@@ -24,6 +24,7 @@ import { authRepository } from '../../auth/api/authRepository';
 import InnerHeader from '../../../shared/components/InnerHeader';
 import { ATTENDANCE_DEFAULTS } from '../constants/attendanceConstants';
 import { DEFAULT_FALLBACKS } from '../../../shared/constants/fallbackDefaults';
+import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
 
 export default function AttendanceLeaveScreen() {
   const router = useRouter();
@@ -52,7 +53,7 @@ export default function AttendanceLeaveScreen() {
   }, []);
 
   const markSelfieAttendance = ({ employeeName, selfieUri, location, status = ATTENDANCE_DEFAULTS.STATUS.PRESENT }) => {
-    const todayStr = new Date().toLocaleDateString('en-GB').replace(/\//g, '-');
+    const todayStr = formatDateDDMMYY(new Date());
     const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const newRecord = {
       id: Date.now(),
@@ -78,7 +79,7 @@ export default function AttendanceLeaveScreen() {
       reason,
       status: ATTENDANCE_DEFAULTS.STATUS.PENDING,
       isPaid: false,
-      appliedOn: new Date().toLocaleDateString('en-GB').replace(/\//g, '-'),
+      appliedOn: formatDateDDMMYY(new Date()),
     };
     setLeaveRequests(prev => [newLeave, ...prev]);
     return { success: true, message: 'Leave application submitted.' };
@@ -651,10 +652,10 @@ export default function AttendanceLeaveScreen() {
               ))}
             </View>
 
-            <Text style={[styles.inputLabel, isDark && styles.textDark]}>Start Date (DD-MM-YYYY) <Text style={{ color: '#EF4444' }}>*</Text></Text>
+            <Text style={[styles.inputLabel, isDark && styles.textDark]}>Start Date (DD-MM-YY) <Text style={{ color: '#EF4444' }}>*</Text></Text>
             <TextInput
               style={[styles.modalInput, isDark && styles.modalInputDark, leaveErrors.startDate && styles.modalInputError]}
-              placeholder="e.g. 15-08-2026"
+              placeholder="e.g. 15-08-26"
               placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
               value={startDate}
               onChangeText={(val) => {
@@ -664,10 +665,10 @@ export default function AttendanceLeaveScreen() {
             />
             {leaveErrors.startDate && <Text style={styles.errorText}>{leaveErrors.startDate}</Text>}
 
-            <Text style={[styles.inputLabel, isDark && styles.textDark]}>End Date (DD-MM-YYYY)</Text>
+            <Text style={[styles.inputLabel, isDark && styles.textDark]}>End Date (DD-MM-YY)</Text>
             <TextInput
               style={[styles.modalInput, isDark && styles.modalInputDark, leaveErrors.endDate && styles.modalInputError]}
-              placeholder="e.g. 16-08-2026"
+              placeholder="e.g. 16-08-26"
               placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
               value={endDate}
               onChangeText={(val) => {

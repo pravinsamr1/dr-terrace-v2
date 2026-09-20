@@ -77,6 +77,7 @@ const parseAppDate = (app) => {
         day = parseInt(parts[0], 10);
         month = parseInt(parts[1], 10) - 1;
         year = parseInt(parts[2], 10);
+        if (year < 100) year += 2000;
       }
     }
   } else if (typeof month === 'string') {

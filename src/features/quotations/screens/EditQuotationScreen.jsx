@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from '../../../core/hooks/useColorScheme';
 import { transformStyleForJakarta } from '../../../core/theme/initFonts';
 import { isPastDate } from '../../../core/utils/validation';
+import { formatDateDDMMYY, toApiDateString, parseDateToDateObj } from '../../../core/utils/dateFormat';
 import InnerHeader from '../../../shared/components/InnerHeader';
 import {
   MaterialAlertModal,
@@ -132,35 +133,11 @@ const normalizePackages = (rawPackages) => {
 };
 
 const formatToApiDate = (dateStr) => {
-  const todayIso = new Date().toISOString().split('T')[0];
-  if (!dateStr || !String(dateStr).trim()) return todayIso;
-  const trimmed = String(dateStr).trim();
-  const dmyMatch = trimmed.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
-  if (dmyMatch) {
-    const [, dd, mm, yyyy] = dmyMatch;
-    return `${yyyy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
-  }
-  const ymdMatch = trimmed.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})/);
-  if (ymdMatch) {
-    const [, yyyy, mm, dd] = ymdMatch;
-    return `${yyyy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
-  }
-  const parsed = new Date(trimmed);
-  if (!isNaN(parsed.getTime())) {
-    return parsed.toISOString().split('T')[0];
-  }
-  return todayIso;
+  return toApiDateString(dateStr);
 };
 
 const formatFromApiDate = (dateStr) => {
-  if (!dateStr) return '';
-  const trimmed = String(dateStr).trim();
-  const ymdMatch = trimmed.match(/^(\d{4})[./-](\d{2})[./-](\d{2})/);
-  if (ymdMatch) {
-    const [, yyyy, mm, dd] = ymdMatch;
-    return `${dd}.${mm}.${yyyy}`;
-  }
-  return trimmed;
+  return formatDateDDMMYY(dateStr);
 };
 
 const getPackageKey = (val) => {
@@ -188,6 +165,12 @@ export default function EditQuotationScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const [existingQuotation, setExistingQuotation] = useState(null);
+  const isQuoteLocked = Boolean(
+    existingQuotation?.isConfirmed ||
+    existingQuotation?.isLocked ||
+    existingQuotation?.status === 'CONFIRMED' ||
+    existingQuotation?.status === 'LOCKED'
+  );
   const [propertiesList, setPropertiesList] = useState([]);
   const [packagesList, setPackagesList] = useState([]);
   const [dynamicServicesMap, setDynamicServicesMap] = useState({});
@@ -208,10 +191,7 @@ export default function EditQuotationScreen() {
     setShowDatePicker(false);
     if (selectedDate) {
       setDatePickerValue(selectedDate);
-      const dd = String(selectedDate.getDate()).padStart(2, '0');
-      const mm = String(selectedDate.getMonth() + 1).padStart(2, '0');
-      const yyyy = selectedDate.getFullYear();
-      setQuotationDate(`${dd}.${mm}.${yyyy}`);
+      setQuotationDate(formatDateDDMMYY(selectedDate));
     }
   };
   const [propertyType, setPropertyType] = useState('');
@@ -574,7 +554,7 @@ export default function EditQuotationScreen() {
         }
 
         // Pre-fill Date
-        setQuotationDate(formatFromApiDate(q.quotationDate) || new Date().toLocaleDateString('en-GB'));
+        setQuotationDate(formatFromApiDate(q.quotationDate) || formatDateDDMMYY(new Date()));
 
         // Pre-fill Property Type
         let matchedPropName = q.propertyName;
@@ -998,6 +978,10 @@ export default function EditQuotationScreen() {
   // Save / Update Single Quotation
   const handleSaveQuotation = async () => {
     Keyboard.dismiss();
+    if (isQuoteLocked) {
+      showAlert('Quotation Locked', 'This quotation is confirmed and locked. It cannot be edited.', 'error');
+      return;
+    }
     if (!validateForm()) return;
 
     setIsSaving(true);
@@ -1255,6 +1239,30 @@ export default function EditQuotationScreen() {
           isDark={isDark}
         />
 
+        {/* Quotation Locked Banner */}
+        {isQuoteLocked && (
+          <View style={{
+            backgroundColor: isDark ? '#7F1D1D25' : '#FEF2F2',
+            borderWidth: 1,
+            borderColor: isDark ? '#991B1B' : '#FECACA',
+            borderRadius: 12,
+            padding: 12,
+            marginBottom: 12,
+            flexDirection: 'row',
+            alignItems: 'center',
+          }}>
+            <Ionicons name="lock-closed" size={20} color="#DC2626" style={{ marginRight: 10 }} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: isDark ? '#FCA5A5' : '#991B1B' }}>
+                Quotation Locked
+              </Text>
+              <Text style={{ fontSize: 12, color: isDark ? '#F87171' : '#B91C1C', marginTop: 2 }}>
+                This quotation is confirmed and locked. It cannot be edited.
+              </Text>
+            </View>
+          </View>
+        )}
+
         {/* Card 1: Quotation Setup */}
         <View style={[styles.card, isDark && styles.cardDark]}>
           <Text style={[styles.cardHeading, isDark && styles.textDark]}>
@@ -1269,11 +1277,19 @@ export default function EditQuotationScreen() {
                 style={[styles.textInput, isDark && styles.textDark]}
                 value={quotationDate}
                 onChangeText={setQuotationDate}
-                placeholder="DD.MM.YYYY"
+                placeholder="DD-MM-YY"
                 placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
               />
               <TouchableOpacity
-                onPress={() => setShowDatePicker(true)}
+                onPress={() => {
+                  if (quotationDate) {
+                    const parsed = parseDateToDateObj(quotationDate);
+                    if (parsed && !isNaN(parsed.getTime())) {
+                      setDatePickerValue(parsed);
+                    }
+                  }
+                  setShowDatePicker(true);
+                }}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
                 <Ionicons name="calendar-outline" size={17} color="#94A3B8" />
@@ -1649,16 +1665,20 @@ export default function EditQuotationScreen() {
         {/* Bottom Save Action CTA */}
         <View style={styles.bottomContainer}>
           <TouchableOpacity
-            style={styles.saveBtn}
+            style={[styles.saveBtn, isQuoteLocked && { backgroundColor: isDark ? '#334155' : '#94A3B8', opacity: 0.7 }]}
             onPress={() => {
               Keyboard.dismiss();
+              if (isQuoteLocked) {
+                showAlert('Quotation Locked', 'This quotation is confirmed and locked. It cannot be edited.', 'error');
+                return;
+              }
               handleSaveQuotation();
             }}
-            disabled={isSaving}
-            activeOpacity={0.85}
+            disabled={isSaving || isQuoteLocked}
+            activeOpacity={isQuoteLocked ? 1 : 0.85}
           >
-            <Text style={styles.saveBtnText}>Save Changes</Text>
-            <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" style={{ marginLeft: 6 }} />
+            <Text style={styles.saveBtnText}>{isQuoteLocked ? 'Quotation Locked' : 'Save Changes'}</Text>
+            <Ionicons name={isQuoteLocked ? "lock-closed" : "checkmark-circle"} size={18} color="#FFFFFF" style={{ marginLeft: 6 }} />
           </TouchableOpacity>
         </View>
       </ScrollView>

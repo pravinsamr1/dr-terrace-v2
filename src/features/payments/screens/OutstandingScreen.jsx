@@ -15,7 +15,6 @@ import { useTabBarScroll } from '../../../core/context/TabBarContext';
 import { useColorScheme } from '../../../core/hooks/useColorScheme';
 import InnerHeader from '../../../shared/components/InnerHeader';
 import { appointmentRepository } from '../../appointments/api/appointmentRepository';
-import { PAYMENT_DEFAULTS } from '../constants/paymentConstants';
 
 export default function OutstandingScreen() {
   const router = useRouter();
@@ -52,12 +51,15 @@ export default function OutstandingScreen() {
 
   // Calculate total outstanding balance across all accounts
   const totalOutstandingSum = appointments.reduce((sum, app) => {
-    const total = app.totalPayment || PAYMENT_DEFAULTS.TOTAL_PAYMENT;
-    let balance = total;
-    if (app.initialPaid) balance -= Math.round(total * PAYMENT_DEFAULTS.MILESTONE_RATIOS.INITIAL);
-    if (app.midTermPaid) balance -= Math.round(total * PAYMENT_DEFAULTS.MILESTONE_RATIOS.MID_TERM);
-    if (app.finalPaid) balance -= Math.round(total * PAYMENT_DEFAULTS.MILESTONE_RATIOS.FINAL);
-    return sum + Math.max(0, balance);
+    const total = Number(app.totalPayment) || Number(app.totalCost) || Number(app.cost) || 0;
+    const initialAmt = Number(app.initialPaidAmount || app.initialPaidDetails?.amount || 0);
+    const midTermAmt = Number(app.midTermPaidAmount || app.midTermPaidDetails?.amount || 0);
+    const finalAmt = Number(app.finalPaidAmount || app.finalPaidDetails?.amount || 0);
+    let paid = 0;
+    if (app.initialPaid) paid += initialAmt;
+    if (app.midTermPaid) paid += midTermAmt;
+    if (app.finalPaid) paid += finalAmt;
+    return sum + Math.max(0, total - paid);
   }, 0);
 
   const handleCardPress = (id) => {
@@ -135,12 +137,15 @@ export default function OutstandingScreen() {
         ) : (
           outstandingAppointments.map((app) => {
             // Calculate details
-            const total = app.totalPayment || 100000;
+            const total = Number(app.totalPayment) || Number(app.totalCost) || Number(app.cost) || 0;
+            const initialAmt = Number(app.initialPaidAmount || app.initialPaidDetails?.amount || 0);
+            const midTermAmt = Number(app.midTermPaidAmount || app.midTermPaidDetails?.amount || 0);
+            const finalAmt = Number(app.finalPaidAmount || app.finalPaidDetails?.amount || 0);
             let paid = 0;
-            if (app.initialPaid) paid += 50000;
-            if (app.midTermPaid) paid += 30000;
-            if (app.finalPaid) paid += 20000;
-            const balance = total - paid;
+            if (app.initialPaid) paid += initialAmt;
+            if (app.midTermPaid) paid += midTermAmt;
+            if (app.finalPaid) paid += finalAmt;
+            const balance = Math.max(0, total - paid);
 
             return (
               <TouchableOpacity

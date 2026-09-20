@@ -76,7 +76,7 @@ const formatDate = (date) => {
   if (!d || isNaN(d.getTime())) return String(date);
   const day = String(d.getDate()).padStart(2, '0');
   const month = String(d.getMonth() + 1).padStart(2, '0');
-  const year = d.getFullYear();
+  const year = String(d.getFullYear()).slice(-2);
   return `${day}-${month}-${year}`;
 };
 
@@ -105,12 +105,13 @@ const toApiDateString = (dateVal, fallbackText) => {
   if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
     return str;
   }
-  const parts = str.split(/[-/]/);
+  const parts = str.split(/[-/.]/);
   if (parts.length === 3) {
     if (parts[0].length === 4) {
       return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
     }
-    return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+    const yearPart = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
+    return `${yearPart}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
   }
   return str;
 };
@@ -852,7 +853,7 @@ export default function EditAppointmentScreen() {
         <View style={[styles.inputWrapper, isDark && styles.inputWrapperDark, errors.date && styles.inputError]}>
           <TextInput
             style={[styles.inputWithIcon, isDark && styles.inputWithIconDark]}
-            placeholder="DD-MM-YYYY"
+            placeholder="DD-MM-YY"
             placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
             value={dateText}
             onChangeText={(val) => {
@@ -893,7 +894,7 @@ export default function EditAppointmentScreen() {
         <View style={[styles.inputWrapper, isDark && styles.inputWrapperDark, errors.fixDate && styles.inputError]}>
           <TextInput
             style={[styles.inputWithIcon, isDark && styles.inputWithIconDark]}
-            placeholder="DD-MM-YYYY"
+            placeholder="DD-MM-YY"
             placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
             value={fixDateText}
             onChangeText={(val) => {

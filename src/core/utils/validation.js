@@ -65,6 +65,7 @@ export const isValidDateString = (dateStr) => {
   }
 
   if (isNaN(day) || isNaN(month) || isNaN(year)) return false;
+  if (year < 100) year += 2000;
   if (month < 1 || month > 12) return false;
   if (day < 1 || day > 31) return false;
   if (year < 1900 || year > 2100) return false;
@@ -95,6 +96,7 @@ export const isPastDate = (dateStr) => {
   }
 
   if (isNaN(day) || isNaN(month) || isNaN(year)) return false;
+  if (year < 100) year += 2000;
 
   const date = new Date(year, month - 1, day);
   const today = new Date();

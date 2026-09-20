@@ -17,6 +17,7 @@ import { appointmentRepository } from '../../appointments/api/appointmentReposit
 import { clientRepository } from '../../clients/api/clientRepository';
 import { useColorScheme } from '../../../core/hooks/useColorScheme';
 import InnerHeader from '../../../shared/components/InnerHeader';
+import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
 
 export default function WarrantyLetterScreen() {
   const router = useRouter();
@@ -68,11 +69,7 @@ export default function WarrantyLetterScreen() {
     );
   }
 
-  const currentDate = new Date().toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric'
-  }).replace(/\//g, '.');
+  const currentDate = formatDateDDMMYY(new Date());
 
   const refNo = `Dr.217${appointment.id}`;
   const serviceType = appointment.serviceType || 'Terrace Waterproofing';
@@ -80,7 +77,7 @@ export default function WarrantyLetterScreen() {
   const clientName = `${prefix}${appointment.clientName}`;
   const address = appointment.address || appointment.location || "Chennai";
 
-  const completedDate = appointment.warranty?.completedDate || 'N/A';
+  const completedDate = appointment.warranty?.completedDate ? formatDateDDMMYY(appointment.warranty.completedDate) : 'N/A';
   const validYears = appointment.warranty?.validYears || '10 Years';
   const serviceWarranties = appointment.warranty?.serviceWarranties || [];
 

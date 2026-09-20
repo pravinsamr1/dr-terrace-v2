@@ -8,6 +8,7 @@ import {
   StatusBar,
   Modal,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,6 +18,7 @@ import { clientRepository as clientService } from '../../clients/api/clientRepos
 import { appointmentRepository as appointmentService } from '../../appointments/api/appointmentRepository';
 import { MaterialDetailSkeleton } from '../../../shared/components/material';
 import InnerHeader from '../../../shared/components/InnerHeader';
+import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
 
 export default function QuotationHistoryScreen() {
   const router = useRouter();
@@ -84,72 +86,47 @@ export default function QuotationHistoryScreen() {
     return params.id ? { id: params.id, appointmentId: params.id, clientName: 'Valued Client' } : null;
   }, [clientData, params.id]);
 
-  const DEFAULT_TIERS_CONFIG = [
-    {
-      id: 'Economic',
-      packageId: 1,
-      packages: 'Economic',
-      packageName: 'Polymer Method',
-      title: 'Economic Package (Polymer Method)',
-      subtitle: 'Polymer Method (5 Years Warranty)',
-      quoteForDefault: 'Polymer Method',
-      warranty: '5 Years',
+  const getTierVisualTheme = (tierId) => {
+    const t = String(tierId || '').toLowerCase().trim();
+    if (t.includes('elite') || t.includes('luxury') || t.includes('polyurea') || t === '3') {
+      return {
+        color: '#7C3AED',
+        lightBg: '#F5F3FF',
+        darkBg: '#2E1065',
+        badgeBg: '#EDE9FE',
+        activeBorder: '#C4B5FD',
+        icon: 'diamond',
+      };
+    }
+    if (t.includes('prem') || t.includes('polyurethane') || t === '2') {
+      return {
+        color: '#D97706',
+        lightBg: '#FFFBEB',
+        darkBg: '#451A03',
+        badgeBg: '#FEF3C7',
+        activeBorder: '#FCD34D',
+        icon: 'star',
+      };
+    }
+    if (t === 'none' || t.includes('single tier')) {
+      return {
+        color: '#0D9488',
+        lightBg: '#F0FDFA',
+        darkBg: '#134E4A',
+        badgeBg: '#CCFBF1',
+        activeBorder: '#5EEAD4',
+        icon: 'layers-outline',
+      };
+    }
+    return {
       color: '#2563EB',
       lightBg: '#EFF6FF',
       darkBg: '#172554',
       badgeBg: '#DBEAFE',
       activeBorder: '#7C9EE9',
       icon: 'shield-checkmark',
-    },
-    {
-      id: 'Premium',
-      packageId: 2,
-      packages: 'Premium',
-      packageName: 'Polyurethane Method',
-      title: 'Premium Package (Polyurethane Method)',
-      subtitle: 'Polyurethane Method (10 Years Warranty)',
-      quoteForDefault: 'Polyurethane Method',
-      warranty: '10 Years',
-      color: '#D97706',
-      lightBg: '#FFFBEB',
-      darkBg: '#451A03',
-      badgeBg: '#FEF3C7',
-      activeBorder: '#FCD34D',
-      icon: 'star',
-    },
-    {
-      id: 'Elite',
-      packageId: 3,
-      packages: 'Elite',
-      packageName: 'Polyurea Method',
-      title: 'Elite Package (Polyurea Method)',
-      subtitle: 'Polyurea Method (15 Years Warranty)',
-      quoteForDefault: 'Polyurea Method',
-      warranty: '15 Years',
-      color: '#7C3AED',
-      lightBg: '#F5F3FF',
-      darkBg: '#2E1065',
-      badgeBg: '#EDE9FE',
-      activeBorder: '#C4B5FD',
-      icon: 'diamond',
-    },
-    {
-      id: 'None',
-      packageId: null,
-      packages: 'None',
-      packageName: 'Single Tier Services',
-      title: 'Single Tier Services',
-      subtitle: 'Single Tier Services (Standard Warranty)',
-      quoteForDefault: 'Single Tier Services',
-      warranty: 'Single Tier',
-      color: '#0D9488',
-      lightBg: '#F0FDFA',
-      darkBg: '#134E4A',
-      badgeBg: '#CCFBF1',
-      activeBorder: '#5EEAD4',
-      icon: 'layers-outline',
-    },
-  ];
+    };
+  };
 
   const getQuoteTierCategory = (quote) => {
     if (!quote) return 'Economic';
@@ -197,7 +174,7 @@ export default function QuotationHistoryScreen() {
       apiPackages.forEach((pkg) => {
         const rawPkgName = pkg.packages || pkg.packageName || pkg.name || pkg.tier || '';
         const lowerName = rawPkgName.toLowerCase();
-        const pId = pkg.packageId != null ? Number(pkg.packageId) : null;
+        const pId = pkg.packageId != null ? Number(pkg.packageId) : (pkg.id != null ? Number(pkg.id) : null);
 
         let tierId = 'Economic';
         if (pId === 3 || lowerName.includes('elite') || lowerName.includes('luxury') || lowerName.includes('polyurea') || lowerName === 'elite') {
@@ -209,18 +186,25 @@ export default function QuotationHistoryScreen() {
         } else if (pId === 1 || lowerName.includes('economic') || lowerName.includes('elastomeric') || lowerName === 'economic') {
           tierId = 'Economic';
         } else {
-          tierId = 'Economic';
+          tierId = rawPkgName || 'Economic';
         }
 
-        const base = DEFAULT_TIERS_CONFIG.find(t => t.id === tierId) || DEFAULT_TIERS_CONFIG[0];
+        const theme = getTierVisualTheme(tierId);
+        const name = pkg.packageName || pkg.name || rawPkgName || (tierId === 'None' ? 'Single Tier Services' : `${tierId} Method`);
+        const title = pkg.title || (tierId === 'None' ? 'Single Tier Services' : name);
+        const warranty = pkg.warranty ? String(pkg.warranty) : (tierId === 'None' ? 'Single Tier' : '');
+        const subtitle = pkg.subtitle || (warranty ? `${name} (${warranty})` : name);
 
         tierMap.set(tierId.toLowerCase(), {
-          ...base,
-          packageId: pId != null ? pId : base.packageId,
-          packages: pkg.packages || base.packages,
-          packageName: pkg.packageName || base.packageName,
-          warranty: pkg.warranty || base.warranty,
-          subtitle: pkg.packageName && pkg.packageName !== tierId ? `${pkg.packageName} (${pkg.warranty || base.warranty})` : base.subtitle,
+          ...theme,
+          id: tierId,
+          packageId: pId,
+          packages: pkg.packages || tierId,
+          packageName: name,
+          title,
+          warranty,
+          subtitle,
+          quoteForDefault: pkg.quoteForDefault || name,
         });
       });
     }
@@ -229,8 +213,23 @@ export default function QuotationHistoryScreen() {
     quotationsList.forEach((q) => {
       const tierId = getQuoteTierCategory(q);
       if (!tierMap.has(tierId.toLowerCase())) {
-        const base = DEFAULT_TIERS_CONFIG.find(t => t.id === tierId) || DEFAULT_TIERS_CONFIG[0];
-        tierMap.set(tierId.toLowerCase(), { ...base });
+        const theme = getTierVisualTheme(tierId);
+        const name = q.packageName || q.quoteFor || (tierId === 'None' ? 'Single Tier Services' : `${tierId} Method`);
+        const title = tierId === 'None' ? 'Single Tier Services' : name;
+        const warranty = q.warranty ? String(q.warranty) : (tierId === 'None' ? 'Single Tier' : '');
+        const subtitle = warranty ? `${name} (${warranty})` : name;
+
+        tierMap.set(tierId.toLowerCase(), {
+          ...theme,
+          id: tierId,
+          packageId: q.packageId != null ? Number(q.packageId) : null,
+          packages: q.packages || tierId,
+          packageName: name,
+          title,
+          warranty,
+          subtitle,
+          quoteForDefault: q.quoteFor || name,
+        });
       }
     });
 
@@ -245,13 +244,8 @@ export default function QuotationHistoryScreen() {
     const ORDER = { economic: 1, premium: 2, elite: 3, none: 4 };
     withQuotes.sort((a, b) => (ORDER[a.id.toLowerCase()] || 99) - (ORDER[b.id.toLowerCase()] || 99));
 
-    // If there are packages with quotations, only display those packages
-    if (withQuotes.length > 0) {
-      return withQuotes;
-    }
-
-    // If no quotations exist yet, show only Economic Method as default
-    return [DEFAULT_TIERS_CONFIG[0]];
+    // Return packages with quotations from API data (empty list if no quotations created yet)
+    return withQuotes;
   }, [apiPackages, quotationsList]);
 
   const activeQuotationId = selectedActiveId || app?.confirmedQuoteId || app?.activeQuotationId || (quotationsList.length > 0 ? quotationsList[quotationsList.length - 1]?.id : null);
@@ -376,7 +370,54 @@ export default function QuotationHistoryScreen() {
             </TouchableOpacity>
           </View>
 
-          {displayPackages.map((tierCfg) => {
+          {displayPackages.length === 0 ? (
+            <View style={{
+              backgroundColor: isDark ? '#141414' : '#FFFFFF',
+              borderRadius: 18,
+              padding: 24,
+              alignItems: 'center',
+              borderWidth: 1,
+              borderColor: isDark ? '#262626' : '#E2E8F0',
+              marginTop: 4,
+            }}>
+              <View style={{
+                width: 56,
+                height: 56,
+                borderRadius: 28,
+                backgroundColor: isDark ? '#1E293B' : '#EFF6FF',
+                justifyContent: 'center',
+                alignItems: 'center',
+                marginBottom: 12,
+              }}>
+                <Ionicons name="document-text-outline" size={28} color="#2563EB" />
+              </View>
+              <Text style={{ fontSize: 16, fontWeight: '700', color: isDark ? '#FFFFFF' : '#0F172A', marginBottom: 6, textAlign: 'center' }}>
+                No Quotations Created Yet
+              </Text>
+              <Text style={{ fontSize: 13, color: isDark ? '#94A3B8' : '#64748B', textAlign: 'center', marginBottom: 16, lineHeight: 18, paddingHorizontal: 10 }}>
+                Tap below to create a quotation for this appointment.
+              </Text>
+              <TouchableOpacity
+                style={{
+                  backgroundColor: '#2563EB',
+                  paddingVertical: 10,
+                  paddingHorizontal: 20,
+                  borderRadius: 12,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                }}
+                onPress={() => router.push({
+                  pathname: '/make-quotation',
+                  params: { id: app.id, customerName: app?.customerName || app?.clientName, phone: app?.mobileNumber || app?.clientPhone, ts: Date.now() }
+                })}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="add-circle-outline" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
+                <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>Create Quotation</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            displayPackages.map((tierCfg) => {
             const tierQuotes = quotationsList.filter(q => getQuoteTierCategory(q).toLowerCase() === tierCfg.id.toLowerCase());
             const sortedTierQuotes = [...tierQuotes].sort((a, b) => {
               if (a.id === app?.confirmedQuoteId) return -1;
@@ -469,7 +510,17 @@ export default function QuotationHistoryScreen() {
                     {(() => {
                       const quote = currentQuote;
                       const revLabel = quote.revisionLabel || `Revision #${quote.revisionNo || quote.revision || sortedTierQuotes.length}`;
-                      const isConfirmed = app?.confirmedQuoteId === quote.id;
+                      const isConfirmed = String(app?.confirmedQuoteId) === String(quote.id) || Boolean(quote.isConfirmed) || quote.status === 'CONFIRMED';
+                      const isAnyConfirmed = Boolean(app?.confirmedQuoteId || (apiQuotations || []).some(q => q.isConfirmed || q.status === 'CONFIRMED'));
+                      const isQuoteLocked = Boolean(
+                        isConfirmed ||
+                        isAnyConfirmed ||
+                        quote.isLocked ||
+                        quote.status === 'CONFIRMED' ||
+                        quote.status === 'LOCKED' ||
+                        app?.initialPaymentReceived ||
+                        app?.initialPaid
+                      );
                       const isActive = quote.id === activeQuotationId || isConfirmed;
                       const sCount = quote.servicesList?.length || 0;
                       const qAmount = Math.round(quote.total != null ? quote.total : (quote.amount != null ? quote.amount : (quote.totalAmount || 0)));
@@ -507,7 +558,7 @@ export default function QuotationHistoryScreen() {
 
                               {(quote.quotationDate || quote.date) && (
                                 <Text style={{ fontSize: 11.5, color: isDark ? '#94A3B8' : '#64748B', fontWeight: '500' }}>
-                                  • {quote.quotationDate || quote.date}
+                                  • {formatDateDDMMYY(quote.quotationDate || quote.date)}
                                 </Text>
                               )}
                             </View>
@@ -583,6 +634,7 @@ export default function QuotationHistoryScreen() {
                             </TouchableOpacity>
 
                             <TouchableOpacity
+                              disabled={isQuoteLocked}
                               style={{
                                 flex: 1,
                                 height: 36,
@@ -593,15 +645,22 @@ export default function QuotationHistoryScreen() {
                                 flexDirection: 'row',
                                 justifyContent: 'center',
                                 alignItems: 'center',
+                                opacity: isQuoteLocked ? 0.45 : 1,
                               }}
                               onPress={() => {
+                                if (isQuoteLocked) {
+                                  Alert.alert('Quotation Locked', 'This quotation is locked and cannot be edited.');
+                                  return;
+                                }
                                 const targetQId = quote.id || quote.quotationId;
                                 router.push({ pathname: '/edit-quotation', params: { id: targetQId, quoteId: targetQId, appointmentId: app.appointmentId || app.id, customerId: app.id } });
                               }}
-                              activeOpacity={0.8}
+                              activeOpacity={isQuoteLocked ? 1 : 0.8}
                             >
-                              <Ionicons name="pencil-outline" size={13} color={isDark ? '#CBD5E1' : '#475569'} style={{ marginRight: 3 }} />
-                              <Text style={{ fontSize: 11.5, fontWeight: '700', color: isDark ? '#CBD5E1' : '#475569' }}>Revise</Text>
+                              <Ionicons name={isQuoteLocked ? "lock-closed-outline" : "pencil-outline"} size={13} color={isDark ? '#CBD5E1' : '#475569'} style={{ marginRight: 3 }} />
+                              <Text style={{ fontSize: 11.5, fontWeight: '700', color: isDark ? '#CBD5E1' : '#475569' }}>
+                                {isQuoteLocked ? 'Locked' : 'Revise'}
+                              </Text>
                             </TouchableOpacity>
                           </View>
                         </View>
@@ -627,6 +686,16 @@ export default function QuotationHistoryScreen() {
                         {previousRevisions.map((revQuote, rIdx) => {
                           const rRevLabel = revQuote.revisionLabel || `Revision #${revQuote.revisionNo || revQuote.revision || (previousRevisions.length - rIdx)}`;
                           const rAmount = Math.round(revQuote.total != null ? revQuote.total : (revQuote.amount != null ? revQuote.amount : (revQuote.totalAmount || 0)));
+                          const isAnyConfirmed = Boolean(app?.confirmedQuoteId || (apiQuotations || []).some(q => q.isConfirmed || q.status === 'CONFIRMED'));
+                          const isRevQuoteLocked = Boolean(
+                            isAnyConfirmed ||
+                            app?.initialPaymentReceived ||
+                            app?.initialPaid ||
+                            revQuote.isConfirmed ||
+                            revQuote.isLocked ||
+                            revQuote.status === 'CONFIRMED' ||
+                            revQuote.status === 'LOCKED'
+                          );
 
                           return (
                             <View
@@ -654,7 +723,7 @@ export default function QuotationHistoryScreen() {
                                   </View>
                                   {(revQuote.quotationDate || revQuote.date) && (
                                     <Text style={{ fontSize: 10.5, color: isDark ? '#94A3B8' : '#64748B' }}>
-                                      • {revQuote.quotationDate || revQuote.date}
+                                      • {formatDateDDMMYY(revQuote.quotationDate || revQuote.date)}
                                     </Text>
                                   )}
                                 </View>
@@ -700,7 +769,8 @@ export default function QuotationHistoryScreen() {
                                   <Text style={{ fontSize: 10.5, fontWeight: '700', color: isDark ? '#CBD5E1' : '#475569' }}>View PDF</Text>
                                 </TouchableOpacity>
 
-                                <TouchableOpacity
+                                 <TouchableOpacity
+                                  disabled={isRevQuoteLocked}
                                   style={{
                                     flex: 1,
                                     flexDirection: 'row',
@@ -709,15 +779,22 @@ export default function QuotationHistoryScreen() {
                                     paddingVertical: 5,
                                     backgroundColor: isDark ? '#262626' : '#F1F5F9',
                                     borderRadius: 6,
+                                    opacity: isRevQuoteLocked ? 0.45 : 1,
                                   }}
                                   onPress={() => {
+                                    if (isRevQuoteLocked) {
+                                      Alert.alert('Quotation Locked', 'This quotation is locked and cannot be edited.');
+                                      return;
+                                    }
                                     const targetQId = revQuote.id || revQuote.quotationId;
                                     router.push({ pathname: '/edit-quotation', params: { id: targetQId, quoteId: targetQId, appointmentId: app.appointmentId || app.id, customerId: app.id } });
                                   }}
-                                  activeOpacity={0.8}
+                                  activeOpacity={isRevQuoteLocked ? 1 : 0.8}
                                 >
-                                  <Ionicons name="pencil-outline" size={12} color={isDark ? '#CBD5E1' : '#475569'} style={{ marginRight: 3 }} />
-                                  <Text style={{ fontSize: 10.5, fontWeight: '700', color: isDark ? '#CBD5E1' : '#475569' }}>Revise</Text>
+                                  <Ionicons name={isRevQuoteLocked ? "lock-closed-outline" : "pencil-outline"} size={12} color={isDark ? '#CBD5E1' : '#475569'} style={{ marginRight: 3 }} />
+                                  <Text style={{ fontSize: 10.5, fontWeight: '700', color: isDark ? '#CBD5E1' : '#475569' }}>
+                                    {isRevQuoteLocked ? 'Locked' : 'Revise'}
+                                  </Text>
                                 </TouchableOpacity>
                               </View>
                             </View>
@@ -729,7 +806,8 @@ export default function QuotationHistoryScreen() {
                 )}
               </View>
             );
-          })}
+          })
+        )}
         </View>
       </ScrollView>
 
@@ -759,7 +837,7 @@ export default function QuotationHistoryScreen() {
                     </Text>
                   </View>
                   <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', marginTop: 2 }}>
-                    Quotation Date: {selectedHistoryQuote?.quotationDate || selectedHistoryQuote?.date}
+                    Quotation Date: {formatDateDDMMYY(selectedHistoryQuote?.quotationDate || selectedHistoryQuote?.date)}
                   </Text>
                 </View>
 
@@ -850,17 +928,50 @@ export default function QuotationHistoryScreen() {
                     <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }}>View PDF</Text>
                   </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={{ flex: 1, backgroundColor: '#10B981', paddingVertical: 12, borderRadius: 10, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }}
-                    onPress={() => {
-                      const qId = selectedHistoryQuote.id;
-                      setSelectedHistoryQuote(null);
-                      router.push({ pathname: '/make-quotation', params: { id: app.id, quoteId: qId } });
-                    }}
-                  >
-                    <Ionicons name="create" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-                    <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }}>Edit / Revise</Text>
-                  </TouchableOpacity>
+                {(() => {
+                  const isHistQuoteLocked = Boolean(
+                    selectedHistoryQuote && (
+                      String(app?.confirmedQuoteId) === String(selectedHistoryQuote.id) ||
+                      selectedHistoryQuote.isConfirmed ||
+                      selectedHistoryQuote.isLocked ||
+                      selectedHistoryQuote.status === 'CONFIRMED' ||
+                      selectedHistoryQuote.status === 'LOCKED' ||
+                      Boolean(app?.confirmedQuoteId || (apiQuotations || []).some(q => q.isConfirmed || q.status === 'CONFIRMED')) ||
+                      app?.initialPaymentReceived ||
+                      app?.initialPaid
+                    )
+                  );
+                  return (
+                    <TouchableOpacity
+                      disabled={isHistQuoteLocked}
+                      style={{
+                        flex: 1,
+                        backgroundColor: isHistQuoteLocked ? (isDark ? '#334155' : '#94A3B8') : '#10B981',
+                        paddingVertical: 12,
+                        borderRadius: 10,
+                        flexDirection: 'row',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        opacity: isHistQuoteLocked ? 0.6 : 1,
+                      }}
+                      onPress={() => {
+                        if (isHistQuoteLocked) {
+                          Alert.alert('Quotation Locked', 'This quotation is locked and cannot be edited.');
+                          return;
+                        }
+                        const qId = selectedHistoryQuote.id;
+                        setSelectedHistoryQuote(null);
+                        router.push({ pathname: '/make-quotation', params: { id: app.id, quoteId: qId } });
+                      }}
+                      activeOpacity={isHistQuoteLocked ? 1 : 0.8}
+                    >
+                      <Ionicons name={isHistQuoteLocked ? "lock-closed" : "create"} size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                      <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }}>
+                        {isHistQuoteLocked ? 'Locked' : 'Edit / Revise'}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })()}
                 </View>
               </ScrollView>
             </TouchableOpacity>

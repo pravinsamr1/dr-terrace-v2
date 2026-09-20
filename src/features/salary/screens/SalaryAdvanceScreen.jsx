@@ -19,6 +19,7 @@ import { authRepository } from '../../auth/api/authRepository';
 import InnerHeader from '../../../shared/components/InnerHeader';
 import { DEFAULT_FALLBACKS } from '../../../shared/constants/fallbackDefaults';
 import { SALARY_DEFAULTS } from '../constants/salaryConstants';
+import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
 
 export default function SalaryAdvanceScreen() {
   const router = useRouter();
@@ -49,7 +50,7 @@ export default function SalaryAdvanceScreen() {
     const newAdvance = {
       id: Date.now(),
       employeeName: employeeName || DEFAULT_FALLBACKS.EMPLOYEE_NAME,
-      requestDate: new Date().toLocaleDateString('en-GB').replace(/\//g, '-'),
+      requestDate: formatDateDDMMYY(new Date()),
       amount: Number(amount),
       reason,
       status: SALARY_DEFAULTS.PAYOUT_STATUS.PENDING,

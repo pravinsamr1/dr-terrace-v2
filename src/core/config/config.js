@@ -10,11 +10,13 @@
 
 // ── API v2 Base URL ───────────────────────────────────────────────────────────
 export const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL || 'https://amusement-easter-praising.ngrok-free.dev/api/v2';
+  // process.env.EXPO_PUBLIC_API_URL || 'https://amusement-easter-praising.ngrok-free.dev/api/v2';
+  process.env.EXPO_PUBLIC_API_URL || 'https://drterrace.pravinsam.in/api/v2';
   // process.env.EXPO_PUBLIC_API_URL || 'https://nexacrm.in/api/v2';
-
-// Legacy v1 base (kept for employee image URL construction only)
-export const API_V1_BASE_URL = 'https://amusement-easter-praising.ngrok-free.dev';
+  
+  // Legacy v1 base (kept for employee image URL construction only)
+  // export const API_V1_BASE_URL = 'https://amusement-easter-praising.ngrok-free.dev';
+  export const API_V1_BASE_URL = 'https://drterrace.pravinsam.in';
 // export const API_V1_BASE_URL = 'https://nexacrm.in';
 
 export const API_ENDPOINTS = {
@@ -36,6 +38,22 @@ export const API_ENDPOINTS = {
   QUOTATIONS: '/quotations',
   QUOTATIONS_PAGE_VIEW: '/quotations/page-view',
 
+  // Quotation Payments & Blockchain Ledger (API v2)
+  QUOTATION_PAY_VIEW: (id) => `/quotations/${id}/pay-view`,
+  QUOTATION_SERVICE_PAYMENT: (quoteId, serviceId) => `/quotations/${quoteId}/services/${serviceId}/payments`,
+  QUOTATION_ADDITIONAL_SERVICES: (quoteId) => `/quotations/${quoteId}/additional-services`,
+  QUOTATION_ADDITIONAL_SERVICE_PAYMENT: (quoteId, serviceId) => `/quotations/${quoteId}/additional-services/${serviceId}/payments`,
+  QUOTATION_FINAL_SETTLEMENT: (quoteId) => `/quotations/${quoteId}/final-settlement`,
+  QUOTATION_PRICING_CONFIG: (quoteId) => `/quotations/${quoteId}/pricing-config`,
+  QUOTATION_VERIFY_CHAIN: (quoteId) => `/quotations/${quoteId}/payments/verify-chain`,
+  QUOTATION_VERIFY_PAYMENT: (quoteId, paymentId) => `/quotations/${quoteId}/payments/${paymentId}/verify`,
+  PAYMENT_VERIFY: (paymentId) => `/payments/${paymentId}/verify`,
+  PAYMENT_VERIFY_VIEW: (paymentId) => `/payments/${paymentId}/verify-view`,
+  QUOTATION_PAYMENT_VERIFY_VIEW: (quoteId, paymentId) => `/quotations/${quoteId}/payments/${paymentId}/verify-view`,
+  QUOTATION_GST_PAYMENT: (quoteId) => `/quotations/${quoteId}/gst-payment`,
+  QUOTATION_FINAL_RECEIPT: (quoteId) => `/quotations/${quoteId}/final-receipt`,
+  QUOTATION_RECEIPT_LOCK: (quoteId) => `/quotations/${quoteId}/receipt-lock`,
+
   // Master data & dropdowns
   WHERE_FOR_WATERPROOF: '/where-to-waterproof',
   WHERE_TO_WATERPROOF: '/where-to-waterproof',
@@ -46,6 +64,8 @@ export const API_ENDPOINTS = {
   SERVICE_DETAILS: '/service-details',
   CONTACT_INFO: '/contact-info',
   CONTACT_INFORMATION: '/contact-info',
+  BANK_ACCOUNTS: '/bank-accounts',
+  BANKS: '/banks',
   TERMS_AND_CONDITIONS: '/terms-and-conditions',
   TERMS: '/terms-and-conditions',
   TERMS_REORDER: '/terms-and-conditions/reorder',
@@ -53,8 +73,10 @@ export const API_ENDPOINTS = {
   EMPLOYEE_POLICIES_LATEST: '/employee-policies/latest',
   EMPLOYEE_POLICIES_REORDER: '/employee-policies/reorder',
 
-  // Attendance (v2 uses /appointments/:id/checkin and /appointments/attends)
-  APPOINTMENT_ATTEND: '/appointment-attend',
+  // Attendance (API v2 canonical endpoints: POST /appointments/:id/checkin & GET /appointments/attends)
+  APPOINTMENT_CHECKIN: (id) => `/appointments/${id}/checkin`,
+  APPOINTMENT_ATTENDS: '/appointments/attends',
+  APPOINTMENT_ATTEND: '/appointments/attends',
 
   // Schedules (v2 /appointment-schedules)
   APPOINTMENT_SCHEDULES: '/appointment-schedules',

@@ -28,7 +28,6 @@ import { setSessionExpiredHandler } from '../src/core/auth/sessionEvents';
 import {
   setServerErrorHandler,
   retryPendingServerRequests,
-  dismissPendingServerRequests,
 } from '../src/core/api/serverErrorEvents';
 
 // App always uses light theme — dark mode is removed
@@ -209,10 +208,6 @@ function RootLayoutContent() {
     await retryPendingServerRequests();
   };
 
-  const handleDismissServerError = () => {
-    dismissPendingServerRequests();
-  };
-
   const activePaperTheme = {
     ...MD3LightTheme,
     fonts: configureFonts({ config: { fontFamily: 'PlusJakartaSans_400Regular' } }),
@@ -239,6 +234,8 @@ function RootLayoutContent() {
           <Stack.Screen name="clients" options={{ headerShown: false }} />
           <Stack.Screen name="payment-detail" options={{ headerShown: false }} />
           <Stack.Screen name="payment-form" options={{ headerShown: false }} />
+          <Stack.Screen name="additional-payment" options={{ headerShown: false }} />
+          <Stack.Screen name="payment-verification" options={{ headerShown: false }} />
           <Stack.Screen name="receipt" options={{ headerShown: false }} />
           <Stack.Screen name="employee-add" options={{ headerShown: false }} />
           <Stack.Screen name="employee-list" options={{ headerShown: false }} />
@@ -280,23 +277,20 @@ function RootLayoutContent() {
           onDismiss={handleSessionExpiredConfirm}
         />
 
-        {/* Global Server Error (502 / Bad Gateway) Retry Modal */}
+        {/* Global Server Connection & Offline Retry Modal */}
         <MaterialAlertModal
           visible={serverErrorState.visible}
-          title={serverErrorState.title || 'Server Error (502)'}
+          title={serverErrorState.title || 'Server is not connected'}
           message={
             serverErrorState.message ||
-            'The server is temporarily unavailable (502 Bad Gateway). Please tap Try Again to reconnect.'
+            'Unable to connect to the server. Please tap Try Again to reconnect.'
           }
           type="error"
           icon="cloud-offline-outline"
           buttonText="Try Again"
-          secondaryButtonText="Dismiss"
+          dismissible={false}
           isLoading={serverErrorState.isRetrying}
           onConfirm={handleRetryServerError}
-          onSecondaryAction={handleDismissServerError}
-          onClose={handleDismissServerError}
-          onDismiss={handleDismissServerError}
         />
       </ThemeProvider>
     </PaperProvider>

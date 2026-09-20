@@ -13,6 +13,13 @@ export const employeeRepository = {
       const formData = new FormData();
 
       formData.append('name', employeeData.name);
+      formData.append('employeeName', employeeData.employeeName || employeeData.name);
+      const prefix = employeeData.prefix || employeeData.title || employeeData.salutation || '';
+      if (prefix) {
+        formData.append('prefix', prefix);
+        formData.append('title', prefix);
+        formData.append('salutation', prefix);
+      }
       formData.append('mobileNumber', (employeeData.mobileNumber));
       formData.append('password', employeeData.password);
 

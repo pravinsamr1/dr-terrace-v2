@@ -1,5 +1,6 @@
 import { apiClient } from '../../../core/api/apiClient';
 import { API_ENDPOINTS } from '../../../core/config/config';
+import { toApiDateString } from '../../../core/utils/dateFormat';
 
 const WATERPROOF_NAME_MAP = {
   1: 'Terrace Waterproofing',
@@ -299,9 +300,11 @@ export const appointmentRepository = {
   addAppointment: async (appointmentData) => {
     try {
       const clientName = String(appointmentData.clientName || appointmentData.customerName || appointmentData.name || '').trim();
+      const prefix = appointmentData.prefix || appointmentData.title || appointmentData.customerTitle || appointmentData.salutation || '';
       const payload = {
         clientName,
         customerName: clientName,
+        ...(prefix ? { prefix, title: prefix, salutation: prefix } : {}),
         mobileNumber: String(appointmentData.mobileNumber || appointmentData.phone || appointmentData.mobile || '').replace(/[^0-9]/g, ''),
         address: typeof appointmentData.address === 'object' && appointmentData.address !== null
           ? {
@@ -363,36 +366,110 @@ export const appointmentRepository = {
    */
   updateAppointment: async (id, updatedFields) => {
     try {
-      const clientName = String(updatedFields.clientName || updatedFields.customerName || updatedFields.name || '').trim();
+      const hasCoreAppointmentFields = Boolean(
+        updatedFields.clientName ||
+        updatedFields.customerName ||
+        updatedFields.name ||
+        updatedFields.mobileNumber ||
+        updatedFields.phone ||
+        updatedFields.mobile ||
+        updatedFields.address ||
+        updatedFields.doorNo ||
+        updatedFields.streetName ||
+        updatedFields.area ||
+        updatedFields.city ||
+        updatedFields.appointmentDate ||
+        updatedFields.date ||
+        updatedFields.appointmentTime ||
+        updatedFields.time ||
+        updatedFields.whereToWaterproof ||
+        updatedFields.assignedEmployeeId ||
+        updatedFields.employeeId
+      );
+
+      // If the update only contains non-appointment fields (e.g. payment/receipt/warranty metadata),
+      // do not send an empty PUT request to /api/v2/appointments/:id which corrupts data and fails on PostgreSQL constraints.
+      if (!hasCoreAppointmentFields) {
+        return {
+          success: true,
+          data: { id, ...updatedFields },
+          appointment: appointmentRepository.normalizeAppointment({ id, ...updatedFields }),
+        };
+      }
+
+      // If core fields are present, fetch existing appointment if any fields are missing to prevent overwriting with blanks
+      let existingAppt = null;
+      if (!updatedFields.clientName || !updatedFields.mobileNumber || !updatedFields.appointmentDate || !updatedFields.address) {
+        try {
+          const getRes = await appointmentRepository.getAppointmentById(id);
+          existingAppt = getRes?.appointment || getRes?.data || null;
+        } catch (_err) {
+          // ignore
+        }
+      }
+
+      const clientName = String(
+        updatedFields.clientName ||
+        updatedFields.customerName ||
+        updatedFields.name ||
+        existingAppt?.clientName ||
+        existingAppt?.customerName ||
+        existingAppt?.name ||
+        ''
+      ).trim();
+
+      const mobileNumber = String(
+        updatedFields.mobileNumber ||
+        updatedFields.phone ||
+        updatedFields.mobile ||
+        existingAppt?.mobileNumber ||
+        existingAppt?.phone ||
+        ''
+      ).replace(/[^0-9]/g, '');
+
+      const addressSource = typeof updatedFields.address === 'object' && updatedFields.address !== null
+        ? updatedFields.address
+        : (typeof existingAppt?.address === 'object' && existingAppt?.address !== null ? existingAppt.address : {});
+
+      const doorNo = String(updatedFields.doorNo || addressSource.doorNo || existingAppt?.doorNo || '').trim();
+      const streetName = String(updatedFields.streetName || updatedFields.street || addressSource.streetName || addressSource.street || existingAppt?.streetName || '').trim();
+      const area = String(updatedFields.area || updatedFields.location || addressSource.area || addressSource.location || existingAppt?.area || '').trim();
+      const city = String(updatedFields.city || addressSource.city || existingAppt?.city || '').trim();
+      const state = String(updatedFields.state || addressSource.state || existingAppt?.state || '').trim();
+      const pincode = String(updatedFields.pincode || addressSource.pincode || existingAppt?.pincode || '').trim();
+
+      const appointmentDate = updatedFields.appointmentDate || updatedFields.date || existingAppt?.appointmentDate || existingAppt?.date || '';
+      const appointmentFixDate = updatedFields.appointmentFixDate || updatedFields.fixDate || appointmentDate;
+      const appointmentTime = updatedFields.appointmentTime || updatedFields.time || existingAppt?.appointmentTime || existingAppt?.time || '10:00';
+
       const payload = {
         clientName,
         customerName: clientName,
-        mobileNumber: String(updatedFields.mobileNumber || updatedFields.phone || updatedFields.mobile || '').replace(/[^0-9]/g, ''),
-        address: typeof updatedFields.address === 'object' && updatedFields.address !== null
-          ? {
-            doorNo: String(updatedFields.address.doorNo || updatedFields.doorNo || '').trim(),
-            streetName: String(updatedFields.address.streetName || updatedFields.address.street || updatedFields.streetName || '').trim(),
-            area: String(updatedFields.address.area || updatedFields.area || updatedFields.location || '').trim(),
-            city: String(updatedFields.address.city || updatedFields.city || '').trim(),
-            state: String(updatedFields.address.state || updatedFields.state || '').trim(),
-            pincode: String(updatedFields.address.pincode || updatedFields.pincode || '').trim(),
-          }
-          : {
-            doorNo: String(updatedFields.doorNo || '').trim(),
-            streetName: String(updatedFields.streetName || updatedFields.street || '').trim(),
-            area: String(updatedFields.area || updatedFields.location || '').trim(),
-            city: String(updatedFields.city || '').trim(),
-            state: String(updatedFields.state || '').trim(),
-            pincode: String(updatedFields.pincode || '').trim(),
-          },
-        googleLocation: updatedFields.googleLocation || '',
-        appointmentDate: updatedFields.appointmentDate || updatedFields.date || '',
-        appointmentFixDate: updatedFields.appointmentFixDate || updatedFields.fixDate || updatedFields.appointmentDate || updatedFields.date || '',
-        appointmentTime: updatedFields.appointmentTime || updatedFields.time || '',
+        mobileNumber,
+        doorNo,
+        streetName,
+        area,
+        city,
+        state,
+        pincode,
+        address: {
+          doorNo,
+          streetName,
+          area,
+          city,
+          state,
+          pincode,
+        },
+        googleLocation: updatedFields.googleLocation || existingAppt?.googleLocation || '',
+        appointmentDate,
+        appointmentFixDate,
+        appointmentTime: appointmentTime.slice(0, 5), // Ensure max 5 chars for VARCHAR(5) like "14:00"
         whereToWaterproof: (() => {
           const raw = Array.isArray(updatedFields.whereToWaterproof) && updatedFields.whereToWaterproof.length > 0
             ? updatedFields.whereToWaterproof
-            : updatedFields.whereToWaterproofIds;
+            : (Array.isArray(existingAppt?.whereToWaterproof) && existingAppt.whereToWaterproof.length > 0
+              ? existingAppt.whereToWaterproof
+              : updatedFields.whereToWaterproofIds);
           if (Array.isArray(raw)) {
             const ids = raw
               .map((item) => (typeof item === 'object' && item !== null ? Number(item.id) : Number(item)))
@@ -401,8 +478,8 @@ export const appointmentRepository = {
           }
           return [1];
         })(),
-        propertyId: updatedFields.propertyId != null ? Number(updatedFields.propertyId) : null,
-        assignedEmployeeId: Number(updatedFields.assignedEmployeeId || updatedFields.employeeId || updatedFields.technicianId) || null,
+        propertyId: updatedFields.propertyId != null ? Number(updatedFields.propertyId) : (existingAppt?.propertyId != null ? Number(existingAppt.propertyId) : null),
+        assignedEmployeeId: Number(updatedFields.assignedEmployeeId || updatedFields.employeeId || updatedFields.technicianId || existingAppt?.assignedEmployeeId || existingAppt?.employeeId) || null,
       };
 
       console.log(`PUT updating appointment ${id} payload:`, JSON.stringify(payload));
@@ -451,75 +528,121 @@ export const appointmentRepository = {
   },
 
   /**
-   * Save Attended Date and Attended Time for an appointment
-   * Primary: POST /appointment-attend
-   * Fallback 1: POST /appointment-schedules
-   * Fallback 2: PUT /new-appointments/:id
+   * Helper to convert date to ISO YYYY-MM-DD format for API v2
    */
-  saveAttendedDetails: async (id, details) => {
-    const cleanId = String(id || details.appointmentId || details.customerId).replace(/^DR/i, '').trim();
-    const appointmentId = Number(cleanId);
-    const customerId = Number(details.customerId || details.clientId || cleanId);
-    const employeeId = Number(details.employeeId || details.assignedEmployeeId || details.technicianId || 100);
-    const attendedDate = details.attendedDate || details.date || '';
-    const attendedTime = details.attendedTime || details.time || '';
-    const totalArea = details.totalArea || '';
+  toApiDate: (dateVal) => {
+    if (!dateVal) return '';
+    return toApiDateString(dateVal);
+  },
 
-    // Primary: POST /appointment-attend
-    try {
-      const attendPayload = {
-        appointmentId,
-        customerId,
-        employeeId,
-        date: attendedDate,
-        time: attendedTime,
-      };
-      console.log('Posting /appointment-attend payload:', JSON.stringify(attendPayload));
-      const attendRes = await apiClient.post(API_ENDPOINTS.APPOINTMENT_ATTEND || '/appointment-attend', attendPayload);
-      if (attendRes && attendRes.data) {
-        return { success: true, data: attendRes.data };
+  /**
+   * Helper to convert time to 24-hour HH:mm format for API v2
+   */
+  toApiTime: (timeVal) => {
+    if (!timeVal) return '';
+    if (timeVal instanceof Date && !isNaN(timeVal.getTime())) {
+      const hours = String(timeVal.getHours()).padStart(2, '0');
+      const minutes = String(timeVal.getMinutes()).padStart(2, '0');
+      return `${hours}:${minutes}`;
+    }
+    const str = String(timeVal).trim();
+    // If already 24-hour format HH:mm
+    if (/^\d{1,2}:\d{2}$/.test(str)) {
+      const [h, m] = str.split(':');
+      return `${h.padStart(2, '0')}:${m}`;
+    }
+    // 12-hour format with AM/PM e.g. "03:25 PM"
+    const match = str.match(/(\d+):(\d+)(?::\d+)?\s*(am|pm)?/i);
+    if (match) {
+      let hours = parseInt(match[1], 10);
+      const minutes = match[2].padStart(2, '0');
+      const ampm = match[3] ? match[3].toLowerCase() : null;
+      if (ampm === 'pm' && hours < 12) hours += 12;
+      if (ampm === 'am' && hours === 12) hours = 0;
+      return `${String(hours).padStart(2, '0')}:${minutes}`;
+    }
+    return str;
+  },
+
+  /**
+   * API v2: Site visit check-in (Attendance)
+   * Canonical v2 endpoint: POST /api/v2/appointments/:id/checkin
+   * Body: { date: "YYYY-MM-DD", time: "HH:mm" }
+   */
+  checkIn: async (appointmentId, timeData = {}) => {
+    const cleanId = String(appointmentId).replace(/\D/g, '') || appointmentId;
+    const rawDate = timeData.date || timeData.attendedDate || '';
+    const rawTime = timeData.time || timeData.attendedTime || '';
+
+    const apiDate = appointmentRepository.toApiDate(rawDate);
+    const apiTime = appointmentRepository.toApiTime(rawTime);
+
+    const payload = {};
+    if (apiDate || rawDate) payload.date = apiDate || rawDate;
+    if (apiTime || rawTime) payload.time = apiTime || rawTime;
+
+    // Resolve employeeId (required when recording check-in as admin)
+    let empId = timeData.employeeId ?? timeData.assignedEmployeeId ?? timeData.technicianId;
+    if (empId == null || isNaN(Number(empId)) || Number(empId) <= 0) {
+      try {
+        const appRes = await apiClient.get(`${API_ENDPOINTS.APPOINTMENTS}/${cleanId}`);
+        const appData = appRes.data?.data || appRes.data?.appointment || appRes.data;
+        empId = appData?.assignedEmployeeId ?? appData?.employeeId ?? appData?.technicianId;
+      } catch (_e) {
+        // Ignore fallback fetch error
       }
-    } catch (_attendErr) {
-      console.log('POST /appointment-attend failed, trying fallbacks:', _attendErr?.message);
     }
 
-    // Fallback 1: POST /appointment-schedules
-    try {
-      const scheduleRes = await apiClient.post('/appointment-schedules', {
-        appointmentId,
-        customerId,
-        employeeId,
-        attendedDate,
-        attendedTime,
-        date: attendedDate,
-        time: attendedTime,
-        status: 'Site Visited',
-        ...(totalArea ? { totalArea: Number(totalArea) } : {}),
-      });
-      if (scheduleRes && scheduleRes.data) {
-        return { success: true, data: scheduleRes.data };
-      }
-    } catch (_schedErr) {
-      console.log('POST /appointment-schedules fallback:', _schedErr?.message);
+    if (empId != null && !isNaN(Number(empId)) && Number(empId) > 0) {
+      payload.employeeId = Number(empId);
+    } else {
+      payload.employeeId = 102; // Default active field technician ID per API v2
     }
 
-    // Fallback 2: PUT /new-appointments/:id
+    console.log(`[API v2] POST /appointments/${cleanId}/checkin:`, JSON.stringify(payload));
+
     try {
-      const appRes = await apiClient.put(`${API_ENDPOINTS.NEW_APPOINTMENTS}/${cleanId}`, {
-        attendedDate,
-        attendedTime,
-        appointmentDate: attendedDate,
-        appointmentTime: attendedTime,
-        status: 'Site Visited',
-      });
-      return { success: true, data: appRes.data };
-    } catch (error) {
-      console.log('Failed to save attended details:', error?.response?.data || error.message);
+      const response = await apiClient.post(
+        `${API_ENDPOINTS.APPOINTMENTS}/${cleanId}/checkin`,
+        payload
+      );
+
+      console.log(`[API v2] Checkin response for appointment ${cleanId}:`, JSON.stringify(response?.data));
+
+      if (response && (response.status === 200 || response.status === 201 || response.data?.success !== false)) {
+        return {
+          success: true,
+          statusCode: response.status || 201,
+          message: response.data?.message || 'Site visit check-in recorded successfully',
+          data: response.data?.data || response.data,
+        };
+      }
+
       return {
         success: false,
-        message: error.response?.data?.message || error.message || 'Failed to save attended details',
+        statusCode: response?.status || 400,
+        message: response.data?.message || 'Failed to record site visit check-in',
+      };
+    } catch (error) {
+      const status = error?.response?.status;
+      const message = error.response?.data?.message || error.message || 'Failed to record site visit check-in';
+      console.log(`[API v2] Failed to check in appointment ${cleanId}:`, status, message);
+      return {
+        success: false,
+        statusCode: status,
+        message,
+        error: error?.response?.data,
       };
     }
+  },
+
+  /**
+   * API v2: Save Attended Date and Attended Time for an appointment
+   * Uses canonical v2 endpoint: POST /api/v2/appointments/:id/checkin
+   */
+  saveAttendedDetails: async (id, details = {}) => {
+    const cleanId = String(id || details.appointmentId || details.customerId || '').replace(/\D/g, '') || id;
+    return appointmentRepository.checkIn(cleanId, details);
   },
 
   /**
@@ -541,33 +664,6 @@ export const appointmentRepository = {
         success: false,
         message: error.response?.data?.message || error.message || 'Failed to fetch waterproof options',
         data: [],
-      };
-    }
-  },
-
-  /**
-   * API v2: Site visit check-in
-   * POST /appointments/:id/checkin
-   */
-  checkIn: async (appointmentId, timeData = {}) => {
-    try {
-      const payload = {};
-      if (timeData.date) payload.date = timeData.date;
-      if (timeData.time) payload.time = timeData.time;
-
-      const response = await apiClient.post(
-        `${API_ENDPOINTS.APPOINTMENTS}/${appointmentId}/checkin`,
-        payload
-      );
-      return {
-        success: true,
-        data: response.data?.data || response.data,
-      };
-    } catch (error) {
-      console.log(`Failed to check in appointment ${appointmentId}:`, error?.response?.data || error.message);
-      return {
-        success: false,
-        message: error.response?.data?.message || error.message || 'Failed to record site visit check-in',
       };
     }
   },

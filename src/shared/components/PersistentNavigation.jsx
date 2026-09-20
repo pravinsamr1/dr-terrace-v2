@@ -63,8 +63,15 @@ const TAB_ROUTES = [
   { name: 'menu', label: 'Menu', icon: 'menu-outline', activeIcon: 'menu' },
 ];
 
-// Screens where the tab bar should be hidden entirely (auth, splash)
-const HIDDEN_SEGMENTS = new Set(['login', 'index']);
+// Screens where the tab bar should be hidden entirely (auth, splash, full forms)
+const HIDDEN_SEGMENTS = new Set([
+  'login',
+  'index',
+  'payment-form',
+  'additional-payment',
+  'payment-verification',
+  'receipt',
+]);
 
 // Maps every stack-level route back to which tab should appear active
 const SEGMENT_TO_TAB = {
@@ -267,9 +274,9 @@ function DrawerOverlay() {
     { label: 'Home', icon: 'home-outline', activeIcon: 'home', route: 'index' },
     { label: 'Our Clients', icon: 'people-outline', activeIcon: 'people', route: 'clients' },
     { label: 'Appointments', icon: 'calendar-outline', activeIcon: 'calendar', route: 'appointments' },
-    // { label: 'Outstanding Payments', icon: 'card-outline', activeIcon: 'card', route: 'outstanding' },
+    { label: 'Outstanding Payments', icon: 'card-outline', activeIcon: 'card', route: 'outstanding' },
+    { label: 'Warranty Tracker', icon: 'shield-checkmark-outline', activeIcon: 'shield-checkmark', route: 'warranty' },
     // Phase 2 modules disabled per client request:
-    // { label: 'Warranty Tracker', icon: 'shield-checkmark-outline', activeIcon: 'shield-checkmark', route: 'warranty' },
     // { label: 'Attendance & Leave', icon: 'location-outline', activeIcon: 'location', route: 'attendance-leave' },
     // { label: 'Salary Details', icon: 'cash-outline', activeIcon: 'cash', route: 'salary-details' },
     // { label: 'Salary Advance', icon: 'wallet-outline', activeIcon: 'wallet', route: 'salary-advance' },

@@ -138,6 +138,69 @@ apiClient.interceptors.request.use(
   }
 );
 
+/**
+ * Extracts a user-friendly error message from an API error or response object.
+ */
+export function extractApiErrorMessage(error, defaultMessage = 'An unexpected error occurred. Please try again.') {
+  if (!error) return defaultMessage;
+
+  // 1. Check error.response.data
+  const resData = error.response?.data;
+  if (resData) {
+    let parsed = resData;
+    if (typeof parsed === 'string') {
+      try {
+        parsed = JSON.parse(parsed);
+      } catch (_e) {}
+    }
+    if (parsed && typeof parsed === 'object') {
+      if (typeof parsed.message === 'string' && parsed.message.trim()) {
+        return parsed.message.trim();
+      }
+      if (Array.isArray(parsed.message) && parsed.message.length > 0) {
+        return parsed.message.join('\n');
+      }
+      if (typeof parsed.error === 'string' && parsed.error.trim()) {
+        return parsed.error.trim();
+      }
+      if (typeof parsed.msg === 'string' && parsed.msg.trim()) {
+        return parsed.msg.trim();
+      }
+    } else if (typeof parsed === 'string' && parsed.trim()) {
+      return parsed.trim();
+    }
+  }
+
+  // 2. Check error.data (if attached directly on custom response/error)
+  if (error.data) {
+    let d = error.data;
+    if (typeof d === 'string') {
+      try { d = JSON.parse(d); } catch (_e) {}
+    }
+    if (d && typeof d === 'object') {
+      if (typeof d.message === 'string' && d.message.trim()) return d.message.trim();
+      if (typeof d.error === 'string' && d.error.trim()) return d.error.trim();
+    }
+  }
+
+  // 3. Check error.message (skip generic Axios status text)
+  if (typeof error.message === 'string' && error.message.trim()) {
+    try {
+      const parsed = JSON.parse(error.message);
+      if (parsed && typeof parsed === 'object') {
+        const nestedMsg = parsed.message || parsed.error || parsed.msg;
+        if (nestedMsg && typeof nestedMsg === 'string') return nestedMsg.trim();
+      }
+    } catch (_e) {}
+
+    if (!error.message.startsWith('Request failed with status code') && error.message !== 'Network Error') {
+      return error.message.trim();
+    }
+  }
+
+  return defaultMessage;
+}
+
 // Response Interceptor: Format error responses and handle expired tokens
 apiClient.interceptors.response.use(
   (response) => {
@@ -145,6 +208,12 @@ apiClient.interceptors.response.use(
     return response;
   },
   async (error) => {
+    // If backend returned a structured error message, attach it to error.message
+    const backendMessage = extractApiErrorMessage(error, null);
+    if (backendMessage) {
+      error.message = backendMessage;
+    }
+
     const errorDetails = {
       message: error.message,
       code: error.code,
@@ -164,7 +233,7 @@ apiClient.interceptors.response.use(
       }
     }
 
-    // 502 Bad Gateway / Server Error popup with Try Again button
+    // Server Connection Error / Offline popup with Try Again button
     if (isServerError(error) && !error.config?._skipServerErrorPopup) {
       return notifyServerError(error);
     }
@@ -211,6 +280,7 @@ export const ApiV2 = {
     delete: (id) => apiClient.delete(`/quotations/${id}`),
     confirm: (id, isConfirmed = true) =>
       apiClient.post(`/quotations/${id}/confirm`, { isConfirmed }),
+    unlock: (id) => apiClient.post(`/quotations/${id}/unlock`),
     getPdfView: (id) => apiClient.get(`/quotations/${id}/pdf-view`),
   },
 
@@ -296,6 +366,10 @@ export const ApiV2 = {
     createEmployee: (data) => apiClient.post('/employees', data),
     updateEmployee: (id, data) => apiClient.put(`/employees/${id}`, data),
     deleteEmployee: (id) => apiClient.delete(`/employees/${id}`),
+  },
+
+  payments: {
+    getBankAccounts: () => apiClient.get('/bank-accounts'),
   },
 
   health: {

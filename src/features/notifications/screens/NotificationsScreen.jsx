@@ -20,7 +20,45 @@ export default function NotificationsScreen() {
   const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
-  const [notifications, setNotifications] = useState([]);
+  const INITIAL_NOTIFICATIONS = [
+    {
+      id: 'stitch-action-verify',
+      type: 'admin',
+      isActionRequest: true,
+      category: 'action_needed',
+      title: 'Final Payment Awaiting Verification',
+      customerName: 'Mr. & Mrs. Anita Raman',
+      customerId: '2',
+      amount: 29500,
+      paymentMethod: 'Cash',
+      voucher: '#VCH-89042',
+      time: '10m ago',
+      read: false,
+      icon: 'alert',
+      message: 'Final payment submitted by executive. Office team must verify payment & completion proof.',
+    },
+    {
+      id: 'notif-2',
+      type: 'specific',
+      targetEmployee: 'Prem',
+      title: 'Site Visit Scheduled',
+      message: 'New site visit assigned in Anna Nagar at 11:30 AM.',
+      time: '25m ago',
+      read: false,
+      icon: 'calendar',
+    },
+    {
+      id: 'notif-3',
+      type: 'admin',
+      title: 'Terrace Season Protocol Update',
+      message: 'Updated safety procedures for chemical membrane application in monsoons.',
+      time: '2h ago',
+      read: true,
+      icon: 'megaphone',
+    },
+  ];
+
+  const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS);
   const clearAllNotifications = () => setNotifications([]);
   const activeEmployee = 'Prem';
 
@@ -179,18 +217,99 @@ export default function NotificationsScreen() {
             </Text>
           </View>
         ) : (
-          displayed.map((notif) => (
-            <TouchableOpacity
-              key={notif.id}
-              style={[
-                styles.card,
-                isDark && styles.cardDark,
-                !notif.read && styles.cardUnread,
-                !notif.read && isDark && styles.cardUnreadDark,
-              ]}
-              onPress={() => router.push({ pathname: '/notification-detail', params: { id: notif.id } })}
-              activeOpacity={0.8}
-            >
+          displayed.map((notif) => {
+            if (notif.isActionRequest) {
+              return (
+                <View
+                  key={notif.id}
+                  style={{
+                    backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+                    borderRadius: 18,
+                    borderWidth: 1,
+                    borderColor: isDark ? '#334155' : '#E2E8F0',
+                    padding: 14,
+                    marginBottom: 12,
+                    shadowColor: '#000',
+                    shadowOpacity: 0.04,
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowRadius: 6,
+                    elevation: 2,
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <View style={{ flex: 1, marginRight: 8 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#2563EB' }} />
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#2563EB', textTransform: 'uppercase' }}>
+                          Action Needed
+                        </Text>
+                        <Text style={{ fontSize: 11, color: isDark ? '#64748B' : '#94A3B8' }}>• {notif.time}</Text>
+                      </View>
+                      <Text style={{ fontSize: 14, fontWeight: '700', color: isDark ? '#FFFFFF' : '#0F172A' }} numberOfLines={1}>
+                        {notif.title}
+                      </Text>
+                      <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', marginTop: 2 }} numberOfLines={1}>
+                        {notif.customerName} (DR{notif.customerId}) • <Text style={{ fontWeight: '700', color: '#047857' }}>₹{notif.amount.toLocaleString()}</Text>
+                      </Text>
+                    </View>
+
+                    <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, borderWidth: 1, borderColor: '#FDE68A' }}>
+                      <Text style={{ color: '#92400E', fontSize: 10, fontWeight: '700' }}>{notif.paymentMethod}</Text>
+                    </View>
+                  </View>
+
+                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: isDark ? '#334155' : '#F1F5F9' }}>
+                    <TouchableOpacity
+                      style={{
+                        flex: 1,
+                        height: 36,
+                        borderRadius: 10,
+                        backgroundColor: '#21498B',
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6,
+                      }}
+                      onPress={() => router.push({ pathname: '/payment-verification', params: { id: notif.customerId, amount: notif.amount, voucher: notif.voucher } })}
+                      activeOpacity={0.85}
+                    >
+                      <Ionicons name="checkmark-circle" size={15} color="#34D399" />
+                      <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>Review</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={{
+                        paddingHorizontal: 16,
+                        height: 36,
+                        borderRadius: 10,
+                        backgroundColor: isDark ? '#334155' : '#F1F5F9',
+                        borderWidth: 1,
+                        borderColor: isDark ? '#475569' : '#E2E8F0',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                      onPress={() => router.push({ pathname: '/customer-detail', params: { id: notif.customerId, initialTab: 'payments' } })}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={{ color: isDark ? '#CBD5E1' : '#475569', fontSize: 12, fontWeight: '600' }}>Details</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            }
+
+            return (
+              <TouchableOpacity
+                key={notif.id}
+                style={[
+                  styles.card,
+                  isDark && styles.cardDark,
+                  !notif.read && styles.cardUnread,
+                  !notif.read && isDark && styles.cardUnreadDark,
+                ]}
+                onPress={() => router.push({ pathname: '/notification-detail', params: { id: notif.id } })}
+                activeOpacity={0.8}
+              >
               {!notif.read && <View style={styles.unreadDot} />}
 
               <View
@@ -258,7 +377,8 @@ export default function NotificationsScreen() {
                 </View>
               </View>
             </TouchableOpacity>
-          ))
+            );
+          })
         )}
       </ScrollView>
     </View>

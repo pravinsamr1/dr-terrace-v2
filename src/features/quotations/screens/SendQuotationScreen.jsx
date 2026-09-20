@@ -22,11 +22,10 @@ import { MaterialPageLoader } from '../../../shared/components/material';
 import { logoBase64 } from '../../../shared/constants/LogoBase64';
 import { sealBase64 } from '../../../shared/constants/SealBase64';
 import { quotationRepository as quotationService } from '../../quotations/api/quotationRepository';
+import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
 
 const generateHTML = (app, quote, isExport = false, fallbackQuoteId = '') => {
-  const dateVal = quote.quotationDate || quote.date || new Date().toLocaleDateString('en-GB', {
-    day: '2-digit', month: '2-digit', year: 'numeric'
-  }).replace(/\//g, '/');
+  const dateVal = formatDateDDMMYY(quote.quotationDate || quote.date) || formatDateDDMMYY(new Date());
 
   const qId = quote.id || quote.quotationId || quote._id || quote.quoteId || fallbackQuoteId || '';
   const quoteNoVal = qId
@@ -307,7 +306,7 @@ const generateHTML = (app, quote, isExport = false, fallbackQuoteId = '') => {
 
   const today = new Date();
   today.setDate(today.getDate() + 15);
-  const validDateStr = today.toLocaleDateString('en-GB', { month: 'short', day: 'numeric', year: 'numeric' });
+  const validDateStr = formatDateDDMMYY(today);
 
   const advanceVal = (quote.advancePercent != null && Number(quote.advancePercent) <= 100)
     ? String(quote.advancePercent)

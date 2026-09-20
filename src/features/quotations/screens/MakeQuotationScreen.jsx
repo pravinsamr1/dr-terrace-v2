@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from '../../../core/hooks/useColorScheme';
 import { transformStyleForJakarta } from '../../../core/theme/initFonts';
 import { isPastDate } from '../../../core/utils/validation';
+import { formatDateDDMMYY, toApiDateString, parseDateToDateObj } from '../../../core/utils/dateFormat';
 import InnerHeader from '../../../shared/components/InnerHeader';
 import { MaterialAlertModal, MaterialFormSkeleton, MaterialOverlayLoader } from '../../../shared/components/material';
 import { appointmentRepository as appointmentService } from '../../appointments/api/appointmentRepository';
@@ -220,20 +221,13 @@ export default function MakeQuotationScreen() {
   }, []);
 
   const getTodayFormatted = () => {
-    const today = new Date();
-    const dd = String(today.getDate()).padStart(2, '0');
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const yyyy = today.getFullYear();
-    return `${dd}.${mm}.${yyyy}`;
+    return formatDateDDMMYY(new Date());
   };
 
   const getValidityFormatted = () => {
     const d = new Date();
     d.setDate(d.getDate() + 15);
-    const dd = String(d.getDate()).padStart(2, '0');
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const yyyy = d.getFullYear();
-    return `Quote Valid till ${dd}.${mm}.${yyyy}`;
+    return `Quote Valid till ${formatDateDDMMYY(d)}`;
   };
 
   // Dropdown States
@@ -285,10 +279,7 @@ export default function MakeQuotationScreen() {
     setShowDatePicker(false);
     if (selectedDate) {
       setDatePickerValue(selectedDate);
-      const dd = String(selectedDate.getDate()).padStart(2, '0');
-      const mm = String(selectedDate.getMonth() + 1).padStart(2, '0');
-      const yyyy = selectedDate.getFullYear();
-      setQuotationDate(`${dd}.${mm}.${yyyy}`);
+      setQuotationDate(formatDateDDMMYY(selectedDate));
     }
   };
 
@@ -1097,24 +1088,7 @@ export default function MakeQuotationScreen() {
   // Construct backend API payload for a specific tier draft
   const buildApiPayloadForTier = useCallback((tierId, draft) => {
     const formatToApiDate = (dateStr) => {
-      const todayIso = new Date().toISOString().split('T')[0];
-      if (!dateStr || !String(dateStr).trim()) return todayIso;
-      const trimmed = String(dateStr).trim();
-      const dmyMatch = trimmed.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
-      if (dmyMatch) {
-        const [, dd, mm, yyyy] = dmyMatch;
-        return `${yyyy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
-      }
-      const ymdMatch = trimmed.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})/);
-      if (ymdMatch) {
-        const [, yyyy, mm, dd] = ymdMatch;
-        return `${yyyy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
-      }
-      const parsed = new Date(trimmed);
-      if (!isNaN(parsed.getTime())) {
-        return parsed.toISOString().split('T')[0];
-      }
-      return todayIso;
+      return toApiDateString(dateStr);
     };
 
     const targetPropType = draft?.propertyType || propertyType;
@@ -1521,11 +1495,19 @@ export default function MakeQuotationScreen() {
                 style={[styles.textInput, isDark && styles.textDark]}
                 value={quotationDate}
                 onChangeText={setQuotationDate}
-                placeholder="DD.MM.YYYY"
+                placeholder="DD-MM-YY"
                 placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
               />
               <TouchableOpacity
-                onPress={() => setShowDatePicker(true)}
+                onPress={() => {
+                  if (quotationDate) {
+                    const parsed = parseDateToDateObj(quotationDate);
+                    if (parsed && !isNaN(parsed.getTime())) {
+                      setDatePickerValue(parsed);
+                    }
+                  }
+                  setShowDatePicker(true);
+                }}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
                 <Ionicons name="calendar-outline" size={17} color="#94A3B8" />

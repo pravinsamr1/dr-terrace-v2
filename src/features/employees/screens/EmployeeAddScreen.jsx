@@ -28,6 +28,7 @@ import { useOsmAreas, useOsmCities } from '../../../core/hooks/useOsmAreas';
 import { getPincodeForArea } from '../../../shared/constants/chennai-areas';
 import { MaterialOverlayLoader, MaterialSuccessModal } from '../../../shared/components/material';
 import InnerHeader from '../../../shared/components/InnerHeader';
+import TitleDropdown from '../../../shared/components/TitleDropdown';
 
 const MAX_IMAGE_SIZE_BYTES = 3 * 1024 * 1024; // 3MB max
 const MAX_IMAGE_SIZE_MESSAGE = 'File size too large. Add photo up to 3MB.';
@@ -101,6 +102,7 @@ export default function EmployeeAddScreen() {
   const isDark = colorScheme === 'dark';
 
   // Form states
+  const [employeeTitle, setEmployeeTitle] = useState('Mr');
   const [employeeName, setEmployeeName] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
   const [password, setPassword] = useState('');
@@ -376,10 +378,20 @@ export default function EmployeeAddScreen() {
 
     setIsSubmitting(true);
 
+    const trimmedEmpName = employeeName.trim();
+    const alreadyHasEmpPrefix = /^(mr|mrs|ms|m\/s)\b/i.test(trimmedEmpName);
+    const finalEmployeeName = alreadyHasEmpPrefix
+      ? trimmedEmpName
+      : `${employeeTitle} ${trimmedEmpName}`;
+
     try {
       const result = await employeeService.addEmployee({
-        name: employeeName.trim(),
-        employeeName: employeeName.trim(),
+        name: finalEmployeeName,
+        employeeName: finalEmployeeName,
+        employeeTitle,
+        title: employeeTitle,
+        prefix: employeeTitle,
+        salutation: employeeTitle,
         mobileNumber: mobileNumber.replace(/[^0-9]/g, ''),
         mobile: mobileNumber.replace(/[^0-9]/g, ''),
         password: password.trim(),
@@ -411,7 +423,7 @@ export default function EmployeeAddScreen() {
         setSuccessModal({
           visible: true,
           title: 'Employee Added!',
-          message: `Employee ${employeeName} has been added successfully.`,
+          message: `Employee ${finalEmployeeName} has been added successfully.`,
         });
       } else {
         const isFileSize = result?.isFileSizeError ||
@@ -483,16 +495,28 @@ export default function EmployeeAddScreen() {
         <Text style={[styles.label, isDark && styles.labelDark]}>
           Employee Name <Text style={styles.star}>*</Text>
         </Text>
-        <TextInput
-          style={[styles.input, isDark && styles.inputDark, errors.employeeName && styles.inputError, { marginBottom: errors.employeeName ? 4 : 20 }]}
-          placeholder="Enter Full Name"
-          placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
-          value={employeeName}
-          onChangeText={(val) => {
-            setEmployeeName(val);
-            if (errors.employeeName) setErrors((prev) => ({ ...prev, employeeName: null }));
-          }}
-        />
+        <View style={[styles.nameRow, { marginBottom: errors.employeeName ? 4 : 20 }]}>
+          <TitleDropdown
+            value={employeeTitle}
+            onChange={(val) => setEmployeeTitle(val)}
+            isDark={isDark}
+          />
+          <TextInput
+            style={[
+              styles.input,
+              styles.nameInputWithDropdown,
+              isDark && styles.inputDark,
+              errors.employeeName && styles.inputError,
+            ]}
+            placeholder="Enter Full Name"
+            placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
+            value={employeeName}
+            onChangeText={(val) => {
+              setEmployeeName(val);
+              if (errors.employeeName) setErrors((prev) => ({ ...prev, employeeName: null }));
+            }}
+          />
+        </View>
         {errors.employeeName && <Text style={styles.errorText}>{errors.employeeName}</Text>}
 
         {/* Mobile Number */}
@@ -1444,5 +1468,14 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  nameInputWithDropdown: {
+    flex: 1,
+    marginBottom: 0,
+    marginLeft: 8,
   },
 });

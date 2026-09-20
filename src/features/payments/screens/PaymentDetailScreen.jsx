@@ -16,10 +16,9 @@ import { useTabBarScroll } from '../../../core/context/TabBarContext';
 import { useColorScheme } from '../../../core/hooks/useColorScheme';
 import InnerHeader from '../../../shared/components/InnerHeader';
 import { MaterialDetailSkeleton } from '../../../shared/components/material';
-import { DEFAULT_FALLBACKS } from '../../../shared/constants/fallbackDefaults';
 import { appointmentRepository } from '../../appointments/api/appointmentRepository';
 import { clientRepository } from '../../clients/api/clientRepository';
-import { PAYMENT_DEFAULTS } from '../constants/paymentConstants';
+import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
 
 export default function PaymentDetailScreen() {
   const router = useRouter();
@@ -74,40 +73,43 @@ export default function PaymentDetailScreen() {
     );
   }
 
-  // Pre-seed matching Figma labels
-  const rawClientName = app.clientName || app.name || DEFAULT_FALLBACKS.CLIENT_NAME;
-  const prefix = rawClientName.trim().toLowerCase().startsWith('mr.') ? '' : 'Mr. ';
-  const displayName = `${prefix}${rawClientName.trim()}`;
-  const displayId = `DR${app.id}`;
-  const displayPhone = app.phone || DEFAULT_FALLBACKS.PHONE;
+  const rawClientName = app?.clientName || app?.name || app?.customerName || '';
+  const prefix = rawClientName.trim() ? (rawClientName.trim().toLowerCase().startsWith('mr.') ? '' : 'Mr. Mrs. ') : '';
+  const displayName = rawClientName.trim() ? `${prefix}${rawClientName.trim()}` : '';
+  const displayId = app?.id ? `DR${app.id}` : '';
+  const displayPhone = app?.phone || app?.mobile || '';
 
   // Calculate balance dynamically
-  const totalPayment = app.totalPayment || PAYMENT_DEFAULTS.TOTAL_PAYMENT;
+  const totalPayment = Number(app?.totalPayment) || Number(app?.totalCost) || Number(app?.cost) || 0;
 
-  const initialPaid = app.initialPaid || false;
-  const midTermPaid = app.midTermPaid || false;
-  const finalPaid = app.finalPaid || false;
+  const initialPaid = Boolean(app?.initialPaid);
+  const midTermPaid = Boolean(app?.midTermPaid);
+  const finalPaid = Boolean(app?.finalPaid);
 
-  const initialAmt = app.initialPaidDetails?.amount || Math.round(totalPayment * PAYMENT_DEFAULTS.MILESTONE_RATIOS.INITIAL);
-  const midTermAmt = app.midTermPaidDetails?.amount || Math.round(totalPayment * PAYMENT_DEFAULTS.MILESTONE_RATIOS.MID_TERM);
-  const finalAmt = app.finalPaidDetails?.amount || (totalPayment - initialAmt - midTermAmt);
+  const initialAmt = Number(app?.initialPaidAmount || app?.initialPaidDetails?.amount || 0);
+  const midTermAmt = Number(app?.midTermPaidAmount || app?.midTermPaidDetails?.amount || 0);
+  const finalAmt = Number(app?.finalPaidAmount || app?.finalPaidDetails?.amount || 0);
 
   let balance = totalPayment;
   if (initialPaid) balance -= initialAmt;
   if (midTermPaid) balance -= midTermAmt;
   if (finalPaid) balance -= finalAmt;
+  balance = Math.max(0, balance);
 
   const handlePayNow = (milestoneName, amount) => {
     let contextFlag = 'initialPaid';
     if (milestoneName === 'Mid-Term') contextFlag = 'midTermPaid';
     if (milestoneName === 'Final') contextFlag = 'finalPaid';
+    const payParams = {
+      id: app.id,
+      milestone: contextFlag,
+    };
+    if (amount && amount > 0) {
+      payParams.amount = amount;
+    }
     router.push({
       pathname: '/payment-form',
-      params: {
-        id: app.id,
-        milestone: contextFlag,
-        amount: amount,
-      },
+      params: payParams,
     });
   };
 
@@ -171,10 +173,12 @@ export default function PaymentDetailScreen() {
                 <Text style={[styles.profileBadgeText, isDark && styles.subtextDark]}>{displayId}</Text>
               </View>
 
-              <View style={styles.profileBadgeRow}>
-                <Ionicons name="call-outline" size={15} color={isDark ? '#94A3B8' : '#475569'} style={{ marginRight: 6 }} />
-                <Text style={[styles.profileBadgeText, isDark && styles.subtextDark]}>{displayPhone}</Text>
-              </View>
+              {Boolean(displayPhone) && (
+                <View style={styles.profileBadgeRow}>
+                  <Ionicons name="call-outline" size={15} color={isDark ? '#94A3B8' : '#475569'} style={{ marginRight: 6 }} />
+                  <Text style={[styles.profileBadgeText, isDark && styles.subtextDark]}>{displayPhone}</Text>
+                </View>
+              )}
             </View>
           </View>
 
@@ -211,7 +215,9 @@ export default function PaymentDetailScreen() {
               <Text style={styles.milestoneHeaderTitle}>Initial Payment</Text>
               <View style={styles.milestoneHeaderRight}>
                 <Ionicons name="cash" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-                <Text style={styles.milestoneHeaderAmount}>Rs. {initialAmt.toLocaleString()}/-</Text>
+                <Text style={styles.milestoneHeaderAmount}>
+                  {initialPaid ? `Rs. ${initialAmt.toLocaleString()}/-` : 'Unpaid'}
+                </Text>
               </View>
             </View>
 
@@ -221,19 +227,19 @@ export default function PaymentDetailScreen() {
                   <View style={styles.milestoneDetailRow}>
                     <Text style={[styles.detailLabel, isDark && styles.subtextDark]}>Mode of Payment</Text>
                     <Text style={[styles.detailValue, isDark && styles.textDark]}>
-                      {app.initialPaidDetails?.paymentMethod || 'UPI'}
+                      {app.initialPaidDetails?.paymentMethod || app.initialPaidDetails?.method || 'N/A'}
                     </Text>
                   </View>
                   <View style={styles.milestoneDetailRow}>
                     <Text style={[styles.detailLabel, isDark && styles.subtextDark]}>Transaction ID</Text>
                     <Text style={[styles.detailValue, isDark && styles.textDark]}>
-                      {app.initialPaidDetails?.transactionId || '1234567891112'}
+                      {app.initialPaidDetails?.transactionId || 'N/A'}
                     </Text>
                   </View>
                   <View style={styles.milestoneDetailRow}>
                     <Text style={[styles.detailLabel, isDark && styles.subtextDark]}>Payment Date</Text>
                     <Text style={[styles.detailValue, isDark && styles.textDark]}>
-                      {app.initialPaidDetails?.paymentDate || '24-05-2025'}
+                      {formatDateDDMMYY(app.initialPaidDetails?.paymentDate || app.initialPaidDetails?.date) || 'N/A'}
                     </Text>
                   </View>
 
@@ -278,7 +284,9 @@ export default function PaymentDetailScreen() {
               <Text style={styles.milestoneHeaderTitle}>Mid-Term Payment</Text>
               <View style={styles.milestoneHeaderRight}>
                 <Ionicons name="cash" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-                <Text style={styles.milestoneHeaderAmount}>Rs. {midTermAmt.toLocaleString()}/-</Text>
+                <Text style={styles.milestoneHeaderAmount}>
+                  {midTermPaid ? `Rs. ${midTermAmt.toLocaleString()}/-` : 'Unpaid'}
+                </Text>
               </View>
             </View>
 
@@ -288,19 +296,19 @@ export default function PaymentDetailScreen() {
                   <View style={styles.milestoneDetailRow}>
                     <Text style={[styles.detailLabel, isDark && styles.subtextDark]}>Mode of Payment</Text>
                     <Text style={[styles.detailValue, isDark && styles.textDark]}>
-                      {app.midTermPaidDetails?.paymentMethod || 'UPI'}
+                      {app.midTermPaidDetails?.paymentMethod || app.midTermPaidDetails?.method || 'N/A'}
                     </Text>
                   </View>
                   <View style={styles.milestoneDetailRow}>
-                    <Text style={[styles.detailLabel, isDark && styles.subtextDark]}>UPI Transaction ID</Text>
+                    <Text style={[styles.detailLabel, isDark && styles.subtextDark]}>Transaction ID</Text>
                     <Text style={[styles.detailValue, isDark && styles.textDark]}>
-                      {app.midTermPaidDetails?.transactionId || '9876543210987'}
+                      {app.midTermPaidDetails?.transactionId || 'N/A'}
                     </Text>
                   </View>
                   <View style={styles.milestoneDetailRow}>
                     <Text style={[styles.detailLabel, isDark && styles.subtextDark]}>Payment Date</Text>
                     <Text style={[styles.detailValue, isDark && styles.textDark]}>
-                      {app.midTermPaidDetails?.paymentDate || 'Today'}
+                      {formatDateDDMMYY(app.midTermPaidDetails?.paymentDate || app.midTermPaidDetails?.date) || 'N/A'}
                     </Text>
                   </View>
 
@@ -344,7 +352,9 @@ export default function PaymentDetailScreen() {
               <Text style={styles.milestoneHeaderTitle}>Final Payment</Text>
               <View style={styles.milestoneHeaderRight}>
                 <Ionicons name="cash" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-                <Text style={styles.milestoneHeaderAmount}>Rs. {finalAmt.toLocaleString()}/-</Text>
+                <Text style={styles.milestoneHeaderAmount}>
+                  {finalPaid ? `Rs. ${finalAmt.toLocaleString()}/-` : 'Unpaid'}
+                </Text>
               </View>
             </View>
 
@@ -354,19 +364,19 @@ export default function PaymentDetailScreen() {
                   <View style={styles.milestoneDetailRow}>
                     <Text style={[styles.detailLabel, isDark && styles.subtextDark]}>Mode of Payment</Text>
                     <Text style={[styles.detailValue, isDark && styles.textDark]}>
-                      {app.finalPaidDetails?.paymentMethod || 'UPI'}
+                      {app.finalPaidDetails?.paymentMethod || app.finalPaidDetails?.method || 'N/A'}
                     </Text>
                   </View>
                   <View style={styles.milestoneDetailRow}>
-                    <Text style={[styles.detailLabel, isDark && styles.subtextDark]}>UPI Transaction ID</Text>
+                    <Text style={[styles.detailLabel, isDark && styles.subtextDark]}>Transaction ID</Text>
                     <Text style={[styles.detailValue, isDark && styles.textDark]}>
-                      {app.finalPaidDetails?.transactionId || '5544332211998'}
+                      {app.finalPaidDetails?.transactionId || 'N/A'}
                     </Text>
                   </View>
                   <View style={styles.milestoneDetailRow}>
                     <Text style={[styles.detailLabel, isDark && styles.subtextDark]}>Payment Date</Text>
                     <Text style={[styles.detailValue, isDark && styles.textDark]}>
-                      {app.finalPaidDetails?.paymentDate || 'Today'}
+                      {formatDateDDMMYY(app.finalPaidDetails?.paymentDate || app.finalPaidDetails?.date) || 'N/A'}
                     </Text>
                   </View>
 

@@ -3,8 +3,10 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   BackHandler,
+  Image,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -27,9 +29,13 @@ import { appointmentRepository as appointmentService } from '../../appointments/
 import { authRepository } from '../../auth/api/authRepository';
 import { clientRepository as clientService } from '../../clients/api/clientRepository';
 import { quotationRepository } from '../../quotations/api/quotationRepository';
+import { paymentRepository } from '../../payments/api/paymentRepository';
 import SelectQuotationTiersModal from '../../quotations/components/SelectQuotationTiersModal';
 import { transformStyleForJakarta } from '../../../core/theme/initFonts';
 import { isPastDate } from '../../../core/utils/validation';
+import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
+import { extractApiErrorMessage } from '../../../core/api/apiClient';
+import { resolveProofImageUrl } from '../../../core/utils/imageUtils';
 
 const Text = React.forwardRef((props, ref) => (
   <RNText ref={ref} {...props} style={transformStyleForJakarta(props.style, true)} />
@@ -129,23 +135,127 @@ export default function CustomerDetailScreen() {
     setClientData(prev => prev ? { ...prev, quotations: [], confirmedQuoteId: null } : prev);
   };
 
-  const confirmAndLockQuotation = (appId, quotationId) => {
-    setClientData(prev => {
-      if (!prev) return prev;
-      const isAlreadyLocked = prev.confirmedQuoteId === quotationId;
-      const newConfirmedId = isAlreadyLocked ? null : quotationId;
-      const confirmedQuote = (prev.quotations || []).find(q => q.id === newConfirmedId);
-      return {
+  const handleConfirmQuotation = async (quotationId) => {
+    try {
+      const cleanQuoteId = String(quotationId).replace(/\D/g, '') || quotationId;
+      console.log(`[API v2] Confirming quotation ${cleanQuoteId}`);
+      const result = await quotationRepository.confirmQuotation(cleanQuoteId, true);
+
+      if (!result?.success) {
+        let errorTitle = 'Failed to Confirm';
+        let errorMessage = result?.message || 'Could not confirm quotation. Please try again.';
+        if (result?.statusCode === 403) {
+          errorTitle = 'Access Denied';
+          errorMessage = 'You do not have permission to confirm this quotation.';
+        } else if (result?.statusCode === 404) {
+          errorTitle = 'Not Found';
+          errorMessage = 'Quotation not found on server.';
+        }
+        return { success: false, title: errorTitle, message: errorMessage };
+      }
+
+      // Update local state
+      const confirmedQuote = (quotationsList || []).find(q => String(q.id) === String(quotationId));
+      setClientData(prev => prev ? {
         ...prev,
-        confirmedQuoteId: newConfirmedId,
-        activeQuotationId: newConfirmedId || prev.activeQuotationId,
-        totalPayment: confirmedQuote ? (confirmedQuote.total || prev.totalPayment) : prev.totalPayment,
-        serviceType: confirmedQuote ? (confirmedQuote.service || prev.serviceType) : prev.serviceType,
+        confirmedQuoteId: quotationId,
+        activeQuotationId: quotationId,
+        totalPayment: confirmedQuote?.grandTotal || confirmedQuote?.total || prev.totalPayment,
+        serviceType: confirmedQuote?.service || confirmedQuote?.packageName || prev.serviceType,
         unlockRequested: false,
         unlockRequestStatus: null,
-      };
-    });
+        quotations: (prev.quotations || []).filter(q => String(q.id) === String(quotationId)),
+      } : prev);
+
+      // Re-fetch quotations from server (server automatically deletes unconfirmed drafts for this appointment)
+      const cleanAppId = String(params.id || app?.id || '').replace(/^DR/i, '').trim();
+      if (cleanAppId) {
+        try {
+          const quotsRes = await clientService.getCustomerQuotations(cleanAppId);
+          if (quotsRes?.success && Array.isArray(quotsRes.quotations)) {
+            setApiQuotations(quotsRes.quotations);
+          }
+        } catch (_fetchErr) {
+          // non-blocking
+        }
+      }
+
+      return { success: true };
+    } catch (error) {
+      console.warn('Error confirming quotation:', error?.message);
+      return { success: false, title: 'Confirmation Error', message: error?.message || 'Failed to confirm quotation.' };
+    }
   };
+
+  const handleUnlockQuotation = async (quotationId, showSuccessAlert = false) => {
+    try {
+      const cleanQuoteId = String(quotationId).replace(/\D/g, '') || quotationId;
+      console.log(`[API v2] Unlocking quotation ${cleanQuoteId}`);
+      const result = await quotationRepository.unlockQuotation(cleanQuoteId);
+
+      if (!result?.success) {
+        let errorTitle = 'Unlock Failed';
+        let errorMessage = result?.message || 'Could not unlock quotation. Please try again.';
+        if (result?.statusCode === 403) {
+          if (result?.message && result.message.toLowerCase().includes('payment')) {
+            errorTitle = 'Quotation Locked';
+            errorMessage = result.message;
+          } else if (result?.message && !['forbidden', 'bad request', 'error'].includes(result.message.trim().toLowerCase())) {
+            errorTitle = result.message.toLowerCase().includes('admin') ? 'Admin Access Required' : 'Quotation Locked';
+            errorMessage = result.message;
+          } else {
+            errorTitle = 'Admin Access Required';
+            errorMessage = 'Only Admin users can unlock a confirmed quotation. Field staff cannot unlock it directly.';
+          }
+        } else if (result?.statusCode === 404) {
+          errorTitle = 'Not Found';
+          errorMessage = result?.message || 'Quotation not found on server.';
+        }
+        if (showSuccessAlert) {
+          showAlert(errorTitle, errorMessage, 'error', 'OK');
+        }
+        return { success: false, title: errorTitle, message: errorMessage };
+      }
+
+      // Update local state
+      setClientData(prev => prev ? {
+        ...prev,
+        confirmedQuoteId: null,
+        unlockRequested: false,
+        unlockRequestStatus: null,
+      } : prev);
+
+      // Re-fetch quotations from server
+      const cleanAppId = String(params.id || app?.id || '').replace(/^DR/i, '').trim();
+      if (cleanAppId) {
+        try {
+          const quotsRes = await clientService.getCustomerQuotations(cleanAppId);
+          if (quotsRes?.success && Array.isArray(quotsRes.quotations)) {
+            setApiQuotations(quotsRes.quotations);
+          }
+        } catch (_fetchErr) {
+          // non-blocking
+        }
+      }
+
+      if (showSuccessAlert) {
+        showAlert(
+          'Quotation Unlocked',
+          'The quotation has been unlocked. You can now select other tiers, edit, or create new revisions.',
+          'info',
+          'OK'
+        );
+      }
+      return { success: true };
+    } catch (error) {
+      console.warn('Error unlocking quotation:', error?.message);
+      if (showSuccessAlert) {
+        showAlert('Unlock Error', error?.message || 'Failed to unlock quotation.', 'error', 'OK');
+      }
+      return { success: false, title: 'Unlock Error', message: error?.message || 'Failed to unlock quotation.' };
+    }
+  };
+
 
   const requestQuotationUnlock = (appId, quotationId, requestedBy = 'Staff') => {
     const todayStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -159,13 +269,17 @@ export default function CustomerDetailScreen() {
     } : prev);
   };
 
-  const resolveQuotationUnlockRequest = (appId, approved = true) => {
-    setClientData(prev => prev ? {
-      ...prev,
-      confirmedQuoteId: approved ? null : prev.confirmedQuoteId,
-      unlockRequested: false,
-      unlockRequestStatus: approved ? 'approved' : 'rejected',
-    } : prev);
+  const resolveQuotationUnlockRequest = async (appId, approved = true) => {
+    if (approved && (app?.confirmedQuoteId || app?.unlockRequestedQuoteId)) {
+      const qId = app?.confirmedQuoteId || app?.unlockRequestedQuoteId;
+      await handleUnlockQuotation(qId);
+    } else {
+      setClientData(prev => prev ? {
+        ...prev,
+        unlockRequested: false,
+        unlockRequestStatus: approved ? 'approved' : 'rejected',
+      } : prev);
+    }
   };
 
   const updateAppointmentInspection = (appId, inspectionDetails) => {
@@ -181,20 +295,6 @@ export default function CustomerDetailScreen() {
 
   const setProjectTotal = (appId, totalPayment, combinedServices, categoryName) => {
     setClientData(prev => prev ? { ...prev, totalPayment, serviceType: combinedServices, chosenCategory: categoryName } : prev);
-  };
-
-  const addExtraCharge = (appId, chargeDetails) => {
-    setClientData(prev => prev ? {
-      ...prev,
-      extraCharges: [...(prev.extraCharges || []), { id: Date.now(), ...chargeDetails, isPaid: false }]
-    } : prev);
-  };
-
-  const toggleExtraChargePayment = (appId, chargeId) => {
-    setClientData(prev => prev ? {
-      ...prev,
-      extraCharges: (prev.extraCharges || []).map(c => c.id === chargeId ? { ...c, isPaid: !c.isPaid } : c)
-    } : prev);
   };
 
   const generateWarranty = async (appId, completedDate, validYears, serviceWarranties) => {
@@ -249,6 +349,61 @@ export default function CustomerDetailScreen() {
     return params.id ? { id: params.id, appointmentId: params.id, quotations: [] } : null;
   }, [clientData, params.id]);
 
+  // API v2: PayView state for the payments tab (live blockchain ledger)
+  const [payView, setPayView] = useState(null);
+  const [isLoadingPayView, setIsLoadingPayView] = useState(false);
+  const payViewIdRef = React.useRef(null);
+  const activeTabSectionRef = React.useRef('profile');
+  const isFetchingPayViewRef = React.useRef(false);
+  const isFetchingCustomerDataRef = React.useRef(false);
+  const isFirstFocusRef = React.useRef(true);
+
+  const appRef = React.useRef(app);
+  appRef.current = app;
+
+  const apiQuotationsRef = React.useRef(apiQuotations);
+  apiQuotationsRef.current = apiQuotations;
+
+  useEffect(() => {
+    if (payView?.id) {
+      payViewIdRef.current = String(payView.id);
+    }
+  }, [payView?.id]);
+
+  // API v2: Fetch fresh PayView from API for the payments tab (strictly on demand)
+  const fetchPayView = useCallback(async (quoteIdOverride = null) => {
+    const currentApp = appRef.current;
+    const currentApiQuots = apiQuotationsRef.current;
+    const confirmedQuoteId =
+      quoteIdOverride ||
+      currentApp?.confirmedQuoteId ||
+      currentApp?.activeQuotationId ||
+      (Array.isArray(currentApp?.quotations) && currentApp.quotations.find((q) => q.isConfirmed)?.id) ||
+      (Array.isArray(currentApiQuots) && currentApiQuots.find((q) => q.isConfirmed)?.id) ||
+      payViewIdRef.current ||
+      null;
+
+    if (!confirmedQuoteId) return null;
+    if (isFetchingPayViewRef.current) return null;
+
+    isFetchingPayViewRef.current = true;
+    setIsLoadingPayView(true);
+    try {
+      const res = await paymentRepository.getPayView(String(confirmedQuoteId));
+      if (res?.success && res.data) {
+        payViewIdRef.current = String(res.data.id || confirmedQuoteId);
+        setPayView(res.data);
+        return res.data;
+      }
+    } catch (err) {
+      console.warn('Failed to fetch payView from API:', err?.message);
+    } finally {
+      setIsLoadingPayView(false);
+      isFetchingPayViewRef.current = false;
+    }
+    return null;
+  }, []);
+
   const loadCustomerData = useCallback(async () => {
     const targetId = params.id;
     if (!targetId) {
@@ -256,6 +411,9 @@ export default function CustomerDetailScreen() {
       setIsLoadingQuotations(false);
       return;
     }
+    if (isFetchingCustomerDataRef.current) return;
+    isFetchingCustomerDataRef.current = true;
+
     setIsLoadingClient(true);
     setIsLoadingQuotations(true);
 
@@ -285,12 +443,22 @@ export default function CustomerDetailScreen() {
         }
         if (Array.isArray(quotsRes.quotations)) {
           setApiQuotations(quotsRes.quotations);
+          const confirmedQ = quotsRes.quotations.find(q => q.isConfirmed === true);
+          if (confirmedQ) {
+            setClientData(prev => prev ? {
+              ...prev,
+              confirmedQuoteId: confirmedQ.id,
+              activeQuotationId: confirmedQ.id,
+              totalPayment: confirmedQ.grandTotal || confirmedQ.total || prev.totalPayment,
+            } : prev);
+          }
         }
       }
     } catch (err) {
       console.warn('Failed to load customer quotations from API:', err?.message);
     } finally {
       setIsLoadingQuotations(false);
+      isFetchingCustomerDataRef.current = false;
     }
   }, [params.id]);
 
@@ -298,6 +466,9 @@ export default function CustomerDetailScreen() {
     setRefreshing(true);
     try {
       await loadCustomerData();
+      if (activeTabSectionRef.current === 'payment') {
+        await fetchPayView();
+      }
     } catch (err) {
       console.warn('CustomerDetailScreen refresh error:', err?.message);
     } finally {
@@ -305,19 +476,34 @@ export default function CustomerDetailScreen() {
     }
   };
 
-  // useFocusEffect handles both the initial mount and every subsequent re-focus,
-  // so no separate useEffect is needed (that would cause a duplicate parallel request).
+  // Load customer data strictly ONCE when screen mounts or params.id changes
+  useEffect(() => {
+    loadCustomerData();
+  }, [loadCustomerData]);
+
+  // When returning to this screen after recording a payment, refresh payView if currently on payments tab
   useFocusEffect(
     useCallback(() => {
-      loadCustomerData();
-    }, [loadCustomerData])
+      if (isFirstFocusRef.current) {
+        isFirstFocusRef.current = false;
+        return;
+      }
+      if (activeTabSectionRef.current === 'payment') {
+        fetchPayView();
+      }
+    }, [fetchPayView])
   );
 
-  // Lump Sum & Extra Service Charges Modal State
-  const [showExtraChargeModal, setShowExtraChargeModal] = useState(false);
-  const [extraTitle, setExtraTitle] = useState('');
-  const [extraAmount, setExtraAmount] = useState('');
-  const [extraNotes, setExtraNotes] = useState('');
+  // Stitch Payment Details Modal state
+  const [selectedPaymentDetailModal, setSelectedPaymentDetailModal] = useState(null);
+  const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
+  // Stitch Activate Warranty Modal state
+  const [showStitchWarrantyModal, setShowStitchWarrantyModal] = useState(false);
+  const [warrantyStartDate, setWarrantyStartDate] = useState(() => {
+    return formatDateDDMMYY(new Date());
+  });
+  const [showWarrantyDatePicker, setShowWarrantyDatePicker] = useState(false);
+  const [warrantyDateObj, setWarrantyDateObj] = useState(new Date());
 
   // Date and Time picker states
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -344,10 +530,12 @@ export default function CustomerDetailScreen() {
     actionType: 'lock', // 'lock' | 'unlock' | 'switch'
     title: '',
     message: '',
+    warningNote: '',
     quoteId: null,
     confirmText: 'Confirm & Lock',
     cancelText: 'Cancel',
   });
+  const [isLockActionLoading, setIsLockActionLoading] = useState(false);
 
   const showAlert = (title, message, type = 'lock', buttonText = 'Got It') => {
     setAlertModalConfig({
@@ -381,21 +569,29 @@ export default function CustomerDetailScreen() {
     const targetTiers = filteredTiers.length > 0 ? filteredTiers : available;
 
     if (app?.confirmedQuoteId) {
-      Alert.alert(
-        'Project Locked',
-        'A quotation is currently confirmed and locked for this project. Do you want to unlock it to create a new quotation?',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Unlock & Create',
-            onPress: () => {
-              confirmAndLockQuotation(app.id, app.confirmedQuoteId);
-              setModalInitialTiers(targetTiers);
-              setIsSelectTiersModalVisible(true);
+      if (isAdminOrMaster) {
+        Alert.alert(
+          'Project Locked',
+          'A quotation is currently confirmed and locked for this project. Do you want to unlock it to create a new quotation?',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Unlock & Create',
+              onPress: async () => {
+                const ok = await handleUnlockQuotation(app.confirmedQuoteId, false);
+                if (ok?.success) {
+                  setModalInitialTiers(targetTiers);
+                  setIsSelectTiersModalVisible(true);
+                } else if (ok && !ok.success) {
+                  showAlert(ok.title || 'Quotation Locked', ok.message || 'Cannot unlock quotation.', 'error', 'OK');
+                }
+              },
             },
-          },
-        ]
-      );
+          ]
+        );
+      } else {
+        showAlert('Quotation Locked 🔒', 'This quotation is confirmed and locked. Only Admin can unlock it.', 'lock', 'OK');
+      }
     } else {
       setModalInitialTiers(targetTiers);
       setIsSelectTiersModalVisible(true);
@@ -477,21 +673,244 @@ export default function CustomerDetailScreen() {
   const [showDurationModal, setShowDurationModal] = useState(false);
   const [serviceDurations, setServiceDurations] = useState({}); // { serviceIndex: durationString }
 
-  // Active section tab anchor focus (Payments & Warranty hidden)
-  const getInitialTab = (tabParam) => {
-    if (tabParam === 'quotation' || tabParam === 'quotations') return 'quotation';
+  // Tab Lock & Gating Conditions
+  const isInitialPaymentReceived = Boolean(app?.initialPaymentReceived || app?.initialPaid);
+
+  const isAttendedLocked = Boolean(
+    isLocallySaved ||
+    isInitialPaymentReceived ||
+    (app?.attendedDate && app?.attendedTime && app.attendedDate !== 'Not Set') ||
+    Boolean(app?.appointmentAttend?.date && app?.appointmentAttend?.time) ||
+    app?.siteVisited === true
+  );
+
+  const isQuotationConfirmed = Boolean(
+    app?.confirmedQuoteId ||
+    app?.activeQuotationId ||
+    payView?.isConfirmed ||
+    (payView?.id && (payView?.isConfirmed || Number(payView?.receivedAmount || 0) > 0)) ||
+    (Array.isArray(app?.quotations) &&
+      app.quotations.some((q) => q.isConfirmed || q.status === 'CONFIRMED' || q.isLocked)) ||
+    (app?.quotation &&
+      (app.quotation.isConfirmed || app.quotation.status === 'CONFIRMED' || app.quotation.isLocked)) ||
+    (Array.isArray(apiQuotations) &&
+      apiQuotations.some((q) => q.isConfirmed || q.status === 'CONFIRMED' || q.isLocked)) ||
+    isInitialPaymentReceived
+  );
+
+  const isReceiptGenerated = Boolean(
+    app?.isReceiptGenerated ||
+    app?.fullReceiptGenerated ||
+    app?.receiptNumber ||
+    app?.isReceiptLocked ||
+    payView?.isReceiptGenerated ||
+    payView?.fullReceiptGenerated ||
+    payView?.receiptStatus === 'GENERATED' ||
+    payView?.receiptNumber ||
+    payView?.isReceiptLocked
+  );
+
+  // Active section tab anchor focus
+  const getInitialTab = useCallback((tabParam) => {
+    if (tabParam === 'quotation' || tabParam === 'quotations') return isAttendedLocked ? 'quotation' : 'profile';
+    if (tabParam === 'payment' || tabParam === 'payments') return isQuotationConfirmed ? 'payment' : 'profile';
+    if (tabParam === 'warranty' || tabParam === 'warranties') return isReceiptGenerated ? 'warranty' : 'profile';
     return 'profile';
-  };
+  }, [isAttendedLocked, isQuotationConfirmed, isReceiptGenerated]);
 
   const [activeTabSection, setActiveTabSection] = useState(getInitialTab(params.initialTab || params.tab));
+  const hasAppliedInitialTabRef = React.useRef(false);
 
   useEffect(() => {
-    const targetTab = getInitialTab(params.initialTab || params.tab);
-    if (params.initialTab || params.tab) {
-      setActiveTabSection(targetTab);
+    const rawTab = params.initialTab || params.tab;
+    if (rawTab && !hasAppliedInitialTabRef.current) {
+      const targetTab = getInitialTab(rawTab);
+      if (targetTab !== 'profile' || rawTab === 'profile') {
+        setActiveTabSection(targetTab);
+        hasAppliedInitialTabRef.current = true;
+      }
     }
-  }, [params.initialTab, params.tab]);
-  // Edit Customer Modal State
+  }, [params.initialTab, params.tab, getInitialTab]);
+
+  // If active tab becomes locked due to data update, fall back safely
+  useEffect(() => {
+    if (activeTabSection === 'quotation' && !isAttendedLocked) {
+      setActiveTabSection('profile');
+    } else if (activeTabSection === 'payment' && !isQuotationConfirmed) {
+      setActiveTabSection(isAttendedLocked ? 'quotation' : 'profile');
+    } else if (activeTabSection === 'warranty' && !isReceiptGenerated) {
+      setActiveTabSection(isQuotationConfirmed ? 'payment' : (isAttendedLocked ? 'quotation' : 'profile'));
+    }
+  }, [activeTabSection, isAttendedLocked, isQuotationConfirmed, isReceiptGenerated]);
+  // Keep activeTabSectionRef in sync
+  useEffect(() => {
+    activeTabSectionRef.current = activeTabSection;
+  }, [activeTabSection]);
+
+  // Fetch fresh payView from API every time the payments tab is opened
+  useEffect(() => {
+    if (activeTabSection === 'payment') {
+      fetchPayView();
+    }
+  }, [activeTabSection, fetchPayView]);
+
+  const [expandedServiceReceipts, setExpandedServiceReceipts] = useState({});
+  const [showFullReceiptModal, setShowFullReceiptModal] = useState(false);
+  const [fullReceiptStep, setFullReceiptStep] = useState('options'); // 'options' | 'without_gst'
+  const [gstNumberInput, setGstNumberInput] = useState('');
+
+  const handleOpenFullReceiptModal = () => {
+    setFullReceiptStep('options');
+    setGstNumberInput(app?.gstNumber || app?.gstin || '');
+    setShowFullReceiptModal(true);
+  };
+
+  const handleOpenFullReceiptWithGstModal = () => {
+    setFullReceiptStep('with_gst_receipt');
+    setGstNumberInput(app?.gstNumber || app?.gstin || '');
+    setShowFullReceiptModal(true);
+  };
+
+  const toggleServiceReceipts = (serviceKey) => {
+    setExpandedServiceReceipts((prev) => ({
+      ...prev,
+      [serviceKey]: !prev[serviceKey],
+    }));
+  };
+
+  const toggleAllServiceReceipts = () => {
+    const allKeys = [
+      ...(Array.isArray(payView?.services) ? payView.services.map((s, i) => s.id || `svc_${i}`) : []),
+      ...(Array.isArray(payView?.additionalPayment) ? payView.additionalPayment.map((s, i) => s.id || `add_${i}`) : []),
+      'gst_clearance',
+    ];
+    const isAnyCollapsed = allKeys.some((k) => !expandedServiceReceipts[k]);
+    const nextMap = {};
+    allKeys.forEach((k) => {
+      nextMap[k] = isAnyCollapsed;
+    });
+    setExpandedServiceReceipts(nextMap);
+  };
+
+  const handleAdminVerifyPayment = async (paymentItem) => {
+    if (!paymentItem) return;
+    const confirmedQuoteId =
+      paymentItem.quotationId ||
+      payView?.id ||
+      app?.confirmedQuoteId ||
+      app?.activeQuotationId ||
+      null;
+    const paymentId = paymentItem.id || paymentItem.details?.id;
+
+    if (!paymentId) {
+      showAlert('Missing Identifier', 'Could not locate payment reference ID.', 'OK');
+      return;
+    }
+
+    setIsVerifyingPayment(true);
+    try {
+      const res = await paymentRepository.verifyPayment(
+        confirmedQuoteId ? String(confirmedQuoteId) : null,
+        paymentId,
+        'Verified against proof / voucher'
+      );
+
+      if (res?.success) {
+        const verifiedBy = res.data?.verifiedBy || (currentUser?.name ? `${currentUser.name} (Admin)` : 'Admin');
+        const verifiedAt = res.data?.verifiedAt || new Date().toISOString();
+
+        // 1. Optimistically update local payView so all receipts update immediately
+        setPayView((prevPayView) => {
+          if (!prevPayView) return prevPayView;
+          const updated = { ...prevPayView };
+          if (Array.isArray(updated.services)) {
+            updated.services = updated.services.map((svc) => {
+              if (Array.isArray(svc.payments)) {
+                return {
+                  ...svc,
+                  payments: svc.payments.map((p) => {
+                    if (String(p.id) === String(paymentId)) {
+                      return {
+                        ...p,
+                        isVerified: true,
+                        verifiedBy,
+                        verifiedAt,
+                      };
+                    }
+                    return p;
+                  }),
+                };
+              }
+              return svc;
+            });
+          }
+          if (Array.isArray(updated.additionalPayment)) {
+            updated.additionalPayment = updated.additionalPayment.map((addSvc) => {
+              if (Array.isArray(addSvc.payments)) {
+                return {
+                  ...addSvc,
+                  payments: addSvc.payments.map((p) => {
+                    if (String(p.id) === String(paymentId)) {
+                      return {
+                        ...p,
+                        isVerified: true,
+                        verifiedBy,
+                        verifiedAt,
+                      };
+                    }
+                    return p;
+                  }),
+                };
+              }
+              return addSvc;
+            });
+          }
+          return updated;
+        });
+
+        // 2. Update selectedPaymentDetailModal state immediately
+        setSelectedPaymentDetailModal((prev) =>
+          prev
+            ? {
+                ...prev,
+                isVerified: true,
+                verifiedBy,
+                verifiedAt,
+                details: {
+                  ...prev.details,
+                  isVerified: true,
+                  verifiedBy,
+                  verifiedAt,
+                },
+              }
+            : null
+        );
+
+        // 3. Re-fetch payView from backend to ensure complete ledger sync
+        if (confirmedQuoteId) {
+          paymentRepository.getPayView(String(confirmedQuoteId)).then((pvRes) => {
+            if (pvRes?.success && pvRes.data) {
+              setPayView(pvRes.data);
+            }
+          }).catch(() => {});
+        }
+
+        showAlert(
+          'Payment Verified!',
+          'The payment has been successfully approved by Admin. View Receipt and Share options are now unlocked for all staff.',
+          'Done'
+        );
+      } else {
+        showAlert('Verification Failed', res?.message || 'Could not verify payment. Please try again.', 'OK');
+      }
+    } catch (err) {
+      showAlert('Error', err?.message || 'Failed to verify payment', 'OK');
+    } finally {
+      setIsVerifyingPayment(false);
+    }
+  };
+
+
   const [showEditCustomerModal, setShowEditCustomerModal] = useState(false);
   const [editClientName, setEditClientName] = useState('');
   const [editClientPhone, setEditClientPhone] = useState('');
@@ -505,9 +924,6 @@ export default function CustomerDetailScreen() {
   const [editAppDate, setEditAppDate] = useState('');
   const [editAppTime, setEditAppTime] = useState('');
   const [editStatus, setEditStatus] = useState('');
-
-  // Check if initial advance payment has been received (locks quotations and customer editing)
-  const isInitialPaymentReceived = Boolean(app?.initialPaymentReceived || app?.initialPaid);
 
   const handleConfirmInitialPayment = () => {
     if (quotationsList.length === 0) {
@@ -530,7 +946,7 @@ export default function CustomerDetailScreen() {
     if (!app) return;
     if (isInitialPaymentReceived) {
       showAlert(
-        'Project Locked 🔒',
+        'Project Locked',
         'Initial payment has been received for this project. Customer and site details are locked and cannot be edited.',
         'lock',
         'Got It'
@@ -609,6 +1025,48 @@ export default function CustomerDetailScreen() {
       return 'Economic';
     }
     return 'Economic';
+  };
+
+  const getTierVisualTheme = (tierId) => {
+    const t = String(tierId || '').toLowerCase().trim();
+    if (t.includes('elite') || t.includes('luxury') || t.includes('polyurea') || t === '3') {
+      return {
+        color: '#7C3AED',
+        lightBg: '#F5F3FF',
+        darkBg: '#2E1065',
+        badgeBg: '#EDE9FE',
+        activeBorder: '#B090E5',
+        icon: 'ribbon',
+      };
+    }
+    if (t.includes('premium') || t.includes('polyurethane') || t === '2') {
+      return {
+        color: '#0052CC',
+        lightBg: '#EEF2FF',
+        darkBg: '#1E1B4B',
+        badgeBg: '#E0E7FF',
+        activeBorder: '#8B9FD0',
+        icon: 'star',
+      };
+    }
+    if (t === 'none' || t.includes('single tier')) {
+      return {
+        color: '#0D9488',
+        lightBg: '#F0FDFA',
+        darkBg: '#134E4A',
+        badgeBg: '#CCFBF1',
+        activeBorder: '#5EEAD4',
+        icon: 'layers-outline',
+      };
+    }
+    return {
+      color: '#2563EB',
+      lightBg: '#EFF6FF',
+      darkBg: '#172554',
+      badgeBg: '#DBEAFE',
+      activeBorder: '#7C9EE9',
+      icon: 'shield-checkmark',
+    };
   };
 
   const DEFAULT_TIERS_CONFIG = [
@@ -715,7 +1173,7 @@ export default function CustomerDetailScreen() {
     return Array.from(set);
   }, [quotationsList]);
 
-  // Packages list mapped from API packages and default tiers (only showing packages that have quotations)
+  // Packages list mapped dynamically from backend API packages and existing quotations (only showing packages with quotations)
   const displayPackages = React.useMemo(() => {
     const tierMap = new Map();
 
@@ -723,7 +1181,7 @@ export default function CustomerDetailScreen() {
       apiPackages.forEach((pkg) => {
         const rawPkgName = pkg.packages || pkg.packageName || pkg.name || pkg.tier || '';
         const lowerName = rawPkgName.toLowerCase();
-        const pId = pkg.packageId != null ? Number(pkg.packageId) : null;
+        const pId = pkg.packageId != null ? Number(pkg.packageId) : (pkg.id != null ? Number(pkg.id) : null);
 
         let tierId = 'Economic';
         if (pId === 3 || lowerName.includes('elite') || lowerName.includes('luxury') || lowerName.includes('polyurea') || lowerName === 'elite') {
@@ -735,18 +1193,25 @@ export default function CustomerDetailScreen() {
         } else if (pId === 1 || lowerName.includes('economic') || lowerName.includes('elastomeric') || lowerName === 'economic') {
           tierId = 'Economic';
         } else {
-          tierId = 'Economic';
+          tierId = rawPkgName || 'Economic';
         }
 
-        const base = DEFAULT_TIERS_CONFIG.find(t => t.id === tierId) || DEFAULT_TIERS_CONFIG[0];
+        const theme = getTierVisualTheme(tierId);
+        const name = pkg.packageName || pkg.name || rawPkgName || (tierId === 'None' ? 'Single Tier Services' : `${tierId} Method`);
+        const title = pkg.title || (tierId === 'None' ? 'Single Tier Services' : name);
+        const warranty = pkg.warranty ? String(pkg.warranty) : (tierId === 'None' ? 'Single Tier' : '');
+        const subtitle = pkg.subtitle || (warranty ? `${name} (${warranty})` : name);
 
         tierMap.set(tierId.toLowerCase(), {
-          ...base,
-          packageId: pId != null ? pId : base.packageId,
-          packages: pkg.packages || base.packages,
-          packageName: pkg.packageName || base.packageName,
-          warranty: pkg.warranty || base.warranty,
-          subtitle: pkg.packageName && pkg.packageName !== tierId ? `${pkg.packageName} (${pkg.warranty || base.warranty})` : base.subtitle,
+          ...theme,
+          id: tierId,
+          packageId: pId,
+          packages: pkg.packages || tierId,
+          packageName: name,
+          title,
+          warranty,
+          subtitle,
+          quoteForDefault: pkg.quoteForDefault || name,
         });
       });
     }
@@ -755,8 +1220,23 @@ export default function CustomerDetailScreen() {
     quotationsList.forEach((q) => {
       const tierId = getQuoteTierCategory(q);
       if (!tierMap.has(tierId.toLowerCase())) {
-        const base = DEFAULT_TIERS_CONFIG.find(t => t.id === tierId) || DEFAULT_TIERS_CONFIG[0];
-        tierMap.set(tierId.toLowerCase(), { ...base });
+        const theme = getTierVisualTheme(tierId);
+        const name = q.packageName || q.quoteFor || (tierId === 'None' ? 'Single Tier Services' : `${tierId} Method`);
+        const title = tierId === 'None' ? 'Single Tier Services' : name;
+        const warranty = q.warranty ? String(q.warranty) : (tierId === 'None' ? 'Single Tier' : '');
+        const subtitle = warranty ? `${name} (${warranty})` : name;
+
+        tierMap.set(tierId.toLowerCase(), {
+          ...theme,
+          id: tierId,
+          packageId: q.packageId != null ? Number(q.packageId) : null,
+          packages: q.packages || tierId,
+          packageName: name,
+          title,
+          warranty,
+          subtitle,
+          quoteForDefault: q.quoteFor || name,
+        });
       }
     });
 
@@ -778,6 +1258,8 @@ export default function CustomerDetailScreen() {
 
     // If no quotations exist yet, show only Economic Method as default
     return [DEFAULT_TIERS_CONFIG[0]];
+    // Return packages with quotations from API data (empty list if no quotations created yet)
+    return withQuotes;
   }, [apiPackages, quotationsList]);
 
   const activeQuotationId = app?.activeQuotationId;
@@ -998,10 +1480,11 @@ export default function CustomerDetailScreen() {
           const day = parseInt(parts[2], 10);
           return new Date(year, month, day);
         } else {
-          // DD-MM-YYYY
+          // DD-MM-YYYY or DD-MM-YY
           const day = parseInt(parts[0], 10);
           const month = parseInt(parts[1], 10) - 1;
-          const year = parseInt(parts[2], 10);
+          let year = parseInt(parts[2], 10);
+          if (year < 100) year += 2000;
           return new Date(year, month, day);
         }
       }
@@ -1032,11 +1515,12 @@ export default function CustomerDetailScreen() {
     return today;
   };
 
-  // Formatter for date: DD-MM-YYYY
+  // Formatter for date: DD-MM-YY (e.g. 12-12-26)
   const formatDate = (date) => {
+    if (!date) return '';
     const day = String(date.getDate()).padStart(2, '0');
     const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = date.getFullYear();
+    const year = String(date.getFullYear()).slice(-2);
     return `${day}-${month}-${year}`;
   };
 
@@ -1053,7 +1537,7 @@ export default function CustomerDetailScreen() {
   // Sync state with selected appointment / client data
   useEffect(() => {
     if (app) {
-      const initialAttendedDate = app.attendedDate || '';
+      const initialAttendedDate = app.attendedDate ? formatDateDDMMYY(app.attendedDate) : '';
       const initialAttendedTime = app.attendedTime || '';
 
       setAttendedDate(initialAttendedDate);
@@ -1091,25 +1575,17 @@ export default function CustomerDetailScreen() {
     const cleaned = rawClientName.replace(/^(mr\.|mrs\.|ms\.|dr\.|prof\.|er\.|mr|mrs|ms|dr)\s+/i, '').trim();
     return (cleaned || rawClientName).charAt(0).toUpperCase() || 'C';
   })();
-  const prefix = rawClientName.toLowerCase().startsWith('mr.') ? '' : 'Mr. ';
-  const displayName = `${prefix}${rawClientName}`;
+  const displayName = `${rawClientName}`;
   const displayId = `DR${app.appointmentId || app.customerId || app.id || ''}`;
   const displayPhone = app.mobileNumber || app.clientPhone || app.phone || app.mobile || 'No Phone Number';
 
-  const displayAppDate = app.appointmentDate || app.date || app.appointmentFixDate || 'Not Set';
-  const displayFixDate = app.appointmentFixDate || app.appointmentFixedDate || app.fixDate || 'Not Set';
+  const rawAppDate = app.appointmentDate || app.date || app.appointmentFixDate || '';
+  const displayAppDate = rawAppDate ? formatDateDDMMYY(rawAppDate) : 'Not Set';
+  const rawFixDate = app.appointmentFixDate || app.appointmentFixedDate || app.fixDate || '';
+  const displayFixDate = rawFixDate ? formatDateDDMMYY(rawFixDate) : 'Not Set';
   const displayAppTime = app.appointmentTime || app.time || 'Not Set';
   const displayAttendedBy = app.employeeName || app.attendedBy || app.assignedTo || app.technician || app.assignedTechnician || 'Unassigned';
   const displayServiceType = app.serviceType || app.services || app.service || 'Waterproofing';
-
-  // Attended date & time is locked once saved
-  const isAttendedLocked = Boolean(
-    isLocallySaved ||
-    isInitialPaymentReceived ||
-    (app?.attendedDate && app?.attendedTime && app.attendedDate !== 'Not Set') ||
-    Boolean(app?.appointmentAttend?.date && app?.appointmentAttend?.time) ||
-    app?.siteVisited === true
-  );
 
   const handleSaveDetails = async () => {
     if (isAttendedLocked) {
@@ -1131,9 +1607,9 @@ export default function CustomerDetailScreen() {
     try {
       const cleanAppId = String(app.appointmentId || app.id || params.id).replace(/^DR/i, '').trim();
       const cleanCustId = String(app.customerId || app.id || params.id).replace(/^DR/i, '').trim();
-      const empId = app.employeeId || app.assignedEmployeeId || app.appointmentAttend?.employeeId || 100;
+      const empId = app?.employeeId || app?.assignedEmployeeId || app?.appointmentAttend?.employeeId || 102;
 
-      await appointmentService.saveAttendedDetails(cleanAppId, {
+      const result = await appointmentService.saveAttendedDetails(cleanAppId, {
         attendedDate,
         attendedTime,
         date: attendedDate,
@@ -1143,6 +1619,39 @@ export default function CustomerDetailScreen() {
         employeeId: empId,
         totalArea,
       });
+      
+      if (!result?.success) {
+        let errorTitle = 'Data Not Saved';
+        let errorMessage = result?.message || 'Site details could not be saved. Please try again.';
+
+        switch (result?.statusCode) {
+          case 400:
+            errorTitle = 'Invalid Data';
+            errorMessage = result?.message || 'The data sent was invalid. Please check the details and try again.';
+            break;
+          case 401:
+            errorTitle = 'Unauthorized';
+            errorMessage = 'Your session has expired. Please log in again.';
+            break;
+          case 403:
+            errorTitle = 'Access Denied';
+            errorMessage = 'You do not have permission to save site details.';
+            break;
+          case 404:
+            errorTitle = 'Not Found';
+            errorMessage = result?.message || 'Appointment not found or resource unavailable.';
+            break;
+          case 500:
+            errorTitle = 'Server Error';
+            errorMessage = 'An internal server error occurred. Please try again later.';
+            break;
+          default:
+            break;
+        }
+
+        showAlert(errorTitle, errorMessage, 'error', 'OK');
+        return;
+      }
 
       updateAppointmentInspection(app.id, {
         attendedDate,
@@ -1368,13 +1877,18 @@ export default function CustomerDetailScreen() {
           </View>
         </View>
 
-        {/* Navigation Cards Bar (Site Info, Quotations) - Payments & Warranty hidden */}
-        <View style={{ marginBottom: 18, flexDirection: 'row', gap: 8 }}>
+        {/* Navigation Cards Bar (Site Info, Quotations, Payments, Warranty) */}
+        <View style={{ marginBottom: 18, flexDirection: 'row', gap: 6 }}>
           {[
             { id: 'profile', label: 'Site Info', icon: 'person-outline', activeIcon: 'person', color: '#2563EB', bg: '#DBEAFE' },
             { id: 'quotation', label: 'Quotations', icon: 'document-text-outline', activeIcon: 'document-text', color: '#16A34A', bg: '#DCFCE7' },
+            { id: 'payment', label: 'Payments', icon: 'card-outline', activeIcon: 'card', color: '#0284C7', bg: '#E0F2FE' },
+            { id: 'warranty', label: 'Warranty', icon: 'shield-checkmark-outline', activeIcon: 'shield-checkmark', color: '#7C3AED', bg: '#EDE9FE' },
           ].map((tab) => {
-            const isQuotationLocked = tab.id === 'quotation' && !isAttendedLocked;
+            const isTabLocked =
+              (tab.id === 'quotation' && !isAttendedLocked) ||
+              (tab.id === 'payment' && !isQuotationConfirmed) ||
+              (tab.id === 'warranty' && !isReceiptGenerated);
             const isActive = activeTabSection === tab.id;
             return (
               <TouchableOpacity
@@ -1382,15 +1896,15 @@ export default function CustomerDetailScreen() {
                 style={[
                   {
                     flex: 1,
-                    height: 82,
-                    borderRadius: 14,
-                    padding: 6,
+                    height: 78,
+                    borderRadius: 12,
+                    padding: 4,
                     alignItems: 'center',
                     justifyContent: 'center',
                     backgroundColor: isActive ? (isDark ? '#1E293B' : '#EFF6FF') : (isDark ? '#1C1C1C' : '#FFFFFF'),
                     borderWidth: 1,
                     borderColor: isActive ? '#93C5FD' : (isDark ? '#334155' : '#E2E8F0'),
-                    opacity: isQuotationLocked ? 0.65 : 1,
+                    opacity: isTabLocked ? 0.65 : 1,
                   }
                 ]}
                 onPress={() => {
@@ -1403,24 +1917,45 @@ export default function CustomerDetailScreen() {
                     );
                     return;
                   }
+                  if (tab.id === 'payment' && !isQuotationConfirmed) {
+                    showAlert(
+                      'Quotation Required',
+                      'Payments will be available once a quotation is confirmed and locked.',
+                      'lock',
+                      'Got It'
+                    );
+                    return;
+                  }
+                  if (tab.id === 'warranty' && !isReceiptGenerated) {
+                    showAlert(
+                      'Full Receipt Required',
+                      'Warranty will be available once the full payment receipt is generated.',
+                      'lock',
+                      'Got It'
+                    );
+                    return;
+                  }
+                  if (tab.id === 'payment') {
+                    fetchPayView();
+                  }
                   setActiveTabSection(tab.id);
                 }}
                 activeOpacity={0.8}
               >
                 {/* Top Center Vector Icon */}
                 <View style={{
-                  width: 34,
-                  height: 34,
-                  borderRadius: 10,
-                  backgroundColor: isQuotationLocked ? (isDark ? '#1E293B' : '#F1F5F9') : (isActive ? tab.bg : (isDark ? '#080808' : '#F8FAFC')),
+                  width: 32,
+                  height: 32,
+                  borderRadius: 9,
+                  backgroundColor: isTabLocked ? (isDark ? '#1E293B' : '#F1F5F9') : (isActive ? tab.bg : (isDark ? '#080808' : '#F8FAFC')),
                   justifyContent: 'center',
                   alignItems: 'center',
-                  marginBottom: 5,
+                  marginBottom: 4,
                 }}>
                   <Ionicons
-                    name={isQuotationLocked ? 'lock-closed' : (isActive ? tab.activeIcon : tab.icon)}
-                    size={18}
-                    color={isQuotationLocked ? '#94A3B8' : (isActive ? tab.color : (isDark ? '#94A3B8' : '#64748B'))}
+                    name={isTabLocked ? 'lock-closed' : (isActive ? tab.activeIcon : tab.icon)}
+                    size={17}
+                    color={isTabLocked ? '#94A3B8' : (isActive ? tab.color : (isDark ? '#94A3B8' : '#64748B'))}
                   />
                 </View>
 
@@ -1430,17 +1965,17 @@ export default function CustomerDetailScreen() {
                     numberOfLines={1}
                     style={[
                       {
-                        fontSize: 11,
+                        fontSize: 10.5,
                         fontWeight: isActive ? '700' : '600',
-                        color: isQuotationLocked ? '#94A3B8' : (isActive ? '#0F172A' : (isDark ? '#94A3B8' : '#64748B')),
+                        color: isTabLocked ? '#94A3B8' : (isActive ? '#0F172A' : (isDark ? '#94A3B8' : '#64748B')),
                       },
-                      isDark && isActive && !isQuotationLocked && { color: '#FFFFFF' }
+                      isDark && isActive && !isTabLocked && { color: '#FFFFFF' }
                     ]}
                   >
                     {tab.label}
                   </Text>
-                  {isQuotationLocked && (
-                    <Ionicons name="lock-closed" size={10} color="#94A3B8" style={{ marginLeft: 2 }} />
+                  {isTabLocked && (
+                    <Ionicons name="lock-closed" size={9} color="#94A3B8" style={{ marginLeft: 2 }} />
                   )}
                 </View>
               </TouchableOpacity>
@@ -1670,199 +2205,253 @@ export default function CustomerDetailScreen() {
                 </View>
 
                 {/* Confirmed / Locked Quotation Alert Banner */}
-                {app?.confirmedQuoteId && (
-                  isAdminOrMaster && app?.unlockRequested ? (
-                    /* Admin Approval Card when Employee Requested Edit */
-                    <View style={{
-                      backgroundColor: isDark ? '#451A03' : '#FEF3C7',
-                      borderColor: '#F59E0B',
-                      borderWidth: 1.5,
-                      borderRadius: 14,
-                      padding: 12,
-                      marginBottom: 14,
-                    }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
-                        <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: isDark ? '#78350F' : '#FDE68A', justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
-                          <Ionicons name="alert-circle" size={20} color="#D97706" />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ fontSize: 13, fontWeight: '800', color: isDark ? '#FDE68A' : '#92400E' }}>
-                            Edit Request from {app.unlockRequestedBy || 'Technician'}
-                          </Text>
-                          <Text style={{ fontSize: 11, color: isDark ? '#FCD34D' : '#B45309', marginTop: 1 }}>
-                            Submitted {app.unlockRequestedAt || 'recently'} • Wants to edit locked quote
-                          </Text>
-                        </View>
-                      </View>
-                      <View style={{ flexDirection: 'row', gap: 8, justifyContent: 'flex-end' }}>
-                        <TouchableOpacity
-                          onPress={() => {
-                            Alert.alert(
-                              'Dismiss Request',
-                              'Are you sure you want to dismiss this edit request without unlocking?',
-                              [
-                                { text: 'Cancel', style: 'cancel' },
-                                { text: 'Dismiss', onPress: () => resolveQuotationUnlockRequest(app.id, false) }
-                              ]
-                            );
-                          }}
-                          style={{
-                            paddingHorizontal: 12,
-                            paddingVertical: 7,
-                            borderRadius: 8,
-                            backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
-                            borderWidth: 1,
-                            borderColor: isDark ? '#334155' : '#D1D5DB',
-                          }}
-                          activeOpacity={0.8}
-                        >
-                          <Text style={{ fontSize: 11.5, fontWeight: '700', color: isDark ? '#CBD5E1' : '#64748B' }}>Dismiss</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          onPress={() => {
-                            Alert.alert(
-                              'Approve & Unlock?',
-                              'Do you want to approve this request and unlock the quotation for editing?',
-                              [
-                                { text: 'Cancel', style: 'cancel' },
-                                { text: 'Approve & Unlock', onPress: () => resolveQuotationUnlockRequest(app.id, true) }
-                              ]
-                            );
-                          }}
-                          style={{
-                            paddingHorizontal: 14,
-                            paddingVertical: 7,
-                            borderRadius: 8,
-                            backgroundColor: '#059669',
-                          }}
-                          activeOpacity={0.8}
-                        >
-                          <Text style={{ fontSize: 11.5, fontWeight: '800', color: '#FFFFFF' }}>✓ Approve & Unlock</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  ) : (
-                    /* Standard Confirmed Quote Banner */
-                    <View style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      backgroundColor: isDark ? '#064E3B' : '#ECFDF5',
-                      borderColor: '#6EE7B7',
-                      borderWidth: 1,
-                      borderRadius: 14,
-                      padding: 12,
-                      marginBottom: 14,
-                    }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8 }}>
-                        <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: isDark ? '#047857' : '#D1FAE5', justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
-                          <Ionicons name="lock-closed" size={18} color="#059669" />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ fontSize: 13, fontWeight: '800', color: isDark ? '#A7F3D0' : '#065F46' }}>
-                            Confirmed & Locked Quote
-                          </Text>
-                          <Text style={{ fontSize: 11, color: isDark ? '#6EE7B7' : '#047857', marginTop: 1 }} numberOfLines={1}>
-                            {quotationsList.find(q => q.id === app.confirmedQuoteId)?.quoteFor || 'Confirmed Package'} • {quotationsList.find(q => q.id === app.confirmedQuoteId)?.revisionLabel || 'Revision #1'}
-                          </Text>
-                        </View>
-                      </View>
+                {(() => {
+                  const confirmedQuoteObj = quotationsList.find(q => String(q.id) === String(app?.confirmedQuoteId) || q.isConfirmed);
+                  if (!confirmedQuoteObj && !app?.confirmedQuoteId) return null;
+                  const confirmedQId = confirmedQuoteObj?.id || app?.confirmedQuoteId;
 
-                      {!isInitialPaymentReceived && (
-                        isAdminOrMaster ? (
-                          /* Admin can unlock directly */
-                          <TouchableOpacity
-                            onPress={() => {
-                              setLockConfirmModal({
-                                visible: true,
-                                actionType: 'unlock',
-                                title: 'Unlock Quotation?',
-                                message: 'Do you want to unlock this quotation to allow selecting or editing other package tiers and revisions?',
-                                quoteId: app.confirmedQuoteId,
-                                confirmText: 'Unlock',
-                                cancelText: 'Cancel',
-                              });
-                            }}
-                            style={{
-                              backgroundColor: '#FFFFFF',
-                              paddingHorizontal: 12,
-                              paddingVertical: 6,
-                              borderRadius: 8,
-                              borderWidth: 1,
-                              borderColor: '#A7F3D0',
-                            }}
-                            activeOpacity={0.8}
-                          >
-                            <Text style={{ fontSize: 11, fontWeight: '800', color: '#059669' }}>Unlock</Text>
-                          </TouchableOpacity>
-                        ) : app?.unlockRequested ? (
-                          /* Employee: Request Pending */
+                  return (
+                    isAdminOrMaster && app?.unlockRequested ? (
+                      /* Admin Approval Card when Employee Requested Edit */
+                      <View style={{
+                        backgroundColor: isDark ? '#451A03' : '#FEF3C7',
+                        borderColor: '#F59E0B',
+                        borderWidth: 1.5,
+                        borderRadius: 14,
+                        padding: 12,
+                        marginBottom: 14,
+                      }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+                          <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: isDark ? '#78350F' : '#FDE68A', justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
+                            <Ionicons name="alert-circle" size={20} color="#D97706" />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 13, fontWeight: '800', color: isDark ? '#FDE68A' : '#92400E' }}>
+                              Edit Request from {app.unlockRequestedBy || 'Technician'}
+                            </Text>
+                            <Text style={{ fontSize: 11, color: isDark ? '#FCD34D' : '#B45309', marginTop: 1 }}>
+                              Submitted {app.unlockRequestedAt || 'recently'} • Wants to edit locked quote
+                            </Text>
+                          </View>
+                        </View>
+                        <View style={{ flexDirection: 'row', gap: 8, justifyContent: 'flex-end' }}>
                           <TouchableOpacity
                             onPress={() => {
                               Alert.alert(
-                                'Request Pending ⏳',
-                                'Your request to edit this quotation has been submitted to Admin/Master and is awaiting approval.'
-                              );
-                            }}
-                            style={{
-                              backgroundColor: '#FEF3C7',
-                              paddingHorizontal: 10,
-                              paddingVertical: 6,
-                              borderRadius: 8,
-                              borderWidth: 1,
-                              borderColor: '#FCD34D',
-                            }}
-                            activeOpacity={0.8}
-                          >
-                            <Text style={{ fontSize: 11, fontWeight: '800', color: '#B45309' }}>⏳ Edit Requested</Text>
-                          </TouchableOpacity>
-                        ) : (
-                          /* Employee: Request to Edit Button */
-                          <TouchableOpacity
-                            onPress={() => {
-                              Alert.alert(
-                                'Request to Edit',
-                                'This quotation is confirmed and locked. Only Admin or Master can unlock it. Would you like to submit a request to edit?',
+                                'Dismiss Request',
+                                'Are you sure you want to dismiss this edit request without unlocking?',
                                 [
                                   { text: 'Cancel', style: 'cancel' },
-                                  {
-                                    text: 'Submit Request',
-                                    onPress: () => {
-                                      requestQuotationUnlock(app.id, app.confirmedQuoteId, currentUser?.name || 'Technician');
-                                      showAlert('Request Submitted', 'Your request to edit this quotation has been sent to Admin/Master.', 'success');
-                                    }
-                                  }
+                                  { text: 'Dismiss', onPress: () => resolveQuotationUnlockRequest(app.id, false) }
                                 ]
                               );
                             }}
                             style={{
-                              backgroundColor: '#FFFFFF',
-                              paddingHorizontal: 10,
-                              paddingVertical: 6,
+                              paddingHorizontal: 12,
+                              paddingVertical: 7,
                               borderRadius: 8,
+                              backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
                               borderWidth: 1,
-                              borderColor: '#A7F3D0',
+                              borderColor: isDark ? '#334155' : '#D1D5DB',
                             }}
                             activeOpacity={0.8}
                           >
-                            <Text style={{ fontSize: 11, fontWeight: '800', color: '#059669' }}>Request to Edit</Text>
+                            <Text style={{ fontSize: 11.5, fontWeight: '700', color: isDark ? '#CBD5E1' : '#64748B' }}>Dismiss</Text>
                           </TouchableOpacity>
-                        )
-                      )}
-                    </View>
-                  )
-                )}
+                          <TouchableOpacity
+                            onPress={() => {
+                              Alert.alert(
+                                'Approve & Unlock?',
+                                'Do you want to approve this request and unlock the quotation for editing?',
+                                [
+                                  { text: 'Cancel', style: 'cancel' },
+                                  { text: 'Approve & Unlock', onPress: () => resolveQuotationUnlockRequest(app.id, true) }
+                                ]
+                              );
+                            }}
+                            style={{
+                              paddingHorizontal: 14,
+                              paddingVertical: 7,
+                              borderRadius: 8,
+                              backgroundColor: '#059669',
+                            }}
+                            activeOpacity={0.8}
+                          >
+                            <Text style={{ fontSize: 11.5, fontWeight: '800', color: '#FFFFFF' }}>✓ Approve & Unlock</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ) : (
+                      /* Standard Confirmed Quote Banner */
+                      <View style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        backgroundColor: isDark ? '#064E3B' : '#ECFDF5',
+                        borderColor: '#6EE7B7',
+                        borderWidth: 1,
+                        borderRadius: 14,
+                        padding: 12,
+                        marginBottom: 14,
+                      }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8 }}>
+                          <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: isDark ? '#047857' : '#D1FAE5', justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
+                            <Ionicons name="lock-closed" size={18} color="#059669" />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 13, fontWeight: '800', color: isDark ? '#A7F3D0' : '#065F46' }}>
+                              Confirmed & Locked Quote
+                            </Text>
+                            <Text style={{ fontSize: 11, color: isDark ? '#6EE7B7' : '#047857', marginTop: 1 }} numberOfLines={1}>
+                              {confirmedQuoteObj?.quoteFor || confirmedQuoteObj?.packageName || 'Confirmed Package'} • {confirmedQuoteObj?.revisionLabel || 'Revision #1'}
+                            </Text>
+                          </View>
+                        </View>
+
+                        {!isInitialPaymentReceived && (
+                          isAdminOrMaster ? (
+                            /* Admin can unlock directly */
+                            <TouchableOpacity
+                              onPress={() => {
+                                setLockConfirmModal({
+                                  visible: true,
+                                  actionType: 'unlock',
+                                  title: 'Unlock Quotation?',
+                                  message: 'Do you want to unlock this quotation to allow selecting or editing other package tiers and revisions?',
+                                  quoteId: confirmedQId,
+                                  confirmText: 'Unlock',
+                                  cancelText: 'Cancel',
+                                });
+                              }}
+                              style={{
+                                backgroundColor: '#FFFFFF',
+                                paddingHorizontal: 12,
+                                paddingVertical: 6,
+                                borderRadius: 8,
+                                borderWidth: 1,
+                                borderColor: '#A7F3D0',
+                              }}
+                              activeOpacity={0.8}
+                            >
+                              <Text style={{ fontSize: 11, fontWeight: '800', color: '#059669' }}>Unlock</Text>
+                            </TouchableOpacity>
+                          ) : app?.unlockRequested ? (
+                            /* Employee: Request Pending */
+                            <TouchableOpacity
+                              onPress={() => {
+                                Alert.alert(
+                                  'Request Pending ⏳',
+                                  'Your request to edit this quotation has been submitted to Admin/Master and is awaiting approval.'
+                                );
+                              }}
+                              style={{
+                                backgroundColor: '#FEF3C7',
+                                paddingHorizontal: 10,
+                                paddingVertical: 6,
+                                borderRadius: 8,
+                                borderWidth: 1,
+                                borderColor: '#FCD34D',
+                              }}
+                              activeOpacity={0.8}
+                            >
+                              <Text style={{ fontSize: 11, fontWeight: '800', color: '#D97706' }}>Request Pending</Text>
+                            </TouchableOpacity>
+                          ) : (
+                            /* Employee: Request to Edit */
+                            <TouchableOpacity
+                              onPress={() => {
+                                Alert.alert(
+                                  'Quotation Locked',
+                                  'This quotation is confirmed and locked. Only Admin or Master can unlock it. Would you like to submit a request to edit?',
+                                  [
+                                    { text: 'Cancel', style: 'cancel' },
+                                    {
+                                      text: 'Request to Edit',
+                                      onPress: () => {
+                                        requestQuotationUnlock(app.id, confirmedQId, currentUser?.name || 'Technician');
+                                        showAlert('Request Submitted', 'Your request to edit this quotation has been sent to Admin.', 'success');
+                                      }
+                                    }
+                                  ]
+                                );
+                              }}
+                              style={{
+                                backgroundColor: '#FFFFFF',
+                                paddingHorizontal: 10,
+                                paddingVertical: 6,
+                                borderRadius: 8,
+                                borderWidth: 1,
+                                borderColor: '#A7F3D0',
+                              }}
+                              activeOpacity={0.8}
+                            >
+                              <Text style={{ fontSize: 11, fontWeight: '800', color: '#059669' }}>Request to Edit</Text>
+                            </TouchableOpacity>
+                          )
+                        )}
+                      </View>
+                    )
+                  );
+                })()}
 
                 {/* Render Tier Sections Separated by Packages from API */}
-                {displayPackages.map((tierCfg) => {
+                {displayPackages.length === 0 ? (
+
+                  <View style={{
+                    backgroundColor: isDark ? '#141414' : '#FFFFFF',
+                    borderRadius: 18,
+                    padding: 24,
+                    alignItems: 'center',
+                    borderWidth: 1,
+                    borderColor: isDark ? '#262626' : '#E2E8F0',
+                    marginTop: 4,
+                  }}>
+                    <View style={{
+                      width: 56,
+                      height: 56,
+                      borderRadius: 28,
+                      backgroundColor: isDark ? '#1E293B' : '#EFF6FF',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      marginBottom: 12,
+                    }}>
+                      <Ionicons name="document-text-outline" size={28} color="#2563EB" />
+                    </View>
+                    <Text style={{ fontSize: 16, fontWeight: '700', color: isDark ? '#FFFFFF' : '#0F172A', marginBottom: 6, textAlign: 'center' }}>
+                      No Quotations Created Yet
+                    </Text>
+                    <Text style={{ fontSize: 13, color: isDark ? '#94A3B8' : '#64748B', textAlign: 'center', marginBottom: 16, lineHeight: 18, paddingHorizontal: 10 }}>
+                      Tap below to select package tiers and create a quotation.
+                    </Text>
+                    {!isInitialPaymentReceived && (
+                      <TouchableOpacity
+                        style={{
+                          backgroundColor: '#2563EB',
+                          paddingVertical: 10,
+                          paddingHorizontal: 20,
+                          borderRadius: 12,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                        }}
+                        onPress={() => handleOpenSelectTiersModal(['economic', 'premium', 'elite'])}
+                        activeOpacity={0.85}
+                      >
+                        <Ionicons name="add-circle-outline" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
+                        <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>Create Quotation</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ) : (
+                  displayPackages.map((tierCfg) => {
                   const tierQuotes = quotationsList.filter(q => getQuoteTierCategory(q).toLowerCase() === tierCfg.id.toLowerCase());
                   const sortedTierQuotes = [...tierQuotes].sort((a, b) => {
-                    if (a.id === app?.confirmedQuoteId) return -1;
-                    if (b.id === app?.confirmedQuoteId) return 1;
+                    if (String(a.id) === String(app?.confirmedQuoteId) || a.isConfirmed) return -1;
+                    if (String(b.id) === String(app?.confirmedQuoteId) || b.isConfirmed) return 1;
                     return (Number(b.revisionNo || b.revision || 0)) - (Number(a.revisionNo || a.revision || 0));
                   });
                   const currentQuote = sortedTierQuotes[0];
                   const previousRevisions = sortedTierQuotes.slice(1);
+                  const isAnyConfirmed = Boolean(app?.confirmedQuoteId || quotationsList.some(q => q.isConfirmed || q.status === 'CONFIRMED'));
 
                   return (
                     <View
@@ -1963,9 +2552,19 @@ export default function CustomerDetailScreen() {
                           {(() => {
                             const quote = currentQuote;
                             const revLabel = quote.revisionLabel || `Revision #${quote.revisionNo || quote.revision || sortedTierQuotes.length}`;
-                            const isConfirmed = app?.confirmedQuoteId === quote.id;
-                            const isAnyConfirmed = Boolean(app?.confirmedQuoteId);
+                            const isConfirmed = String(app?.confirmedQuoteId) === String(quote.id) || Boolean(quote.isConfirmed);
+                            const isAnyConfirmed = Boolean(app?.confirmedQuoteId || quotationsList.some(q => q.isConfirmed));
                             const isLocked = isAnyConfirmed && !isConfirmed;
+                            const isQuoteLocked = Boolean(
+                              isConfirmed ||
+                              isLocked ||
+                              quote.isLocked ||
+                              quote.status === 'CONFIRMED' ||
+                              quote.status === 'LOCKED' ||
+                              isInitialPaymentReceived ||
+                              (payView?.isConfirmed && String(payView?.id) === String(quote.id)) ||
+                              payView?.isReceiptLocked
+                            );
                             const sCount = quote.servicesList?.length || 0;
 
                             return (
@@ -2164,6 +2763,7 @@ export default function CustomerDetailScreen() {
                                               actionType: 'lock',
                                               title: 'Confirm & Lock Quotation?',
                                               message: `Are you sure you want to confirm this ${tierCfg.title} (${revLabel}) and lock the project to this quote?`,
+                                              warningNote: 'Note: All other quotations for this project will be deleted.',
                                               quoteId: quote.id,
                                               confirmText: 'Confirm & Lock',
                                               cancelText: 'Cancel',
@@ -2190,6 +2790,7 @@ export default function CustomerDetailScreen() {
 
                                       {/* Edit Button */}
                                       <TouchableOpacity
+                                        disabled={isQuoteLocked}
                                         style={{
                                           flex: 0.9,
                                           flexDirection: 'row',
@@ -2201,50 +2802,20 @@ export default function CustomerDetailScreen() {
                                           borderRadius: 8,
                                           borderWidth: 1,
                                           borderColor: isDark ? '#334155' : '#CBD5E1',
-                                          opacity: isLocked ? 0.5 : 1,
+                                          opacity: isQuoteLocked ? 0.45 : 1,
                                         }}
                                         onPress={() => {
-                                          if (isLocked) {
-                                            if (isAdminOrMaster) {
-                                              setLockConfirmModal({
-                                                visible: true,
-                                                actionType: 'switch',
-                                                title: 'Quotation Locked',
-                                                message: 'Another quotation is currently confirmed and locked for this customer. Unlock it first or switch confirmation to this quote.',
-                                                quoteId: quote.id,
-                                                confirmText: 'Switch Confirmation',
-                                                cancelText: 'Cancel',
-                                              });
-                                            } else if (app?.unlockRequested) {
-                                              Alert.alert(
-                                                'Request Pending ⏳',
-                                                'Your request to edit this project has been submitted to Admin/Master and is awaiting approval.'
-                                              );
-                                            } else {
-                                              Alert.alert(
-                                                'Quotation Locked',
-                                                'A quotation is currently confirmed and locked for this customer. Only Admin or Master can unlock it. Would you like to submit a request to edit?',
-                                                [
-                                                  { text: 'Cancel', style: 'cancel' },
-                                                  {
-                                                    text: 'Request to Edit',
-                                                    onPress: () => {
-                                                      requestQuotationUnlock(app.id, quote.id, currentUser?.name || 'Technician');
-                                                      showAlert('Request Submitted', 'Your request to edit has been sent to Admin.', 'success');
-                                                    }
-                                                  }
-                                                ]
-                                              );
-                                            }
-                                          } else {
-                                            const targetQId = quote.id || quote.quotationId;
-                                            router.push({ pathname: '/edit-quotation', params: { id: targetQId, quoteId: targetQId, appointmentId: app.appointmentId || app.id, customerId: app.id } });
+                                          if (isQuoteLocked) {
+                                            Alert.alert('Quotation Locked', 'This quotation is locked and cannot be edited.');
+                                            return;
                                           }
+                                          const targetQId = quote.id || quote.quotationId;
+                                          router.push({ pathname: '/edit-quotation', params: { id: targetQId, quoteId: targetQId, appointmentId: app.appointmentId || app.id, customerId: app.id } });
                                         }}
-                                        activeOpacity={0.8}
+                                        activeOpacity={isQuoteLocked ? 1 : 0.8}
                                       >
-                                        <Ionicons name={isLocked ? "lock-closed" : "pencil"} size={12} color={isDark ? '#CBD5E1' : '#475569'} style={{ marginRight: 3 }} />
-                                        <Text style={{ fontSize: 11.5, fontWeight: '700', color: isDark ? '#CBD5E1' : '#475569' }}>{isLocked ? 'Locked' : 'Edit'}</Text>
+                                        <Ionicons name={isQuoteLocked ? "lock-closed" : "pencil"} size={12} color={isDark ? '#CBD5E1' : '#475569'} style={{ marginRight: 3 }} />
+                                        <Text style={{ fontSize: 11.5, fontWeight: '700', color: isDark ? '#CBD5E1' : '#475569' }}>{isQuoteLocked ? 'Locked' : 'Edit'}</Text>
                                       </TouchableOpacity>
 
                                       {/* View PDF Button */}
@@ -2291,6 +2862,16 @@ export default function CustomerDetailScreen() {
                               {previousRevisions.map((revQuote, rIdx) => {
                                 const rRevLabel = revQuote.revisionLabel || `Revision #${revQuote.revisionNo || revQuote.revision || (previousRevisions.length - rIdx)}`;
                                 const rAmount = Math.round(revQuote.total != null ? revQuote.total : (revQuote.amount != null ? revQuote.amount : (revQuote.totalAmount || 0)));
+
+                                const isRevQuoteLocked = Boolean(
+                                  isAnyConfirmed ||
+                                  isInitialPaymentReceived ||
+                                  revQuote.isConfirmed ||
+                                  revQuote.isLocked ||
+                                  revQuote.status === 'CONFIRMED' ||
+                                  revQuote.status === 'LOCKED' ||
+                                  payView?.isReceiptLocked
+                                );
 
                                 return (
                                   <View
@@ -2389,6 +2970,7 @@ export default function CustomerDetailScreen() {
 
                                       {!isInitialPaymentReceived && (
                                         <TouchableOpacity
+                                          disabled={isRevQuoteLocked}
                                           style={{
                                             flex: 1,
                                             flexDirection: 'row',
@@ -2397,15 +2979,22 @@ export default function CustomerDetailScreen() {
                                             paddingVertical: 5,
                                             backgroundColor: isDark ? '#262626' : '#F1F5F9',
                                             borderRadius: 6,
+                                            opacity: isRevQuoteLocked ? 0.45 : 1,
                                           }}
                                           onPress={() => {
+                                            if (isRevQuoteLocked) {
+                                              Alert.alert('Quotation Locked', 'This quotation is locked and cannot be edited.');
+                                              return;
+                                            }
                                             const targetQId = revQuote.id || revQuote.quotationId;
                                             router.push({ pathname: '/edit-quotation', params: { id: targetQId, quoteId: targetQId, appointmentId: app.appointmentId || app.id, customerId: app.id } });
                                           }}
-                                          activeOpacity={0.8}
+                                          activeOpacity={isRevQuoteLocked ? 1 : 0.8}
                                         >
-                                          <Ionicons name="pencil-outline" size={12} color={isDark ? '#CBD5E1' : '#475569'} style={{ marginRight: 3 }} />
-                                          <Text style={{ fontSize: 10.5, fontWeight: '700', color: isDark ? '#CBD5E1' : '#475569' }}>Revise</Text>
+                                          <Ionicons name={isRevQuoteLocked ? "lock-closed-outline" : "pencil-outline"} size={12} color={isDark ? '#CBD5E1' : '#475569'} style={{ marginRight: 3 }} />
+                                          <Text style={{ fontSize: 10.5, fontWeight: '700', color: isDark ? '#CBD5E1' : '#475569' }}>
+                                            {isRevQuoteLocked ? 'Locked' : 'Revise'}
+                                          </Text>
                                         </TouchableOpacity>
                                       )}
                                     </View>
@@ -2418,7 +3007,9 @@ export default function CustomerDetailScreen() {
                       )}
                     </View>
                   );
-                })}
+                })
+                )}
+
 
                 {/* Bottom Action: Initial Payment Received Button / Locked Status Banner */}
                 <View style={{ marginTop: 10, marginBottom: 16 }}>
@@ -2472,7 +3063,7 @@ export default function CustomerDetailScreen() {
                         </View>
                         <View style={{ flex: 1 }}>
                           <Text style={{ fontSize: 14, fontWeight: '800', color: isDark ? '#A7F3D0' : '#065F46' }}>
-                            Initial Payment Received ✅ (Locked)
+                            Initial Payment Received (Locked)
                           </Text>
                           <Text style={{ fontSize: 12, color: isDark ? '#6EE7B7' : '#047857', marginTop: 2 }}>
                             Quotation & customer details locked. Only PDF viewing is allowed.
@@ -2514,9 +3105,9 @@ export default function CustomerDetailScreen() {
                 </TouchableOpacity>
               </View>
             ) : (
-              /* ACTIVE PAYMENTS BREAKDOWN & EXTRA CHARGES */
+              /* ACTIVE PAYMENTS BREAKDOWN */
               (() => {
-                const dynamicCategoryTotal = calculateCategoryTotal(chosenCategory) || app.totalPayment || 118000;
+                const dynamicCategoryTotal = calculateCategoryTotal(chosenCategory) || app.totalPayment || app.totalCost || app.cost || 0;
 
                 // If fullPaid is true, we just set the paid amount to the full amount
                 const isFullPaid = Boolean(app.fullPaid);
@@ -2525,13 +3116,18 @@ export default function CustomerDetailScreen() {
                 const baseM1 = Math.round(dynamicCategoryTotal * 0.5);
                 const baseM2 = Math.round(dynamicCategoryTotal * 0.4);
 
+                // Booking Advance
+                const advanceAmt = app.advancePaid
+                  ? Number(app.advancePaidAmount || app.advanceDetails?.amount || Math.round(dynamicCategoryTotal * 0.1))
+                  : 0;
+
                 // M1 (Initial 50%) - use custom paid amount if paid
                 const m1Amt = app.initialPaid && !isFullPaid
                   ? Number(app.initialPaidAmount || app.initialPaidDetails?.amount || baseM1)
                   : baseM1;
 
                 const expectedM1 = app.initialPaid && !isFullPaid ? m1Amt : baseM1;
-                const expectedRemainingAfterM1 = Math.max(0, dynamicCategoryTotal - expectedM1);
+                const expectedRemainingAfterM1 = Math.max(0, dynamicCategoryTotal - advanceAmt - expectedM1);
 
                 // M2 (Mid-Term 40%) - capped at remaining balance after M1
                 const m2Amt = app.midTermPaid && !isFullPaid
@@ -2546,283 +3142,1913 @@ export default function CustomerDetailScreen() {
                   ? Number(app.finalPaidAmount || app.finalPaidDetails?.amount || expectedRemainingAfterM2)
                   : expectedRemainingAfterM2;
 
-                const totalPaidSoFar = isFullPaid ? fullPaidAmt : ((app.initialPaid ? m1Amt : 0) + (app.midTermPaid ? m2Amt : 0) + (app.finalPaid ? m3Amt : 0));
-                const remainingBalance = Math.max(0, dynamicCategoryTotal - totalPaidSoFar);
-                const paidPercentage = Math.min(100, Math.round((totalPaidSoFar / dynamicCategoryTotal) * 100));
+                const calcPaidSoFar = isFullPaid
+                  ? fullPaidAmt
+                  : (advanceAmt + (app.initialPaid ? m1Amt : 0) + (app.midTermPaid ? m2Amt : 0) + (app.finalPaid ? m3Amt : 0));
+                const calcRemaining = Math.max(0, dynamicCategoryTotal - calcPaidSoFar);
 
-                return (
-                  <>
-                    {/* Header Title Bar */}
-                    <View style={{ marginBottom: 14, paddingHorizontal: 4 }}>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                        <Text style={{ fontSize: 16, fontWeight: '500', color: isDark ? '#FFFFFF' : '#0F172A', flex: 1, marginRight: 8 }}>
-                          Payment Breakdown
+                const totalCostValue = payView ? (payView.totalWithGst || payView.totalPrice || dynamicCategoryTotal) : dynamicCategoryTotal;
+                const totalPaidSoFar = payView ? (payView.totalPaid ?? calcPaidSoFar) : calcPaidSoFar;
+                const remainingBalance = payView ? (payView.balanceAmount ?? calcRemaining) : calcRemaining;
+                const paidPercentage = totalCostValue > 0 ? Math.min(100, Math.round((totalPaidSoFar / totalCostValue) * 100)) : 0;
+
+                const allServiceKeys = [
+                  ...(Array.isArray(payView?.services) ? payView.services.map((s, i) => s.id || `svc_${i}`) : []),
+                  ...(Array.isArray(payView?.additionalPayment) ? payView.additionalPayment.map((s, i) => s.id || `add_${i}`) : []),
+                ];
+                const isAllExpanded = allServiceKeys.length > 0 && allServiceKeys.every((k) => Boolean(expandedServiceReceipts[k]));
+
+                const isAllServicesCompleted =
+                  Array.isArray(payView?.services) && payView.services.length > 0
+                    ? payView.services.every((s) => s.status === 'COMPLETED' || Number(s.balanceAmount || 0) <= 0)
+                    : false;
+
+                const isFullPaymentFinished =
+                  Boolean(app?.fullPaid) ||
+                  (remainingBalance <= 0 && totalCostValue > 0) ||
+                  paidPercentage === 100 ||
+                  isAllServicesCompleted;
+
+                const baseTotalValue = payView ? (payView.totalPrice || dynamicCategoryTotal) : dynamicCategoryTotal;
+
+                const gstPaymentsList = (Array.isArray(payView?.withGstPayments) && payView.withGstPayments.length > 0)
+                  ? payView.withGstPayments
+                  : (Array.isArray(payView?.gstPayments) && payView.gstPayments.length > 0)
+                    ? payView.gstPayments
+                    : (Array.isArray(payView?.gstPayment?.payments) && payView.gstPayment.payments.length > 0)
+                      ? payView.gstPayment.payments
+                      : (Array.isArray(payView?.withGstPayment?.payments) && payView.withGstPayment.payments.length > 0)
+                        ? payView.withGstPayment.payments
+                        : (Array.isArray(app?.gstPayments) && app.gstPayments.length > 0)
+                          ? app.gstPayments
+                          : [];
+
+                const actualGstPaymentsSum = gstPaymentsList.reduce((acc, p) => acc + Number(p.amount || 0), 0);
+                const apiGstPaidAmount = Number(
+                  payView?.gstPayment?.paidAmount ??
+                  payView?.withGstPayment?.paidAmount ??
+                  payView?.gstPaidAmount ??
+                  app?.gstPaidAmount ??
+                  app?.gstPaidDetails?.amount ??
+                  0
+                );
+                const gstPaidAmount = actualGstPaymentsSum > 0 ? actualGstPaymentsSum : Math.max(0, apiGstPaidAmount);
+
+                const isGstPaid = (gstPaidAmount > 0 || gstPaymentsList.length > 0) && Boolean(
+                  app?.gstPaid ||
+                  (app?.gstPaidDetails && Number(app.gstPaidDetails.amount || 0) > 0) ||
+                  (payView?.withGst && Number(payView?.gstAmount || 0) > 0) ||
+                  payView?.isGstConfirmed ||
+                  payView?.gstStatus === 'PAID' ||
+                  payView?.gstStatus === 'COMPLETED' ||
+                  payView?.gstPaid
+                );
+
+                const hasPendingVerification = Boolean(
+                  payView?.hasUnverifiedPayments ||
+                  (payView?.unverifiedPaymentCount && Number(payView.unverifiedPaymentCount) > 0) ||
+                  (Array.isArray(payView?.services) &&
+                    payView.services.some((svc) =>
+                      Array.isArray(svc.payments) &&
+                      svc.payments.some((p) => p.isVerified === false || p.verificationStatus === 'pending')
+                    )) ||
+                  (Array.isArray(payView?.additionalPayment) &&
+                    payView.additionalPayment.some((svc) =>
+                      Array.isArray(svc.payments) &&
+                      svc.payments.some((p) => p.isVerified === false || p.verificationStatus === 'pending')
+                    )) ||
+                  (Array.isArray(gstPaymentsList) &&
+                    gstPaymentsList.some((p) => p.isVerified === false || p.verificationStatus === 'pending')) ||
+                  app?.verificationStatus === 'pending' ||
+                  (app?.fullPaid && app?.isVerified === false) ||
+                  (Array.isArray(app?.payments) &&
+                    app.payments.some((p) => p.isVerified === false || p.verificationStatus === 'pending')) ||
+                  (app?.advanceDetails && (app.advanceDetails.isVerified === false || app.advanceDetails.verificationStatus === 'pending')) ||
+                  (app?.initialPaidDetails && (app.initialPaidDetails.isVerified === false || app.initialPaidDetails.verificationStatus === 'pending')) ||
+                  (app?.midTermPaidDetails && (app.midTermPaidDetails.isVerified === false || app.midTermPaidDetails.verificationStatus === 'pending')) ||
+                  (app?.finalPaidDetails && (app.finalPaidDetails.isVerified === false || app.finalPaidDetails.verificationStatus === 'pending')) ||
+                  (app?.fullPaidDetails && (app.fullPaidDetails.isVerified === false || app.fullPaidDetails.verificationStatus === 'pending'))
+                );
+
+                const gstPercentVal =
+                  payView?.gstPayment?.gstPercentage ||
+                  payView?.withGstPayment?.gstPercentage ||
+                  payView?.gstPercentage ||
+                  app?.gstPercentage ||
+                  app?.gstPaidDetails?.gstPercentage ||
+                  app?.finalPaidDetails?.gstPercentage ||
+                  '18';
+                const gstPaymentMethod =
+                  gstPaymentsList?.[0]?.paymentMethod ||
+                  payView?.gstPayment?.paymentType ||
+                  payView?.settlement?.paymentMethod ||
+                  app?.gstPaidDetails?.paymentMethod ||
+                  app?.finalPaidDetails?.paymentMethod ||
+                  'UPI';
+                const gstPaymentDate =
+                  gstPaymentsList?.[0]?.date ||
+                  payView?.settlement?.paymentDate ||
+                  app?.gstPaidDetails?.paymentDate ||
+                  app?.finalPaidDetails?.paymentDate ||
+                  formatDateDDMMYY(new Date());
+                const gstVerificationStatus =
+                  gstPaymentsList?.[0]?.isVerified !== undefined
+                    ? (gstPaymentsList[0].isVerified ? 'verified' : 'pending')
+                    : (app?.gstPaidDetails?.verificationStatus || app?.finalPaidDetails?.verificationStatus || 'pending');
+                const customerGstNumber =
+                  payView?.customerGstNumber ||
+                  app?.gstin ||
+                  app?.gstNumber ||
+                  app?.customerGstNumber ||
+                  '';
+
+                const renderStandaloneGstCard = () => {
+                  if (!isGstPaid || (gstPaidAmount <= 0 && gstPaymentsList.length === 0)) return null;
+                  return (
+                    <View style={{ marginTop: 12 }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingHorizontal: 2 }}>
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#94A3B8' : '#64748B', letterSpacing: 0.5 }}>
+                          GST TAX CLEARANCE
                         </Text>
-
-                        <TouchableOpacity
-                          style={{ backgroundColor: '#0052CC', paddingVertical: 12, paddingHorizontal: 12, borderRadius: 8, flexDirection: 'row', alignItems: 'center', }}
-                          onPress={() => router.push({ pathname: '/payment-form', params: { id: app.id, totalCost: dynamicCategoryTotal } })}
-                          activeOpacity={0.85}
-                        >
-                          <Ionicons name="add" size={16} color="#FFFFFF" style={{ marginRight: 2 }} />
-                          <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '600' }}>Add Payment</Text>
-                        </TouchableOpacity>
                       </View>
 
-                      {/* Cumulative Payment Progress Card */}
-                      <View style={{ backgroundColor: isDark ? '#1C1C1C' : '#F8FAFC', borderRadius: 14, padding: 12, borderWidth: 1, borderColor: isDark ? '#334155' : '#E2E8F0' }}>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                          <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B' }}>
-                            Total Project Cost: <Text style={{ fontSize: '15', fontWeight: '700', color: isDark ? '#FFFFFF' : '#0F172A' }}>₹{dynamicCategoryTotal.toLocaleString()}</Text>
-                          </Text>
-                          <Text style={{ fontSize: 12, fontWeight: '600', color: paidPercentage === 100 ? '#10B981' : '#0052CC' }}>
-                            {paidPercentage}% Paid
-                          </Text>
-                        </View>
-
-                        {/* Progress Bar */}
-                        <View style={{ height: 6, backgroundColor: isDark ? '#334155' : '#E2E8F0', borderRadius: 3, overflow: 'hidden', marginBottom: 6 }}>
-                          <View style={{ height: '100%', width: `${paidPercentage}%`, backgroundColor: paidPercentage === 100 ? '#10B981' : '#0052CC', borderRadius: 3 }} />
-                        </View>
-
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <Text style={{ fontSize: 11, color: '#16A34A', fontWeight: '600' }}>
-                            Paid So Far: ₹{totalPaidSoFar.toLocaleString()}
-                          </Text>
-                          <Text style={{ fontSize: 11, color: remainingBalance > 0 ? '#D97706' : '#16A34A', fontWeight: '700' }}>
-                            {remainingBalance > 0 ? `Remaining: ₹${remainingBalance.toLocaleString()}` : 'Bill Cleared ✅'}
-                          </Text>
-                        </View>
-                      </View>
-                    </View>
-
-                    {/* Milestones List */}
-                    {isFullPaid ? (
                       <View
                         style={{
-                          backgroundColor: isDark ? '#1C1C1C' : '#FFFFFF',
+                          backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
                           borderRadius: 16,
                           padding: 14,
-                          marginBottom: 12,
-                          borderWidth: 1,
-                          borderColor: isDark ? '#334155' : '#E2E8F0',
+                          marginBottom: 10,
+                          borderWidth: 1.5,
+                          borderColor: isDark ? '#166534' : '#86EFAC',
+                          shadowColor: '#000',
+                          shadowOpacity: 0.03,
+                          shadowOffset: { width: 0, height: 1 },
+                          shadowRadius: 4,
+                          elevation: 1,
                         }}
                       >
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <View style={{ flex: 1, paddingRight: 8 }}>
-                            <Text style={{ fontSize: 14, fontWeight: '500', paddingBottom: 2, color: isDark ? '#FFFFFF' : '#0F172A' }}>
-                              1. Full Project Payment (100%)
-                            </Text>
-                            <Text style={{ fontSize: 16, fontWeight: '500', color: '#0052CC', marginTop: 3 }}>
-                              ₹{fullPaidAmt.toLocaleString()}
-                            </Text>
+                        {/* Top row: Title, GSTIN, and Verification Status */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, marginRight: 8 }}>
+                            <View
+                              style={{
+                                width: 28,
+                                height: 28,
+                                borderRadius: 14,
+                                backgroundColor: '#DCFCE7',
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                              }}
+                            >
+                              <Ionicons name="shield-checkmark" size={15} color="#16A34A" />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ fontSize: 13, fontWeight: '700', color: isDark ? '#FFFFFF' : '#0F172A' }} numberOfLines={1}>
+                                GST Tax Clearance ({gstPercentVal}%)
+                              </Text>
+                              <Text style={{ fontSize: 11, color: isDark ? '#94A3B8' : '#64748B', marginTop: 1 }}>
+                                CGST 9%: ₹{Math.round(gstPaidAmount / 2).toLocaleString('en-IN')} • SGST 9%: ₹{Math.round(gstPaidAmount / 2).toLocaleString('en-IN')}
+                              </Text>
+                              {customerGstNumber ? (
+                                <Text style={{ fontSize: 11, fontWeight: '600', color: '#1E488F', marginTop: 2 }}>
+                                  GSTIN: {customerGstNumber}
+                                </Text>
+                              ) : null}
+                            </View>
                           </View>
 
-                          <View style={{ alignItems: 'flex-end' }}>
+                          <View
+                            style={{
+                              backgroundColor: gstVerificationStatus === 'verified' ? '#ECFDF5' : '#FFFBEB',
+                              borderWidth: 1,
+                              borderColor: gstVerificationStatus === 'verified' ? '#A7F3D0' : '#FDE68A',
+                              paddingHorizontal: 8,
+                              paddingVertical: 3,
+                              borderRadius: 9999,
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                          >
+                            <Ionicons
+                              name={gstVerificationStatus === 'verified' ? 'checkmark-circle' : 'time'}
+                              size={11}
+                              color={gstVerificationStatus === 'verified' ? '#047857' : '#D97706'}
+                            />
+                            <Text
+                              style={{
+                                color: gstVerificationStatus === 'verified' ? '#047857' : '#D97706',
+                                fontSize: 10,
+                                fontWeight: '700',
+                              }}
+                            >
+                              {gstVerificationStatus === 'verified' ? 'Verified' : 'Pending'}
+                            </Text>
+                          </View>
+                        </View>
+
+                        {/* Financial stats row */}
+                        <View
+                          style={{
+                            flexDirection: 'row',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            marginTop: 12,
+                            paddingTop: 10,
+                            borderTopWidth: 1,
+                            borderTopColor: isDark ? '#334155' : '#F1F5F9',
+                          }}
+                        >
+                          <View>
+                            <Text style={{ fontSize: 10, color: isDark ? '#94A3B8' : '#64748B', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                              Total GST
+                            </Text>
+                            <Text style={{ fontSize: 13, fontWeight: '700', color: isDark ? '#E2E8F0' : '#0F172A', marginTop: 2 }}>
+                              ₹{gstPaidAmount.toLocaleString('en-IN')}
+                            </Text>
+                          </View>
+                          <View>
+                            <Text style={{ fontSize: 10, color: isDark ? '#94A3B8' : '#64748B', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                              Paid
+                            </Text>
+                            <Text style={{ fontSize: 13, fontWeight: '700', color: '#16A34A', marginTop: 2 }}>
+                              ₹{gstPaidAmount.toLocaleString('en-IN')}
+                            </Text>
+                          </View>
+                          <View>
+                            <Text style={{ fontSize: 10, color: isDark ? '#94A3B8' : '#64748B', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                              Balance
+                            </Text>
+                            <Text style={{ fontSize: 13, fontWeight: '700', color: isDark ? '#94A3B8' : '#64748B', marginTop: 2 }}>
+                              ₹0
+                            </Text>
+                          </View>
+                        </View>
+
+                        {/* Expand/Collapse Receipts Button */}
+                        <TouchableOpacity
+                          onPress={() => toggleServiceReceipts('gst_clearance')}
+                          activeOpacity={0.7}
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            marginTop: 10,
+                            paddingTop: 8,
+                            borderTopWidth: 1,
+                            borderTopColor: isDark ? '#334155' : '#F1F5F9',
+                          }}
+                        >
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <Ionicons name="receipt-outline" size={13} color="#1E488F" />
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#1E488F' }}>
+                              GST Payment Receipts ({gstPaymentsList.length})
+                            </Text>
+                          </View>
+                          <Ionicons
+                            name={expandedServiceReceipts['gst_clearance'] ? 'chevron-up' : 'chevron-down'}
+                            size={14}
+                            color="#1E488F"
+                          />
+                        </TouchableOpacity>
+
+                        {/* Expanded Receipts List */}
+                        {expandedServiceReceipts['gst_clearance'] && (
+                          <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: isDark ? '#334155' : '#F1F5F9' }}>
+                            {gstPaymentsList.map((gPay, gIdx) => {
+                              const pMethod = gPay.paymentMethod || gstPaymentMethod;
+                              const pVoucher = gPay.voucher || gPay.transactionId || app?.gstPaidDetails?.transactionId || `GST-${gIdx + 1}`;
+                              const pAmount = Number(gPay.amount || gstPaidAmount);
+                              const isVerified = gPay.isVerified ?? (gstVerificationStatus === 'verified');
+
+                              return (
+                                <View
+                                  key={gPay.id || `gst_pay_${gIdx}`}
+                                  style={{
+                                    backgroundColor: isDark ? '#0F172A' : '#F8FAFC',
+                                    borderRadius: 12,
+                                    padding: 10,
+                                    marginBottom: 8,
+                                    borderWidth: 1,
+                                    borderColor: isDark ? '#334155' : '#E2E8F0',
+                                  }}
+                                >
+                                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, marginRight: 8 }}>
+                                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: isVerified ? '#10B981' : '#F59E0B' }} />
+                                      <Text style={{ fontSize: 11, fontWeight: '700', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                                        Receipt #{gIdx + 1}
+                                      </Text>
+                                      <View style={{ backgroundColor: isDark ? '#1E293B' : '#E0E7FF', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
+                                        <Text style={{ color: '#3730A3', fontSize: 9, fontWeight: '700' }}>{pMethod}</Text>
+                                      </View>
+                                    </View>
+
+                                    {isVerified ? (
+                                      <View style={{ backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 9999, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                        <Ionicons name="checkmark-circle" size={10} color="#047857" />
+                                        <Text style={{ color: '#047857', fontSize: 10, fontWeight: '700' }}>Verified</Text>
+                                      </View>
+                                    ) : (
+                                      <View style={{ backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 9999, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                        <Ionicons name="time" size={10} color="#D97706" />
+                                        <Text style={{ color: '#D97706', fontSize: 10, fontWeight: '700' }}>Pending</Text>
+                                      </View>
+                                    )}
+                                  </View>
+
+                                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 6 }}>
+                                    <Text style={{ fontSize: 14, fontWeight: '800', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                                      ₹{pAmount.toLocaleString('en-IN')}
+                                    </Text>
+                                    <Text style={{ fontSize: 10, color: isDark ? '#94A3B8' : '#64748B' }}>
+                                      Voucher: {pVoucher}
+                                    </Text>
+                                  </View>
+
+                                  {!isVerified && (
+                                    <View style={{ marginTop: 8, paddingTop: 6, borderTopWidth: 1, borderTopColor: isDark ? '#1E293B' : '#E2E8F0' }}>
+                                      {isAdminOrMaster ? (
+                                        <TouchableOpacity
+                                          style={{
+                                            height: 32,
+                                            borderRadius: 8,
+                                            backgroundColor: '#059669',
+                                            flexDirection: 'row',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            gap: 6,
+                                          }}
+                                          onPress={() => {
+                                            const qId = payView?.id || app?.confirmedQuoteId || app?.activeQuotationId;
+                                            router.push({
+                                              pathname: '/payment-verification',
+                                              params: {
+                                                id: app?.id,
+                                                quotationId: qId || '',
+                                                paymentId: gPay.id,
+                                                amount: String(pAmount),
+                                                stage: 'GST Tax Clearance',
+                                                voucher: pVoucher,
+                                                method: pMethod,
+                                                date: gstPaymentDate,
+                                                isGst: 'true',
+                                              },
+                                            });
+                                          }}
+                                          activeOpacity={0.8}
+                                        >
+                                          <Ionicons name="shield-checkmark" size={13} color="#FFFFFF" />
+                                          <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '700' }}>Review & Verify Payment</Text>
+                                        </TouchableOpacity>
+                                      ) : (
+                                        <View
+                                          style={{
+                                            backgroundColor: isDark ? 'rgba(245, 158, 11, 0.1)' : '#FFFBEB',
+                                            borderColor: isDark ? '#78350F' : '#FDE68A',
+                                            borderWidth: 1,
+                                            borderRadius: 8,
+                                            paddingVertical: 6,
+                                            paddingHorizontal: 8,
+                                            flexDirection: 'row',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            gap: 6,
+                                          }}
+                                        >
+                                          <Ionicons name="lock-closed" size={12} color="#D97706" />
+                                          <Text style={{ fontSize: 10, fontWeight: '700', color: isDark ? '#FBBF24' : '#B45309' }}>
+                                            Admin Verification Needed (Receipt Locked)
+                                          </Text>
+                                        </View>
+                                      )}
+                                    </View>
+                                  )}
+                                </View>
+                              );
+                            })}
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  );
+                };
+
+                const renderFullReceiptActionButton = () => {
+                  if (!isFullPaymentFinished) return null;
+
+                  // Do not show Generate Full Receipt button if any payment verification is pending
+                  if (!isReceiptGenerated && hasPendingVerification) {
+                    return null;
+                  }
+
+                  const receiptNumber =
+                    payView?.receiptNumber ||
+                    app?.receiptNumber ||
+                    `REC-${app?.id || '101'}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
+
+                  const quoteIdVal =
+                    payView?.id ||
+                    app?.confirmedQuoteId ||
+                    app?.activeQuotationId ||
+                    (Array.isArray(app?.quotations) && app.quotations.find((q) => q.isConfirmed)?.id) ||
+                    '';
+
+                  const settledAmount = isGstPaid
+                    ? Number(baseTotalValue) + Number(gstPaidAmount)
+                    : Number(totalPaidSoFar || baseTotalValue);
+
+                  if (isReceiptGenerated) {
+                    return (
+                      <View style={{ marginBottom: 14, marginTop: 10 }}>
+                        <View
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            marginBottom: 8,
+                            paddingHorizontal: 2,
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 12,
+                              fontWeight: '700',
+                              color: isDark ? '#94A3B8' : '#64748B',
+                              letterSpacing: 0.5,
+                            }}
+                          >
+                            FULL RECEIPT
+                          </Text>
+                        </View>
+
+                        {/* Generated Full Receipt Details Card */}
+                        <View
+                          style={{
+                            backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+                            borderRadius: 16,
+                            padding: 14,
+                            borderWidth: 1.5,
+                            borderColor: isDark ? '#1E3A8A' : '#BFDBFE',
+                            shadowColor: '#000',
+                            shadowOpacity: 0.04,
+                            shadowOffset: { width: 0, height: 2 },
+                            shadowRadius: 5,
+                            elevation: 2,
+                            gap: 12,
+                          }}
+                        >
+                          {/* Receipt Info Header */}
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                              <View
+                                style={{
+                                  width: 36,
+                                  height: 36,
+                                  borderRadius: 10,
+                                  backgroundColor: isDark ? '#1E3A8A' : '#EFF6FF',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                }}
+                              >
+                                <Ionicons name="document-text" size={20} color="#21498B" />
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <Text
+                                  style={{
+                                    fontSize: 13,
+                                    fontWeight: '700',
+                                    color: isDark ? '#FFFFFF' : '#0F172A',
+                                  }}
+                                  numberOfLines={1}
+                                >
+                                  {isGstPaid ? 'Final Tax Invoice (with GST)' : 'Full Settlement Receipt'}
+                                </Text>
+                                <Text
+                                  style={{
+                                    fontSize: 11,
+                                    fontWeight: '600',
+                                    color: '#21498B',
+                                    marginTop: 1,
+                                  }}
+                                >
+                                  #{receiptNumber}
+                                </Text>
+                              </View>
+                            </View>
+
+                            <View style={{ alignItems: 'flex-end' }}>
+                              <Text style={{ fontSize: 10, color: isDark ? '#94A3B8' : '#64748B', fontWeight: '500' }}>
+                                Settled Amount
+                              </Text>
+                              <Text style={{ fontSize: 15, fontWeight: '800', color: '#16A34A', marginTop: 1 }}>
+                                ₹{settledAmount.toLocaleString('en-IN')}
+                              </Text>
+                            </View>
+                          </View>
+
+                          {/* Action Buttons: View Full Receipt & Share */}
+                          <View style={{ flexDirection: 'row', gap: 10, marginTop: 2 }}>
                             <TouchableOpacity
-                              style={{ backgroundColor: '#10B981', paddingVertical: 12, paddingHorizontal: 12, borderRadius: 8, flexDirection: 'row', alignItems: 'center', }}
-                              onPress={() => router.push({ pathname: '/receipt', params: { id: app.id, milestone: 'fullPaid', amount: fullPaidAmt, stage: 'Full Project Payment (100%)' } })}
+                              style={{
+                                flex: 1,
+                                height: 42,
+                                borderRadius: 12,
+                                backgroundColor: '#21498B',
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: 6,
+                                shadowColor: '#21498B',
+                                shadowOpacity: 0.2,
+                                shadowOffset: { width: 0, height: 2 },
+                                shadowRadius: 3,
+                                elevation: 2,
+                              }}
+                              onPress={() => {
+                                router.push({
+                                  pathname: '/receipt',
+                                  params: {
+                                    id: app?.id,
+                                    quotationId: quoteIdVal || '',
+                                    isFullServiceReceipt: 'true',
+                                    stage: isGstPaid ? 'Full Project Settlement (with GST)' : 'Full Project Settlement',
+                                    hasGst: isGstPaid ? 'true' : 'false',
+                                    gstPercent: String(gstPercentVal),
+                                    gstPaidAmount: String(gstPaidAmount),
+                                    amount: String(settledAmount),
+                                    totalCost: String(settledAmount),
+                                    gstNumber: customerGstNumber,
+                                    receiptNumber: receiptNumber,
+                                  },
+                                });
+                              }}
                               activeOpacity={0.8}
                             >
-                              <Ionicons name="receipt-outline" size={14} color="#FFFFFF" style={{ marginRight: 4 }} />
-                              <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '800' }}>Receipt</Text>
+                              <Ionicons name="eye-outline" size={16} color="#FFFFFF" />
+                              <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>
+                                View Full Receipt
+                              </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              style={{
+                                flex: 0.85,
+                                height: 42,
+                                borderRadius: 12,
+                                borderWidth: 1.5,
+                                borderColor: isDark ? '#334155' : '#CBD5E1',
+                                backgroundColor: isDark ? '#0F172A' : '#F8FAFC',
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: 6,
+                              }}
+                              onPress={() => {
+                                router.push({
+                                  pathname: '/receipt',
+                                  params: {
+                                    id: app?.id,
+                                    quotationId: quoteIdVal || '',
+                                    isFullServiceReceipt: 'true',
+                                    stage: isGstPaid ? 'Full Project Settlement (with GST)' : 'Full Project Settlement',
+                                    hasGst: isGstPaid ? 'true' : 'false',
+                                    gstPercent: String(gstPercentVal),
+                                    gstPaidAmount: String(gstPaidAmount),
+                                    amount: String(settledAmount),
+                                    totalCost: String(settledAmount),
+                                    gstNumber: customerGstNumber,
+                                    receiptNumber: receiptNumber,
+                                    autoShare: 'true',
+                                  },
+                                });
+                              }}
+                              activeOpacity={0.8}
+                            >
+                              <Ionicons name="share-social-outline" size={16} color={isDark ? '#E2E8F0' : '#334155'} />
+                              <Text style={{ color: isDark ? '#E2E8F0' : '#334155', fontSize: 13, fontWeight: '700' }}>
+                                Share
+                              </Text>
                             </TouchableOpacity>
                           </View>
                         </View>
                       </View>
-                    ) : (
-                      [
-                        {
-                          id: 'initialPaid',
-                          num: '1',
-                          title: 'Initial Advance (50%)',
-                          amount: m1Amt,
-                          isPaid: Boolean(app.initialPaid),
-                        },
-                        {
-                          id: 'midTermPaid',
-                          num: '2',
-                          title: 'Mid-Term Completion (40%)',
-                          amount: m2Amt,
-                          isPaid: Boolean(app.midTermPaid),
-                        },
-                        {
-                          id: 'finalPaid',
-                          num: '3',
-                          title: 'Final Settlement (10%)',
-                          amount: m3Amt,
-                          isPaid: Boolean(app.finalPaid),
-                        },
-                      ].map((m) => (
-                        <View
-                          key={m.id}
+                    );
+                  }
+
+                  return (
+                    <View style={{ marginBottom: 14, marginTop: 10 }}>
+                      <View
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          marginBottom: 8,
+                          paddingHorizontal: 2,
+                        }}
+                      >
+                        <Text
                           style={{
-                            backgroundColor: isDark ? '#1C1C1C' : '#FFFFFF',
-                            borderRadius: 16,
-                            padding: 14,
-                            marginBottom: 12,
-                            borderWidth: 1,
-                            borderColor: isDark ? '#334155' : '#E2E8F0',
+                            fontSize: 12,
+                            fontWeight: '700',
+                            color: isDark ? '#94A3B8' : '#64748B',
+                            letterSpacing: 0.5,
                           }}
                         >
-                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <View style={{ flex: 1, paddingRight: 8 }}>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                <Text style={{ fontSize: 14, fontWeight: '500', paddingBottom: 2, color: isDark ? '#FFFFFF' : '#0F172A' }}>
-                                  {m.num}. {m.title}
+                          FULL RECEIPT
+                        </Text>
+                        <View
+                          style={{
+                            backgroundColor: '#DCFCE7',
+                            paddingHorizontal: 8,
+                            paddingVertical: 2,
+                            borderRadius: 9999,
+                          }}
+                        >
+                          <Text style={{ color: '#166534', fontSize: 10, fontWeight: '700' }}>
+                            ✓ Full Payment Completed
+                          </Text>
+                        </View>
+                      </View>
+
+                      <TouchableOpacity
+                        style={{
+                          height: 48,
+                          borderRadius: 14,
+                          backgroundColor: '#21498B',
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 8,
+                          shadowColor: '#21498B',
+                          shadowOpacity: 0.25,
+                          shadowOffset: { width: 0, height: 2 },
+                          shadowRadius: 4,
+                          elevation: 2,
+                        }}
+                        onPress={isGstPaid ? handleOpenFullReceiptWithGstModal : handleOpenFullReceiptModal}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="receipt-outline" size={18} color="#FFFFFF" />
+                        <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '700' }}>
+                          {isGstPaid ? 'Generate Full Receipt with GST' : 'Generate Full Receipt'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  );
+                };
+
+                return (
+                  <>
+                    {/* Header Title Bar */}
+                    <View style={{ marginBottom: 12, paddingHorizontal: 2 }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                        <Text style={{ fontSize: 18, fontWeight: '700', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                          Payment Breakdown
+                        </Text>
+                        {hasPendingVerification && (
+                          <View
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 5,
+                              backgroundColor: isDark ? 'rgba(245, 158, 11, 0.18)' : '#FEF3C7',
+                              borderWidth: 1,
+                              borderColor: isDark ? '#78350F' : '#FDE68A',
+                              paddingHorizontal: 10,
+                              paddingVertical: 3.5,
+                              borderRadius: 9999,
+                            }}
+                          >
+                            <Ionicons name="time-outline" size={13} color="#D97706" />
+                            <Text style={{ fontSize: 11.5, fontWeight: '700', color: '#D97706' }}>
+                              Verification Pending
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+
+                      {/* Total Project Cost Card (Single Card per strict user constraint) */}
+                      <View
+                        style={{
+                          backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+                          borderRadius: 20,
+                          padding: 16,
+                          borderWidth: 1,
+                          borderColor: isDark ? '#334155' : '#E2E8F0',
+                          shadowColor: '#000',
+                          shadowOpacity: 0.04,
+                          shadowOffset: { width: 0, height: 2 },
+                          shadowRadius: 6,
+                          elevation: 2,
+                        }}
+                      >
+                        {/* Top Row: Total Cost & Paid Percentage / Badge */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                          <View>
+                            <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', fontWeight: '500' }}>
+                              Total Project Cost
+                            </Text>
+                            <Text style={{ fontSize: 22, fontWeight: '800', color: isDark ? '#FFFFFF' : '#0F172A', marginTop: 2 }}>
+                              ₹{totalCostValue.toLocaleString()}
+                            </Text>
+                          </View>
+
+                          {paidPercentage === 100 ? (
+                            <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                              <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 9999, borderWidth: 1, borderColor: '#86EFAC' }}>
+                                <Text style={{ color: '#166534', fontSize: 12, fontWeight: '700' }}>✓ 100% Paid</Text>
+                              </View>
+                            </View>
+                          ) : paidPercentage > 0 ? (
+                            <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                              <View style={{ backgroundColor: '#EFF6FF', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 9999, borderWidth: 1, borderColor: '#BFDBFE' }}>
+                                <Text style={{ color: '#1E488F', fontSize: 12, fontWeight: '700' }}>{paidPercentage}% Paid</Text>
+                              </View>
+                            </View>
+                          ) : (
+                            <Text style={{ fontSize: 13, fontWeight: '700', color: '#1E488F' }}>0% Paid</Text>
+                          )}
+                        </View>
+
+                        {/* Progress Bar Track */}
+                        <View style={{ height: 8, backgroundColor: isDark ? '#334155' : '#E2E8F0', borderRadius: 4, overflow: 'hidden', marginVertical: 8 }}>
+                          <View
+                            style={{
+                              height: '100%',
+                              width: `${paidPercentage}%`,
+                              backgroundColor: paidPercentage === 100 ? '#10B981' : '#1E488F',
+                              borderRadius: 4,
+                            }}
+                          />
+                        </View>
+
+                        {/* Metric Boxes Row */}
+                        <View style={{ flexDirection: 'row', gap: 10, marginTop: 6 }}>
+                          <View
+                            style={{
+                              flex: 1,
+                              backgroundColor: isDark ? '#064E3B' : 'rgba(236, 253, 245, 0.8)',
+                              borderWidth: 1,
+                              borderColor: isDark ? '#047857' : '#A7F3D0',
+                              borderRadius: 12,
+                              padding: 10,
+                            }}
+                          >
+                            <Text style={{ fontSize: 11, fontWeight: '600', color: '#047857' }}>Paid So Far</Text>
+                            <Text style={{ fontSize: 15, fontWeight: '800', color: '#047857', marginTop: 2 }}>
+                              ₹{totalPaidSoFar.toLocaleString()}
+                            </Text>
+                          </View>
+
+                          <View
+                            style={{
+                              flex: 1,
+                              backgroundColor: isDark ? (remainingBalance > 0 ? '#78350F' : '#1E293B') : (remainingBalance > 0 ? 'rgba(254, 243, 199, 0.8)' : '#F8FAFC'),
+                              borderWidth: 1,
+                              borderColor: isDark ? (remainingBalance > 0 ? '#B45309' : '#334155') : (remainingBalance > 0 ? '#FDE68A' : '#E2E8F0'),
+                              borderRadius: 12,
+                              padding: 10,
+                            }}
+                          >
+                            <Text style={{ fontSize: 11, fontWeight: '600', color: remainingBalance > 0 ? '#B45309' : '#64748B' }}>
+                              Remaining
+                            </Text>
+                            <Text style={{ fontSize: 15, fontWeight: '800', color: remainingBalance > 0 ? '#B45309' : '#64748B', marginTop: 2 }}>
+                              ₹{remainingBalance.toLocaleString()}
+                            </Text>
+                          </View>
+                        </View>
+
+                        {/* Office Verification Pending Banner (If awaiting verification) */}
+                        {Boolean(app.verificationStatus === 'pending' || (app.finalPaid && !app.isVerified)) && (
+                          <TouchableOpacity
+                            style={{
+                              marginTop: 12,
+                              paddingTop: 12,
+                              borderTopWidth: 1,
+                              borderTopColor: isDark ? '#334155' : '#F1F5F9',
+                            }}
+                            onPress={() => router.push({
+                              pathname: '/payment-verification',
+                              params: {
+                                id: app.id,
+                                amount: m3Amt,
+                                quotationId: app.confirmedQuoteId || app.activeQuotationId || payView?.id,
+                              },
+                            })}
+                            activeOpacity={0.8}
+                          >
+                            <View
+                              style={{
+                                backgroundColor: '#FFFBEB',
+                                borderWidth: 1,
+                                borderColor: '#FDE68A',
+                                borderRadius: 14,
+                                padding: 12,
+                                flexDirection: 'row',
+                                alignItems: 'flex-start',
+                              }}
+                            >
+                              <View
+                                style={{
+                                  width: 28,
+                                  height: 28,
+                                  borderRadius: 8,
+                                  backgroundColor: '#FEF3C7',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  marginRight: 10,
+                                  marginTop: 1,
+                                }}
+                              >
+                                <Ionicons name="alert-circle" size={18} color="#D97706" />
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#92400E' }}>
+                                    Awaiting Admin Verification
+                                  </Text>
+                                  <View style={{ backgroundColor: 'rgba(245, 158, 11, 0.25)', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }}>
+                                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#B45309' }}>In Review</Text>
+                                  </View>
+                                </View>
+                                <Text style={{ fontSize: 11, color: '#92400E', marginTop: 3, lineHeight: 15 }}>
+                                  Final payment submitted by executive. Office team must verify payment & completion proof to unlock <Text style={{ fontWeight: '700' }}>Warranty Activation</Text>.
                                 </Text>
-                                {m.isPaid && (
-                                  <View style={{ backgroundColor: '#DCFCE7', borderRadius: 6, paddingVertical: 2, paddingHorizontal: 6 }}>
-                                    <Text style={{ color: '#16A34A', fontSize: 10, fontWeight: '700' }}>Paid</Text>
+                              </View>
+                            </View>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+
+                      {/* Action button: Additional Payment (below the payment Breakdown card, hidden once Full Receipt is created) */}
+                      {!isReceiptGenerated && (
+                        <TouchableOpacity
+                          style={{
+                            height: 46,
+                            borderRadius: 14,
+                            borderWidth: 1.5,
+                            borderColor: '#21498B',
+                            backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 6,
+                            marginTop: 10,
+                            marginBottom: 4,
+                          }}
+                          onPress={() => {
+                            const qId = app?.confirmedQuoteId || app?.activeQuotationId
+                              || (Array.isArray(app?.quotations) && app.quotations.find((q) => q.isConfirmed)?.id)
+                              || payView?.id
+                              || null;
+                            router.push({ pathname: '/additional-payment', params: { id: app.id, totalCost: dynamicCategoryTotal, quotationId: qId || '' } });
+                          }}
+                          activeOpacity={0.8}
+                        >
+                          <Ionicons name="add" size={18} color="#21498B" />
+                          <Text style={{ color: '#21498B', fontSize: 13, fontWeight: '700' }}>Additional Payment</Text>
+                        </TouchableOpacity>
+                      )}
+
+                      {/* API v2: Sequential Scope Progress Cards */}
+                      {Array.isArray(payView?.services) && payView.services.length > 0 && (
+                        <View style={{ marginTop: 14 }}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingHorizontal: 2 }}>
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#94A3B8' : '#64748B', letterSpacing: 0.5 }}>
+                              SCOPE & SERVICE PROGRESS
+                            </Text>
+                          </View>
+
+                          {payView.services.map((svc, sIdx) => {
+                            const isCompleted = svc.status === 'COMPLETED' || (Number(svc.balanceAmount) === 0 && Number(svc.totalPrice) > 0);
+                            const isActive = payView.currentActiveServiceId === svc.id || (!isCompleted && sIdx === 0);
+                            const isLocked = !isCompleted && !isActive;
+                            const svcKey = svc.id || `svc_${sIdx}`;
+                            const isExpanded = Boolean(expandedServiceReceipts[svcKey]);
+                            const servicePayments = Array.isArray(svc.payments) ? svc.payments : [];
+                            const paymentCount = servicePayments.length;
+                            const paidPct = svc.totalPrice > 0 ? Math.min(100, Math.round((Number(svc.paidAmount || 0) / Number(svc.totalPrice)) * 100)) : (isCompleted ? 100 : 0);
+                            const rateVal = svc.rate || (svc.sqft > 0 && svc.totalPrice > 0 ? Math.round(Number(svc.totalPrice) / Number(svc.sqft)) : null);
+
+                            return (
+                              <View
+                                key={svcKey}
+                                style={{
+                                  backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+                                  borderRadius: 16,
+                                  padding: 14,
+                                  marginBottom: 10,
+                                  borderWidth: 1,
+                                  borderColor: isActive ? '#2557C7' : (isDark ? '#334155' : '#E2E8F0'),
+                                  shadowColor: '#000',
+                                  shadowOpacity: 0.03,
+                                  shadowOffset: { width: 0, height: 1 },
+                                  shadowRadius: 4,
+                                  elevation: 1,
+                                }}
+                              >
+                                {/* Service Info & Tap-to-Pay Trigger (Clicking service opens payment page) */}
+                                <TouchableOpacity
+                                  activeOpacity={0.75}
+                                  onPress={() => {
+                                    const qId = payView?.id
+                                      || app?.confirmedQuoteId
+                                      || app?.activeQuotationId
+                                      || (Array.isArray(app?.quotations) && app.quotations.find((q) => q.isConfirmed)?.id)
+                                      || null;
+                                    router.push({
+                                      pathname: '/payment-form',
+                                      params: {
+                                        id: app.id,
+                                        totalCost: dynamicCategoryTotal,
+                                        quotationId: qId || '',
+                                        serviceId: svc.id ? String(svc.id) : '',
+                                        service: svc.title || svc.name || '',
+                                        serviceName: svc.title || svc.name || '',
+                                        amount: (svc.balanceAmount != null && Number(svc.balanceAmount) > 0)
+                                          ? String(Math.round(Number(svc.balanceAmount)))
+                                          : '',
+                                      },
+                                    });
+                                  }}
+                                >
+                                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, marginRight: 8 }}>
+                                      <View style={{
+                                        width: 26,
+                                        height: 26,
+                                        borderRadius: 13,
+                                        backgroundColor: isCompleted ? '#DCFCE7' : (isActive ? '#EFF6FF' : '#F1F5F9'),
+                                        justifyContent: 'center',
+                                        alignItems: 'center',
+                                      }}>
+                                        <Ionicons
+                                          name={isCompleted ? 'checkmark' : (isActive ? 'play' : 'card-outline')}
+                                          size={13}
+                                          color={isCompleted ? '#16A34A' : (isActive ? '#1E488F' : '#64748B')}
+                                        />
+                                      </View>
+                                      <View style={{ flex: 1 }}>
+                                        <Text style={{ fontSize: 13, fontWeight: '700', color: isDark ? '#FFFFFF' : '#0F172A' }} numberOfLines={1}>
+                                          {svc.title || `Service ${sIdx + 1}`}
+                                        </Text>
+                                        {(svc.sqft > 0 || rateVal) && (
+                                          <Text style={{ fontSize: 11, color: isDark ? '#94A3B8' : '#64748B', marginTop: 1 }}>
+                                            {svc.sqft > 0 ? `${svc.sqft} sq.ft` : ''}{svc.sqft > 0 && rateVal ? ' • ' : ''}{rateVal ? `₹${rateVal}/sq.ft` : ''}
+                                          </Text>
+                                        )}
+                                      </View>
+                                    </View>
+
+                                    <View style={{
+                                      backgroundColor: isCompleted ? '#DCFCE7' : '#EFF6FF',
+                                      paddingHorizontal: 8,
+                                      paddingVertical: 3,
+                                      borderRadius: 9999,
+                                      flexDirection: 'row',
+                                      alignItems: 'center',
+                                      gap: 3,
+                                    }}>
+                                      <Text style={{
+                                        fontSize: 10,
+                                        fontWeight: '700',
+                                        color: isCompleted ? '#166534' : '#1E488F',
+                                      }}>
+                                        {isCompleted ? 'COMPLETED' : 'PAYABLE NOW'}
+                                      </Text>
+                                      {!isCompleted && (
+                                        <Ionicons name="chevron-forward" size={11} color="#1E488F" />
+                                      )}
+                                    </View>
+                                  </View>
+
+                                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: isDark ? '#334155' : '#F1F5F9' }}>
+                                    <View>
+                                      <Text style={{ fontSize: 10, color: isDark ? '#94A3B8' : '#64748B' }}>Total</Text>
+                                      <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                                        ₹{(svc.totalPrice || 0).toLocaleString()}
+                                      </Text>
+                                    </View>
+                                    <View>
+                                      <Text style={{ fontSize: 10, color: isDark ? '#94A3B8' : '#64748B' }}>Paid</Text>
+                                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#16A34A' }}>
+                                        ₹{(svc.paidAmount || 0).toLocaleString()}
+                                      </Text>
+                                    </View>
+                                    <View>
+                                      <Text style={{ fontSize: 10, color: isDark ? '#94A3B8' : '#64748B' }}>Balance</Text>
+                                      <Text style={{ fontSize: 12, fontWeight: '700', color: (svc.balanceAmount || 0) > 0 ? '#DC2626' : '#16A34A' }}>
+                                        ₹{(svc.balanceAmount || 0).toLocaleString()}
+                                      </Text>
+                                    </View>
+                                  </View>
+
+                                  {/* Progress Bar */}
+                                  <View style={{ marginTop: 8, height: 4, backgroundColor: isDark ? '#334155' : '#F1F5F9', borderRadius: 2, overflow: 'hidden' }}>
+                                    <View style={{ width: `${paidPct}%`, height: '100%', backgroundColor: isCompleted ? '#16A34A' : '#2557C7', borderRadius: 2 }} />
+                                  </View>
+                                </TouchableOpacity>
+
+                                {/* Payment Receipts Dropdown Toggle */}
+                                <TouchableOpacity
+                                  onPress={() => toggleServiceReceipts(svcKey)}
+                                  activeOpacity={0.7}
+                                  style={{
+                                    flexDirection: 'row',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    marginTop: 10,
+                                    paddingTop: 10,
+                                    borderTopWidth: 1,
+                                    borderTopColor: isDark ? '#334155' : '#F1F5F9',
+                                  }}
+                                >
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                    <Ionicons name="receipt-outline" size={14} color={paymentCount > 0 ? '#1E488F' : '#94A3B8'} />
+                                    <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                                      Payment Receipts
+                                    </Text>
+                                    <View style={{
+                                      backgroundColor: paymentCount > 0 ? (isDark ? '#1E3A8A' : '#EFF6FF') : (isDark ? '#334155' : '#F1F5F9'),
+                                      paddingHorizontal: 7,
+                                      paddingVertical: 1.5,
+                                      borderRadius: 9999,
+                                    }}>
+                                      <Text style={{
+                                        fontSize: 10,
+                                        fontWeight: '700',
+                                        color: paymentCount > 0 ? (isDark ? '#93C5FD' : '#1E488F') : (isDark ? '#94A3B8' : '#64748B'),
+                                      }}>
+                                        {paymentCount}
+                                      </Text>
+                                    </View>
+                                  </View>
+
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#1E488F' }}>
+                                      {isExpanded ? 'Hide' : 'View'}
+                                    </Text>
+                                    <Ionicons
+                                      name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                                      size={14}
+                                      color="#1E488F"
+                                    />
+                                  </View>
+                                </TouchableOpacity>
+
+                                {/* Expanded Receipts Container */}
+                                {isExpanded && (
+                                  <View style={{ marginTop: 8 }}>
+                                    {paymentCount === 0 ? (
+                                      <View style={{ padding: 12, borderRadius: 10, backgroundColor: isDark ? '#0F172A' : '#F8FAFC', alignItems: 'center', borderWidth: 1, borderColor: isDark ? '#334155' : '#E2E8F0' }}>
+                                        <Text style={{ fontSize: 11, color: isDark ? '#94A3B8' : '#64748B' }}>
+                                          No payment receipts recorded for this service yet.
+                                        </Text>
+                                      </View>
+                                    ) : (
+                                      servicePayments.map((p, pIdx) => {
+                                        const pId = p.id || `pay_${svc.id}_${pIdx}`;
+                                        const pDate = p.createdAt ? formatDateDDMMYY(new Date(p.createdAt)) : formatDateDDMMYY(new Date());
+                                        const pVoucher = p.voucher || p.upiId || (p.accountId ? `Acc #${p.accountId}` : (p.id ? String(p.id).slice(0, 8) : 'N/A'));
+                                        const pMethod = p.paymentMethod || 'CASH';
+                                        const pAmount = Number(p.amount || 0);
+                                        const isVerified = Boolean(p.isVerified);
+                                        const rawProof = p.proofImageUrl || p.proof?.proofImageUrl || p.proofImage || p.proof?.proofImage || p.referenceImage || null;
+                                        const resolvedProof = resolveProofImageUrl(rawProof);
+
+                                        const receiptItem = {
+                                          id: pId,
+                                          stage: svc.title || 'Service Payment',
+                                          pct: `${svc.totalPrice > 0 ? Math.round((pAmount / Number(svc.totalPrice)) * 100) : 0}%`,
+                                          amount: pAmount,
+                                          date: pDate,
+                                          method: pMethod,
+                                          voucher: pVoucher,
+                                          previousPaymentId: p.previousPaymentId || null,
+                                          proofImage: rawProof,
+                                          proofImageUrl: resolvedProof,
+                                          referenceImage: resolvedProof,
+                                          isVerified,
+                                          verifiedBy: p.verifiedBy || null,
+                                          verifiedAt: p.verifiedAt || null,
+                                          quotationId: payView?.id || app?.confirmedQuoteId || app?.activeQuotationId,
+                                          serviceId: svc.id,
+                                          serviceTitle: svc.title,
+                                          sqft: svc.sqft,
+                                          rate: svc.rate,
+                                          totalCost: svc.totalPrice,
+                                          details: p,
+                                          isBlockchain: true,
+                                        };
+
+                                        return (
+                                          <TouchableOpacity
+                                            key={pId}
+                                            onPress={() => setSelectedPaymentDetailModal(receiptItem)}
+                                            activeOpacity={0.85}
+                                            style={{
+                                              backgroundColor: isDark ? '#0F172A' : '#F8FAFC',
+                                              borderRadius: 12,
+                                              padding: 10,
+                                              marginBottom: 8,
+                                              borderWidth: 1,
+                                              borderColor: isDark ? '#334155' : '#E2E8F0',
+                                            }}
+                                          >
+                                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, marginRight: 8 }}>
+                                                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: isVerified ? '#10B981' : '#F59E0B' }} />
+                                                <Text style={{ fontSize: 11, fontWeight: '700', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                                                  Receipt #{pIdx + 1}
+                                                </Text>
+                                                <View style={{ backgroundColor: isDark ? '#1E293B' : '#E0E7FF', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
+                                                  <Text style={{ color: '#3730A3', fontSize: 9, fontWeight: '700' }}>{pMethod}</Text>
+                                                </View>
+                                              </View>
+
+                                              {isVerified ? (
+                                                <View style={{ backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 9999, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                                  <Ionicons name="checkmark-circle" size={10} color="#047857" />
+                                                  <Text style={{ color: '#047857', fontSize: 10, fontWeight: '700' }}>Verified</Text>
+                                                </View>
+                                              ) : (
+                                                <View style={{ backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 9999, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                                  <Ionicons name="time" size={10} color="#D97706" />
+                                                  <Text style={{ color: '#D97706', fontSize: 10, fontWeight: '700' }}>Pending</Text>
+                                                </View>
+                                              )}
+                                            </View>
+
+                                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 6 }}>
+                                              <Text style={{ fontSize: 14, fontWeight: '800', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                                                ₹{pAmount.toLocaleString()}
+                                              </Text>
+                                              <Text style={{ fontSize: 10, color: isDark ? '#94A3B8' : '#64748B' }}>
+                                                Voucher: {pVoucher}
+                                              </Text>
+                                            </View>
+
+                                            {isVerified ? (
+                                              <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, paddingTop: 6, borderTopWidth: 1, borderTopColor: isDark ? '#1E293B' : '#E2E8F0' }}>
+                                                <TouchableOpacity
+                                                  style={{
+                                                    flex: 1,
+                                                    height: 28,
+                                                    borderRadius: 6,
+                                                    borderWidth: 1,
+                                                    borderColor: isDark ? '#334155' : '#E2E8F0',
+                                                    flexDirection: 'row',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    gap: 4,
+                                                  }}
+                                                  onPress={() => {
+                                                    router.push({
+                                                      pathname: '/receipt',
+                                                      params: {
+                                                        id: app.id,
+                                                        quotationId: String(payView?.id || app?.confirmedQuoteId || app?.activeQuotationId || ''),
+                                                        serviceId: String(svc.id || ''),
+                                                        sqft: String(svc.sqft || ''),
+                                                        rate: String(svc.rate || ''),
+                                                        totalCost: String(svc.totalPrice || pAmount),
+                                                        receiptNumber: pVoucher && pVoucher !== 'N/A' ? pVoucher : '',
+                                                        milestone: pId,
+                                                        amount: pAmount,
+                                                        stage: svc.title || 'Service Payment',
+                                                        voucher: pVoucher,
+                                                        method: pMethod,
+                                                        date: pDate || '',
+                                                      },
+                                                    });
+                                                  }}
+                                                  activeOpacity={0.8}
+                                                >
+                                                  <Ionicons name="eye-outline" size={12} color={isDark ? '#FFFFFF' : '#475569'} />
+                                                  <Text style={{ color: isDark ? '#FFFFFF' : '#475569', fontSize: 10, fontWeight: '700' }}>View</Text>
+                                                </TouchableOpacity>
+
+                                                <TouchableOpacity
+                                                  style={{
+                                                    flex: 1,
+                                                    height: 28,
+                                                    borderRadius: 6,
+                                                    borderWidth: 1,
+                                                    borderColor: isDark ? '#334155' : '#E2E8F0',
+                                                    flexDirection: 'row',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    gap: 4,
+                                                  }}
+                                                  onPress={() => {
+                                                    router.push({
+                                                      pathname: '/receipt',
+                                                      params: {
+                                                        id: app.id,
+                                                        quotationId: String(payView?.id || app?.confirmedQuoteId || app?.activeQuotationId || ''),
+                                                        serviceId: String(svc.id || ''),
+                                                        sqft: String(svc.sqft || ''),
+                                                        rate: String(svc.rate || ''),
+                                                        totalCost: String(svc.totalPrice || pAmount),
+                                                        receiptNumber: pVoucher && pVoucher !== 'N/A' ? pVoucher : '',
+                                                        milestone: pId,
+                                                        amount: pAmount,
+                                                        stage: svc.title || 'Service Payment',
+                                                        voucher: pVoucher,
+                                                        method: pMethod,
+                                                        date: pDate || '',
+                                                        autoShare: 'true',
+                                                      },
+                                                    });
+                                                  }}
+                                                  activeOpacity={0.8}
+                                                >
+                                                  <Ionicons name="share-social-outline" size={12} color={isDark ? '#FFFFFF' : '#475569'} />
+                                                  <Text style={{ color: isDark ? '#FFFFFF' : '#475569', fontSize: 10, fontWeight: '700' }}>Share</Text>
+                                                </TouchableOpacity>
+                                              </View>
+                                            ) : (
+                                              <View style={{ marginTop: 8, paddingTop: 6, borderTopWidth: 1, borderTopColor: isDark ? '#1E293B' : '#E2E8F0' }}>
+                                                {isAdminOrMaster ? (
+                                                  <TouchableOpacity
+                                                    style={{
+                                                      height: 32,
+                                                      borderRadius: 8,
+                                                      backgroundColor: '#059669',
+                                                      flexDirection: 'row',
+                                                      alignItems: 'center',
+                                                      justifyContent: 'center',
+                                                      gap: 6,
+                                                    }}
+                                                    onPress={() => {
+                                                      router.push({
+                                                        pathname: '/payment-verification',
+                                                        params: {
+                                                          id: app?.id,
+                                                          quotationId: receiptItem.quotationId,
+                                                          paymentId: receiptItem.id,
+                                                          amount: receiptItem.amount,
+                                                          stage: receiptItem.stage,
+                                                          voucher: receiptItem.voucher,
+                                                          method: receiptItem.method,
+                                                          date: receiptItem.date,
+                                                          proofImage: receiptItem.proofImageUrl || receiptItem.proofImage || receiptItem.referenceImage,
+                                                        },
+                                                      });
+                                                    }}
+                                                    activeOpacity={0.8}
+                                                  >
+                                                    <Ionicons name="shield-checkmark" size={13} color="#FFFFFF" />
+                                                    <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '700' }}>Review & Verify Payment</Text>
+                                                  </TouchableOpacity>
+                                                ) : (
+                                                  <View
+                                                    style={{
+                                                      backgroundColor: isDark ? 'rgba(245, 158, 11, 0.1)' : '#FFFBEB',
+                                                      borderColor: isDark ? '#78350F' : '#FDE68A',
+                                                      borderWidth: 1,
+                                                      borderRadius: 8,
+                                                      paddingVertical: 6,
+                                                      paddingHorizontal: 8,
+                                                      flexDirection: 'row',
+                                                      alignItems: 'center',
+                                                      justifyContent: 'center',
+                                                      gap: 6,
+                                                    }}
+                                                  >
+                                                    <Ionicons name="lock-closed" size={12} color="#D97706" />
+                                                    <Text style={{ fontSize: 10, fontWeight: '700', color: isDark ? '#FBBF24' : '#B45309' }}>
+                                                      Admin Verification Needed (Receipt Locked)
+                                                    </Text>
+                                                  </View>
+                                                )}
+                                              </View>
+                                            )}
+                                          </TouchableOpacity>
+                                        );
+                                      })
+                                    )}
                                   </View>
                                 )}
                               </View>
-                              <Text style={{ fontSize: 16, fontWeight: '500', color: '#0052CC', marginTop: 3 }}>
-                                ₹{m.amount.toLocaleString()}
+                            );
+                          })}
+                        </View>
+                      )}
+
+                      {/* API v2: Additional Variation Work Orders Card */}
+                      {Array.isArray(payView?.additionalPayment) && payView.additionalPayment.length > 0 && (
+                        <View style={{ marginTop: 10 }}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingHorizontal: 2 }}>
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#94A3B8' : '#64748B', letterSpacing: 0.5 }}>
+                              VARIATION WORK ORDERS
+                            </Text>
+                            <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 9999 }}>
+                              <Text style={{ color: '#92400E', fontSize: 10, fontWeight: '700' }}>
+                                {payView.additionalPayment.length} Orders
                               </Text>
-                            </View>
-
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                              <TouchableOpacity
-                                style={{ backgroundColor: '#10B981', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 8, flexDirection: 'row', alignItems: 'center' }}
-                                onPress={() => router.push({ pathname: '/receipt', params: { id: app.id, milestone: m.id, amount: m.amount, stage: m.title } })}
-                                activeOpacity={0.8}
-                              >
-                                <Ionicons name="receipt-outline" size={14} color="#FFFFFF" style={{ marginRight: 4 }} />
-                                <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '800' }}>Receipt</Text>
-                              </TouchableOpacity>
-
-                              {!m.isPaid && (
-                                <TouchableOpacity
-                                  style={{ backgroundColor: '#0052CC', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 8, flexDirection: 'row', alignItems: 'center' }}
-                                  onPress={() => router.push({ pathname: '/payment-form', params: { id: app.id, amount: m.amount, milestone: m.id } })}
-                                  activeOpacity={0.85}
-                                >
-                                  <Ionicons name="card-outline" size={13} color="#FFFFFF" style={{ marginRight: 3 }} />
-                                  <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '800' }}>Pay Now</Text>
-                                </TouchableOpacity>
-                              )}
                             </View>
                           </View>
-                        </View>
-                      ))
-                    )}
 
-                    {/* SECTION 2: LUMP SUM & EXTRA SERVICES CHARGES */}
-                    <View style={{ marginTop: 14, marginBottom: 12, paddingHorizontal: 4 }}>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                        <View style={{ flex: 1, marginRight: 8 }}>
-                          <Text style={{ fontSize: 16, fontWeight: '600', color: isDark ? '#FFFFFF' : '#0F172A' }}>
-                            Extra & Lump Sum Charges
-                          </Text>
-                          <Text style={{ fontSize: 11, color: isDark ? '#94A3B8' : '#64748B', marginTop: 10 }}>
-                            Cleaning, scaffolding, prep & extra service fees
-                          </Text>
-                        </View>
+                          {payView.additionalPayment.map((addSvc, aIdx) => {
+                            const addKey = addSvc.id || `add_${aIdx}`;
+                            const isExpanded = Boolean(expandedServiceReceipts[addKey]);
+                            const addPayments = Array.isArray(addSvc.payments) ? addSvc.payments : [];
+                            const paymentCount = addPayments.length;
+                            const isCompleted = addSvc.status === 'COMPLETED' || (Number(addSvc.balanceAmount) === 0 && Number(addSvc.totalPrice) > 0);
+                            const paidPct = addSvc.totalPrice > 0 ? Math.min(100, Math.round((Number(addSvc.paidAmount || 0) / Number(addSvc.totalPrice)) * 100)) : (isCompleted ? 100 : 0);
+                            const rateVal = addSvc.rate || (addSvc.sqft > 0 && addSvc.totalPrice > 0 ? Math.round(Number(addSvc.totalPrice) / Number(addSvc.sqft)) : null);
 
-                        <TouchableOpacity
-                          style={{ backgroundColor: '#10B981', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, flexDirection: 'row', alignItems: 'center', }}
-                          onPress={() => setShowExtraChargeModal(true)}
-                          activeOpacity={0.85}
-                        >
-                          <Ionicons name="add-circle-outline" size={16} color="#FFFFFF" style={{ marginRight: 3 }} />
-                          <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '600' }}>Add Extra</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
+                            return (
+                              <View
+                                key={addKey}
+                                style={{
+                                  backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+                                  borderRadius: 16,
+                                  padding: 14,
+                                  marginBottom: 10,
+                                  borderWidth: 1,
+                                  borderColor: isDark ? '#334155' : '#E2E8F0',
+                                  shadowColor: '#000',
+                                  shadowOpacity: 0.03,
+                                  shadowOffset: { width: 0, height: 1 },
+                                  shadowRadius: 4,
+                                  elevation: 1,
+                                }}
+                              >
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <View style={{ flex: 1, marginRight: 8 }}>
+                                    <Text style={{ fontSize: 13, fontWeight: '700', color: isDark ? '#FFFFFF' : '#0F172A' }} numberOfLines={1}>
+                                      {addSvc.title || `Variation ${aIdx + 1}`}
+                                    </Text>
+                                    {(addSvc.sqft > 0 || rateVal) && (
+                                      <Text style={{ fontSize: 11, color: isDark ? '#94A3B8' : '#64748B', marginTop: 1 }}>
+                                        {addSvc.sqft > 0 ? `${addSvc.sqft} sq.ft` : ''}{addSvc.sqft > 0 && rateVal ? ' • ' : ''}{rateVal ? `₹${rateVal}/sq.ft` : ''}
+                                      </Text>
+                                    )}
+                                  </View>
+                                  <View style={{
+                                    backgroundColor: isCompleted ? '#DCFCE7' : '#FEF3C7',
+                                    paddingHorizontal: 8,
+                                    paddingVertical: 3,
+                                    borderRadius: 9999,
+                                  }}>
+                                    <Text style={{
+                                      fontSize: 10,
+                                      fontWeight: '700',
+                                      color: isCompleted ? '#166534' : '#92400E',
+                                    }}>
+                                      {isCompleted ? 'COMPLETED' : (addSvc.status || 'ACTIVE')}
+                                    </Text>
+                                  </View>
+                                </View>
 
-                    {/* Extra Charges Cards List */}
-                    {(!app.extraCharges || app.extraCharges.length === 0) ? (
-                      <View style={{ backgroundColor: isDark ? '#1C1C1C' : '#FFFFFF', borderRadius: 14, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: isDark ? '#334155' : '#E2E8F0', marginBottom: 12 }}>
-                        <Text style={{ fontSize: 13, color: isDark ? '#94A3B8' : '#64748B' }}>No lump sum extra charges added yet.</Text>
-                      </View>
-                    ) : (
-                      app.extraCharges.map((chg) => (
-                        <View
-                          key={chg.id}
-                          style={{
-                            backgroundColor: isDark ? '#1C1C1C' : '#FFFFFF',
-                            borderRadius: 16,
-                            padding: 14,
-                            marginBottom: 12,
-                            borderWidth: 1,
-                            borderColor: isDark ? '#334155' : '#E2E8F0',
-                          }}
-                        >
-                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <View style={{ flex: 1, paddingRight: 8 }}>
-                              <Text style={{ fontSize: 14, fontWeight: '800', color: isDark ? '#FFFFFF' : '#0F172A' }}>
-                                {chg.title}
-                              </Text>
-                              {chg.notes ? (
-                                <Text style={{ fontSize: 11, color: isDark ? '#94A3B8' : '#64748B', marginTop: 2 }}>
-                                  {chg.notes}
-                                </Text>
-                              ) : null}
-                              <Text style={{ fontSize: 16, fontWeight: '900', color: '#10B981', marginTop: 3 }}>
-                                ₹{chg.amount.toLocaleString()}
-                              </Text>
-                            </View>
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: isDark ? '#334155' : '#F1F5F9' }}>
+                                  <View>
+                                    <Text style={{ fontSize: 10, color: isDark ? '#94A3B8' : '#64748B' }}>Total</Text>
+                                    <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                                      ₹{(addSvc.totalPrice || 0).toLocaleString()}
+                                    </Text>
+                                  </View>
+                                  <View>
+                                    <Text style={{ fontSize: 10, color: isDark ? '#94A3B8' : '#64748B' }}>Paid</Text>
+                                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#16A34A' }}>
+                                      ₹{(addSvc.paidAmount || 0).toLocaleString()}
+                                    </Text>
+                                  </View>
+                                  <View>
+                                    <Text style={{ fontSize: 10, color: isDark ? '#94A3B8' : '#64748B' }}>Balance</Text>
+                                    <Text style={{ fontSize: 12, fontWeight: '700', color: (addSvc.balanceAmount || 0) > 0 ? '#DC2626' : '#16A34A' }}>
+                                      ₹{(addSvc.balanceAmount || 0).toLocaleString()}
+                                    </Text>
+                                  </View>
+                                </View>
 
-                            <View style={{ alignItems: 'flex-end' }}>
-                              {chg.isPaid ? (
-                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                  <View style={{ backgroundColor: '#DCFCE7', paddingVertical: 4, paddingHorizontal: 8, borderRadius: 6, flexDirection: 'row', alignItems: 'center' }}>
-                                    <Ionicons name="checkmark-circle" size={13} color="#16A34A" style={{ marginRight: 3 }} />
-                                    <Text style={{ color: '#16A34A', fontSize: 10, fontWeight: '800' }}>PAID</Text>
+                                {/* Progress Bar */}
+                                <View style={{ marginTop: 8, height: 4, backgroundColor: isDark ? '#334155' : '#F1F5F9', borderRadius: 2, overflow: 'hidden' }}>
+                                  <View style={{ width: `${paidPct}%`, height: '100%', backgroundColor: isCompleted ? '#16A34A' : '#D97706', borderRadius: 2 }} />
+                                </View>
+
+                                {/* Payment Receipts Dropdown Toggle */}
+                                <TouchableOpacity
+                                  onPress={() => toggleServiceReceipts(addKey)}
+                                  activeOpacity={0.7}
+                                  style={{
+                                    flexDirection: 'row',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    marginTop: 10,
+                                    paddingTop: 10,
+                                    borderTopWidth: 1,
+                                    borderTopColor: isDark ? '#334155' : '#F1F5F9',
+                                  }}
+                                >
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                    <Ionicons name="receipt-outline" size={14} color={paymentCount > 0 ? '#D97706' : '#94A3B8'} />
+                                    <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                                      Payment Receipts
+                                    </Text>
+                                    <View style={{
+                                      backgroundColor: paymentCount > 0 ? (isDark ? '#78350F' : '#FEF3C7') : (isDark ? '#334155' : '#F1F5F9'),
+                                      paddingHorizontal: 7,
+                                      paddingVertical: 1.5,
+                                      borderRadius: 9999,
+                                    }}>
+                                      <Text style={{
+                                        fontSize: 10,
+                                        fontWeight: '700',
+                                        color: paymentCount > 0 ? (isDark ? '#FCD34D' : '#92400E') : (isDark ? '#94A3B8' : '#64748B'),
+                                      }}>
+                                        {paymentCount}
+                                      </Text>
+                                    </View>
                                   </View>
 
-                                  <TouchableOpacity
-                                    style={{ backgroundColor: '#10B981', paddingVertical: 5, paddingHorizontal: 10, borderRadius: 8, flexDirection: 'row', alignItems: 'center' }}
-                                    onPress={() => router.push({ pathname: '/receipt', params: { id: app.id, amount: chg.amount, stage: chg.title } })}
-                                    activeOpacity={0.8}
-                                  >
-                                    <Ionicons name="receipt-outline" size={13} color="#FFFFFF" style={{ marginRight: 3 }} />
-                                    <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '800' }}>Receipt</Text>
-                                  </TouchableOpacity>
-                                </View>
-                              ) : (
-                                <TouchableOpacity
-                                  style={{ backgroundColor: '#10B981', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, flexDirection: 'row', alignItems: 'center' }}
-                                  onPress={() => toggleExtraChargePayment(app.id, chg.id)}
-                                  activeOpacity={0.85}
-                                >
-                                  <Ionicons name="card-outline" size={13} color="#FFFFFF" style={{ marginRight: 3 }} />
-                                  <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '800' }}>Mark Paid</Text>
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#D97706' }}>
+                                      {isExpanded ? 'Hide' : 'View'}
+                                    </Text>
+                                    <Ionicons
+                                      name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                                      size={14}
+                                      color="#D97706"
+                                    />
+                                  </View>
                                 </TouchableOpacity>
-                              )}
-                            </View>
-                          </View>
-                        </View>
-                      ))
-                    )}
 
-                    {/* FULL SERVICE & SETTLEMENT RECEIPT BUTTON */}
-                    <TouchableOpacity
-                      style={{
-                        backgroundColor: '#0052CC',
-                        paddingVertical: 14,
-                        paddingHorizontal: 20,
-                        borderRadius: 14,
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        marginTop: 14,
-                        marginBottom: 4,
-                      }}
-                      onPress={() =>
-                        router.push({
-                          pathname: '/receipt',
-                          params: { id: app.id, isFullServiceReceipt: 'true' },
-                        })
+                                {/* Expandable Receipts List */}
+                                {isExpanded && (
+                                  <View style={{ marginTop: 8 }}>
+                                    {paymentCount === 0 ? (
+                                      <View style={{ padding: 12, borderRadius: 10, backgroundColor: isDark ? '#0F172A' : '#F8FAFC', alignItems: 'center', borderWidth: 1, borderColor: isDark ? '#334155' : '#E2E8F0' }}>
+                                        <Text style={{ fontSize: 11, color: isDark ? '#94A3B8' : '#64748B' }}>
+                                          No payment receipts recorded for this variation yet.
+                                        </Text>
+                                      </View>
+                                    ) : (
+                                      addPayments.map((p, pIdx) => {
+                                        const pId = p.id || `add_pay_${addSvc.id}_${pIdx}`;
+                                        const pDate = p.createdAt ? formatDateDDMMYY(new Date(p.createdAt)) : formatDateDDMMYY(new Date());
+                                        const pVoucher = p.voucher || p.upiId || (p.accountId ? `Acc #${p.accountId}` : (p.id ? String(p.id).slice(0, 8) : 'N/A'));
+                                        const pMethod = p.paymentMethod || 'CASH';
+                                        const pAmount = Number(p.amount || 0);
+                                        const isVerified = Boolean(p.isVerified);
+                                        const rawProof = p.proofImageUrl || p.proof?.proofImageUrl || p.proofImage || p.proof?.proofImage || p.referenceImage || null;
+                                        const resolvedProof = resolveProofImageUrl(rawProof);
+
+                                        const receiptItem = {
+                                          id: pId,
+                                          stage: `${addSvc.title || 'Variation'} (Variation)`,
+                                          pct: `${addSvc.totalPrice > 0 ? Math.round((pAmount / Number(addSvc.totalPrice)) * 100) : 0}%`,
+                                          amount: pAmount,
+                                          date: pDate,
+                                          method: pMethod,
+                                          voucher: pVoucher,
+                                          previousPaymentId: p.previousPaymentId || null,
+                                          proofImage: rawProof,
+                                          proofImageUrl: resolvedProof,
+                                          referenceImage: resolvedProof,
+                                          isVerified,
+                                          verifiedBy: p.verifiedBy || null,
+                                          verifiedAt: p.verifiedAt || null,
+                                          quotationId: payView?.id || app?.confirmedQuoteId || app?.activeQuotationId,
+                                          additionalServiceId: addSvc.id,
+                                          serviceId: addSvc.id,
+                                          serviceTitle: addSvc.title,
+                                          sqft: addSvc.sqft,
+                                          rate: addSvc.rate,
+                                          totalCost: addSvc.totalPrice,
+                                          details: p,
+                                          isBlockchain: true,
+                                        };
+
+                                        return (
+                                          <TouchableOpacity
+                                            key={pId}
+                                            onPress={() => setSelectedPaymentDetailModal(receiptItem)}
+                                            activeOpacity={0.85}
+                                            style={{
+                                              backgroundColor: isDark ? '#0F172A' : '#F8FAFC',
+                                              borderRadius: 12,
+                                              padding: 10,
+                                              marginBottom: 8,
+                                              borderWidth: 1,
+                                              borderColor: isDark ? '#334155' : '#E2E8F0',
+                                            }}
+                                          >
+                                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, marginRight: 8 }}>
+                                                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: isVerified ? '#10B981' : '#F59E0B' }} />
+                                                <Text style={{ fontSize: 11, fontWeight: '700', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                                                  Receipt #{pIdx + 1}
+                                                </Text>
+                                                <View style={{ backgroundColor: isDark ? '#1E293B' : '#E0E7FF', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
+                                                  <Text style={{ color: '#3730A3', fontSize: 9, fontWeight: '700' }}>{pMethod}</Text>
+                                                </View>
+                                              </View>
+
+                                              {isVerified ? (
+                                                <View style={{ backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 9999, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                                  <Ionicons name="checkmark-circle" size={10} color="#047857" />
+                                                  <Text style={{ color: '#047857', fontSize: 10, fontWeight: '700' }}>Verified</Text>
+                                                </View>
+                                              ) : (
+                                                <View style={{ backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 9999, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                                  <Ionicons name="time" size={10} color="#D97706" />
+                                                  <Text style={{ color: '#D97706', fontSize: 10, fontWeight: '700' }}>Pending</Text>
+                                                </View>
+                                              )}
+                                            </View>
+
+                                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 6 }}>
+                                              <Text style={{ fontSize: 14, fontWeight: '800', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                                                ₹{pAmount.toLocaleString()}
+                                              </Text>
+                                              <Text style={{ fontSize: 10, color: isDark ? '#94A3B8' : '#64748B' }}>
+                                                Voucher: {pVoucher}
+                                              </Text>
+                                            </View>
+
+                                            {isVerified ? (
+                                              <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, paddingTop: 6, borderTopWidth: 1, borderTopColor: isDark ? '#1E293B' : '#E2E8F0' }}>
+                                                <TouchableOpacity
+                                                  style={{
+                                                    flex: 1,
+                                                    height: 28,
+                                                    borderRadius: 6,
+                                                    borderWidth: 1,
+                                                    borderColor: isDark ? '#334155' : '#E2E8F0',
+                                                    flexDirection: 'row',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    gap: 4,
+                                                  }}
+                                                  onPress={() => {
+                                                    router.push({
+                                                      pathname: '/receipt',
+                                                      params: {
+                                                        id: app.id,
+                                                        quotationId: String(payView?.id || app?.confirmedQuoteId || app?.activeQuotationId || ''),
+                                                        serviceId: String(addSvc.id || ''),
+                                                        sqft: String(addSvc.sqft || ''),
+                                                        rate: String(addSvc.rate || ''),
+                                                        totalCost: String(addSvc.totalPrice || pAmount),
+                                                        receiptNumber: pVoucher && pVoucher !== 'N/A' ? pVoucher : '',
+                                                        milestone: pId,
+                                                        amount: pAmount,
+                                                        stage: addSvc.title || 'Variation Payment',
+                                                        voucher: pVoucher,
+                                                        method: pMethod,
+                                                        date: pDate || '',
+                                                      },
+                                                    });
+                                                  }}
+                                                  activeOpacity={0.8}
+                                                >
+                                                  <Ionicons name="eye-outline" size={12} color={isDark ? '#FFFFFF' : '#475569'} />
+                                                  <Text style={{ color: isDark ? '#FFFFFF' : '#475569', fontSize: 10, fontWeight: '700' }}>View</Text>
+                                                </TouchableOpacity>
+
+                                                <TouchableOpacity
+                                                  style={{
+                                                    flex: 1,
+                                                    height: 28,
+                                                    borderRadius: 6,
+                                                    borderWidth: 1,
+                                                    borderColor: isDark ? '#334155' : '#E2E8F0',
+                                                    flexDirection: 'row',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    gap: 4,
+                                                  }}
+                                                  onPress={() => {
+                                                    router.push({
+                                                      pathname: '/receipt',
+                                                      params: {
+                                                        id: app.id,
+                                                        quotationId: String(payView?.id || app?.confirmedQuoteId || app?.activeQuotationId || ''),
+                                                        serviceId: String(addSvc.id || ''),
+                                                        sqft: String(addSvc.sqft || ''),
+                                                        rate: String(addSvc.rate || ''),
+                                                        totalCost: String(addSvc.totalPrice || pAmount),
+                                                        receiptNumber: pVoucher && pVoucher !== 'N/A' ? pVoucher : '',
+                                                        milestone: pId,
+                                                        amount: pAmount,
+                                                        stage: addSvc.title || 'Variation Payment',
+                                                        voucher: pVoucher,
+                                                        method: pMethod,
+                                                        date: pDate || '',
+                                                        autoShare: 'true',
+                                                      },
+                                                    });
+                                                  }}
+                                                  activeOpacity={0.8}
+                                                >
+                                                  <Ionicons name="share-social-outline" size={12} color={isDark ? '#FFFFFF' : '#475569'} />
+                                                  <Text style={{ color: isDark ? '#FFFFFF' : '#475569', fontSize: 10, fontWeight: '700' }}>Share</Text>
+                                                </TouchableOpacity>
+                                              </View>
+                                            ) : (
+                                              <View style={{ marginTop: 8, paddingTop: 6, borderTopWidth: 1, borderTopColor: isDark ? '#1E293B' : '#E2E8F0' }}>
+                                                {isAdminOrMaster ? (
+                                                  <TouchableOpacity
+                                                    style={{
+                                                      height: 32,
+                                                      borderRadius: 8,
+                                                      backgroundColor: '#059669',
+                                                      flexDirection: 'row',
+                                                      alignItems: 'center',
+                                                      justifyContent: 'center',
+                                                      gap: 6,
+                                                    }}
+                                                    onPress={() => {
+                                                      router.push({
+                                                        pathname: '/payment-verification',
+                                                        params: {
+                                                          id: app?.id,
+                                                          quotationId: receiptItem.quotationId,
+                                                          paymentId: receiptItem.id,
+                                                          amount: receiptItem.amount,
+                                                          stage: receiptItem.stage,
+                                                          voucher: receiptItem.voucher,
+                                                          method: receiptItem.method,
+                                                          date: receiptItem.date,
+                                                          proofImage: receiptItem.proofImageUrl || receiptItem.proofImage || receiptItem.referenceImage,
+                                                        },
+                                                      });
+                                                    }}
+                                                    activeOpacity={0.8}
+                                                  >
+                                                    <Ionicons name="shield-checkmark" size={13} color="#FFFFFF" />
+                                                    <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '700' }}>Review & Verify Payment</Text>
+                                                  </TouchableOpacity>
+                                                ) : (
+                                                  <View
+                                                    style={{
+                                                      backgroundColor: isDark ? 'rgba(245, 158, 11, 0.1)' : '#FFFBEB',
+                                                      borderColor: isDark ? '#78350F' : '#FDE68A',
+                                                      borderWidth: 1,
+                                                      borderRadius: 8,
+                                                      paddingVertical: 6,
+                                                      paddingHorizontal: 8,
+                                                      flexDirection: 'row',
+                                                      alignItems: 'center',
+                                                      justifyContent: 'center',
+                                                      gap: 6,
+                                                    }}
+                                                  >
+                                                    <Ionicons name="lock-closed" size={12} color="#D97706" />
+                                                    <Text style={{ fontSize: 10, fontWeight: '700', color: isDark ? '#FBBF24' : '#B45309' }}>
+                                                      Admin Verification Needed (Receipt Locked)
+                                                    </Text>
+                                                  </View>
+                                                )}
+                                              </View>
+                                            )}
+                                          </TouchableOpacity>
+                                        );
+                                      })
+                                    )}
+                                  </View>
+                                )}
+                              </View>
+                            );
+                          })}
+                        </View>
+                      )}
+
+                      {/* Standalone GST Tax Clearance Card & Full Receipt Action Button */}
+                      {renderStandaloneGstCard()}
+                      {renderFullReceiptActionButton()}
+                    </View>
+
+                    {/* SECTION: RECORDED PAYMENTS (Legacy fallback when payView services are not available) */}
+                    {(!Array.isArray(payView?.services) || payView.services.length === 0) && (() => {
+                      const recordedList = [];
+                      if (isFullPaid) {
+                        recordedList.push({
+                          id: 'fullPaid',
+                          stage: 'Full Project Payment (100%)',
+                          pct: '100%',
+                          amount: fullPaidAmt,
+                          date: app.fullPaidDetails?.paymentDate || formatDateDDMMYY(new Date()),
+                          method: app.fullPaidDetails?.paymentMethod || 'Cash',
+                          voucher: app.fullPaidDetails?.transactionId || 'VCH-88219',
+                          details: app.fullPaidDetails,
+                        });
+                      } else {
+                        if (app.advancePaid) {
+                          recordedList.push({
+                            id: 'advancePaid',
+                            stage: 'Booking Advance',
+                            pct: `${Math.min(100, Math.round((advanceAmt / totalCostValue) * 100))}%`,
+                            amount: advanceAmt,
+                            date: app.advanceDetails?.paymentDate || formatDateDDMMYY(new Date()),
+                            method: app.advanceDetails?.paymentMethod || 'Cash',
+                            voucher: app.advanceDetails?.transactionId || 'ADV-1001',
+                            details: app.advanceDetails,
+                          });
+                        }
+                        if (app.initialPaid) {
+                          recordedList.push({
+                            id: 'initialPaid',
+                            stage: 'Initial Payment',
+                            pct: `${Math.min(100, Math.round((m1Amt / totalCostValue) * 100))}%`,
+                            amount: m1Amt,
+                            date: app.initialPaidDetails?.paymentDate || formatDateDDMMYY(new Date()),
+                            method: app.initialPaidDetails?.paymentMethod || 'Cash',
+                            voucher: app.initialPaidDetails?.transactionId || 'VCH-88219',
+                            details: app.initialPaidDetails,
+                          });
+                        }
+                        if (Array.isArray(app.midPayments) && app.midPayments.length > 0) {
+                          app.midPayments.forEach((mItem, mIdx) => {
+                            recordedList.push({
+                              id: mItem.id || `mid_${mIdx}`,
+                              stage: app.midPayments.length > 1 ? `Mid Payment #${mIdx + 1}` : 'Mid Payment',
+                              pct: `${Math.min(100, Math.round((Number(mItem.amount || 0) / totalCostValue) * 100))}%`,
+                              amount: Number(mItem.amount || 0),
+                              date: mItem.paymentDate || formatDateDDMMYY(new Date()),
+                              method: mItem.paymentMethod || 'UPI',
+                              voucher: mItem.transactionId || `MID-${mIdx + 1}`,
+                              details: mItem,
+                            });
+                          });
+                        } else if (app.midTermPaid) {
+                          recordedList.push({
+                            id: 'midTermPaid',
+                            stage: 'Mid Payment',
+                            pct: `${Math.min(100, Math.round((m2Amt / totalCostValue) * 100))}%`,
+                            amount: m2Amt,
+                            date: app.midTermPaidDetails?.paymentDate || formatDateDDMMYY(new Date()),
+                            method: app.midTermPaidDetails?.paymentMethod || 'UPI',
+                            voucher: app.midTermPaidDetails?.transactionId || 'UPI-984712',
+                            details: app.midTermPaidDetails,
+                          });
+                        }
+                        if (app.finalPaid) {
+                          recordedList.push({
+                            id: 'finalPaid',
+                            stage: 'Final Payment',
+                            pct: `${Math.min(100, Math.round((m3Amt / totalCostValue) * 100))}%`,
+                            amount: m3Amt,
+                            date: app.finalPaidDetails?.paymentDate || formatDateDDMMYY(new Date()),
+                            method: app.finalPaidDetails?.paymentMethod || 'Cash',
+                            voucher: app.finalPaidDetails?.transactionId || 'VCH-89042',
+                            details: app.finalPaidDetails,
+                          });
+                        }
                       }
-                      activeOpacity={0.85}
-                    >
-                      <Ionicons name="document-text" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
-                      <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>
-                        Generate Full Service Receipt
-                      </Text>
-                    </TouchableOpacity>
+
+                      return (
+                        <View style={{ marginTop: 10, marginBottom: 14 }}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, paddingHorizontal: 2 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#94A3B8' : '#64748B', letterSpacing: 0.5 }}>
+                                RECORDED PAYMENTS
+                              </Text>
+                              <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 9999 }}>
+                                <Text style={{ color: '#166534', fontSize: 10, fontWeight: '700' }}>
+                                  {recordedList.length} Recorded
+                                </Text>
+                              </View>
+                            </View>
+                            <Text style={{ fontSize: 11, fontWeight: '600', color: isDark ? '#94A3B8' : '#94A3B8' }}>
+                              Total: ₹{totalPaidSoFar.toLocaleString()}
+                            </Text>
+                          </View>
+
+                          {recordedList.length === 0 ? (
+                            <View style={{ backgroundColor: isDark ? '#1C1C1C' : '#FFFFFF', borderRadius: 16, padding: 18, alignItems: 'center', borderWidth: 1, borderColor: isDark ? '#334155' : '#E2E8F0' }}>
+                              <Text style={{ fontSize: 13, color: isDark ? '#94A3B8' : '#64748B', textAlign: 'center' }}>
+                                No payments recorded yet. Tap &quot;+ Add Payment&quot; to record the initial milestone.
+                              </Text>
+                            </View>
+                          ) : (
+                            recordedList.map((item) => (
+                              <TouchableOpacity
+                                key={item.id}
+                                style={{
+                                  backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+                                  borderRadius: 18,
+                                  padding: 14,
+                                  marginBottom: 10,
+                                  borderWidth: 1,
+                                  borderColor: isDark ? '#334155' : '#E2E8F0',
+                                  shadowColor: '#000',
+                                  shadowOpacity: 0.03,
+                                  shadowOffset: { width: 0, height: 1 },
+                                  shadowRadius: 4,
+                                  elevation: 1,
+                                }}
+                                onPress={() => setSelectedPaymentDetailModal(item)}
+                                activeOpacity={0.8}
+                              >
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, marginRight: 8 }}>
+                                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#10B981' }} />
+                                    <Text style={{ fontSize: 14, fontWeight: '700', color: isDark ? '#FFFFFF' : '#0F172A' }} numberOfLines={1}>
+                                      {item.stage}
+                                    </Text>
+                                    <View style={{ backgroundColor: '#EFF6FF', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 6 }}>
+                                      <Text style={{ color: '#1E488F', fontSize: 10, fontWeight: '700' }}>{item.pct}</Text>
+                                    </View>
+                                  </View>
+
+                                  <View style={{ backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 9999 }}>
+                                    <Text style={{ color: '#047857', fontSize: 10, fontWeight: '700' }}>✓ Paid on {item.date}</Text>
+                                  </View>
+                                </View>
+
+                                <View style={{ marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: isDark ? '#334155' : '#F1F5F9' }}>
+                                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                                    <Text style={{ fontSize: 18, fontWeight: '800', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                                      ₹{item.amount.toLocaleString()}
+                                    </Text>
+                                    <Text style={{ fontSize: 11, color: isDark ? '#94A3B8' : '#64748B' }}>
+                                      {item.method} • <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', color: '#1E488F', fontWeight: '600' }}>#{item.voucher}</Text>
+                                    </Text>
+                                  </View>
+
+                                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: isDark ? '#334155' : '#F1F5F9' }}>
+                                    <TouchableOpacity
+                                      style={{
+                                        flex: 1,
+                                        height: 36,
+                                        borderRadius: 10,
+                                        backgroundColor: '#EDF4FF',
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: 4,
+                                      }}
+                                      onPress={() => router.push({
+                                        pathname: '/receipt',
+                                        params: {
+                                          id: app.id,
+                                          quotationId: String(payView?.id || app?.confirmedQuoteId || app?.activeQuotationId || ''),
+                                          milestone: item.id,
+                                          amount: item.amount,
+                                          stage: item.stage,
+                                          voucher: item.voucher,
+                                          method: item.method,
+                                          date: item.date || '',
+                                          receiptNumber: item.voucher && item.voucher !== 'N/A' ? item.voucher : '',
+                                        },
+                                      })}
+                                      activeOpacity={0.8}
+                                    >
+                                      <Ionicons name="eye-outline" size={14} color="#1E488F" />
+                                      <Text style={{ color: '#1E488F', fontSize: 11, fontWeight: '700' }}>View Receipt</Text>
+                                    </TouchableOpacity>
+
+                                    <TouchableOpacity
+                                      style={{
+                                        flex: 1,
+                                        height: 36,
+                                        borderRadius: 10,
+                                        backgroundColor: isDark ? '#334155' : '#F1F5F9',
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: 4,
+                                      }}
+                                      onPress={() => {
+                                        router.push({
+                                          pathname: '/receipt',
+                                          params: {
+                                            id: app.id,
+                                            quotationId: String(payView?.id || app?.confirmedQuoteId || app?.activeQuotationId || ''),
+                                            milestone: item.id,
+                                            amount: item.amount,
+                                            stage: item.stage,
+                                            voucher: item.voucher,
+                                            method: item.method,
+                                            date: item.date || '',
+                                            receiptNumber: item.voucher && item.voucher !== 'N/A' ? item.voucher : '',
+                                            autoShare: 'true',
+                                          },
+                                        });
+                                      }}
+                                      activeOpacity={0.8}
+                                    >
+                                      <Ionicons name="share-social-outline" size={14} color={isDark ? '#FFFFFF' : '#475569'} />
+                                      <Text style={{ color: isDark ? '#FFFFFF' : '#475569', fontSize: 11, fontWeight: '700' }}>Share</Text>
+                                    </TouchableOpacity>
+                                  </View>
+                                </View>
+                              </TouchableOpacity>
+                            ))
+                          )}
+
+                          {/* Standalone GST Tax Clearance Card & Full Receipt Action Button */}
+                          {renderStandaloneGstCard()}
+                          {renderFullReceiptActionButton()}
+                        </View>
+                      );
+                    })()}
                   </>
                 );
               })())}
@@ -2833,7 +5059,7 @@ export default function CustomerDetailScreen() {
         {activeTabSection === 'warranty' && (() => {
           const certNo = app.warranty?.certificateNo || `DTW-${new Date().getFullYear()}-${String(app.id || '1001').slice(-4).padStart(4, '0')}`;
           const validDuration = app.warranty?.validYears || '10 Years';
-          const issuedOn = app.warranty?.completedDate || (app.attendedDate ? `${app.attendedDate}` : new Date().toLocaleDateString('en-GB'));
+          const issuedOn = formatDateDDMMYY(app.warranty?.completedDate || app.attendedDate || new Date());
           const isGen = Boolean(app.warranty?.generated);
 
           return (
@@ -2915,6 +5141,33 @@ export default function CustomerDetailScreen() {
                     </View>
                   ))}
                 </>
+              )}
+
+              {/* Activate Warranty Primary CTA Banner (If not yet active) */}
+              {!isGen && (
+                <TouchableOpacity
+                  style={{
+                    backgroundColor: '#4F46E5',
+                    borderRadius: 14,
+                    padding: 14,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginBottom: 12,
+                    shadowColor: '#4F46E5',
+                    shadowOpacity: 0.3,
+                    shadowOffset: { width: 0, height: 3 },
+                    shadowRadius: 6,
+                    elevation: 3,
+                  }}
+                  onPress={() => setShowStitchWarrantyModal(true)}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="flash" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+                  <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>
+                    Activate Warranty Coverage
+                  </Text>
+                </TouchableOpacity>
               )}
 
               {/* Action Buttons */}
@@ -3431,111 +5684,6 @@ export default function CustomerDetailScreen() {
         />
       )}
 
-      {/* 5. ADD LUMP SUM EXTRA CHARGE MODAL */}
-      <Modal
-        visible={showExtraChargeModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowExtraChargeModal(false)}
-      >
-        <TouchableOpacity
-          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 }}
-          activeOpacity={1}
-          onPress={() => setShowExtraChargeModal(false)}
-        >
-          <TouchableOpacity
-            activeOpacity={1}
-            style={{ width: '100%', maxWidth: 400, backgroundColor: isDark ? '#1C1C1C' : '#FFFFFF', borderRadius: 20, padding: 20 }}
-          >
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <Text style={{ fontSize: 18, fontWeight: '800', color: isDark ? '#FFFFFF' : '#0F172A' }}>
-                + Add Lump Sum Charge
-              </Text>
-              <TouchableOpacity onPress={() => setShowExtraChargeModal(false)}>
-                <Ionicons name="close" size={24} color={isDark ? '#94A3B8' : '#64748B'} />
-              </TouchableOpacity>
-            </View>
-
-            {/* Service Title Quick Presets */}
-            <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#94A3B8' : '#64748B', marginBottom: 6 }}>
-              Service / Reason Title
-            </Text>
-            <TextInput
-              style={{ borderWidth: 1, borderColor: isDark ? '#334155' : '#CBD5E1', borderRadius: 10, padding: 12, color: isDark ? '#FFFFFF' : '#0F172A', marginBottom: 10, fontSize: 14 }}
-              placeholder="e.g. Building Cleaning, Scaffolding Fee..."
-              placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
-              value={extraTitle}
-              onChangeText={setExtraTitle}
-            />
-
-            {/* Quick Presets */}
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
-              {['Debris Cleaning', 'Scaffolding Setup', 'Pressure Wash', 'Crack Injection', 'Extra Material'].map((preset) => (
-                <TouchableOpacity
-                  key={preset}
-                  style={{ backgroundColor: extraTitle === preset ? '#0052CC' : (isDark ? '#334155' : '#F1F5F9'), paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6 }}
-                  onPress={() => setExtraTitle(preset)}
-                >
-                  <Text style={{ color: extraTitle === preset ? '#FFFFFF' : (isDark ? '#CBD5E1' : '#475569'), fontSize: 11, fontWeight: '700' }}>
-                    {preset}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* Lump Sum Amount */}
-            <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#94A3B8' : '#64748B', marginBottom: 6 }}>
-              Lump Sum Amount (₹)
-            </Text>
-            <TextInput
-              style={{ borderWidth: 1, borderColor: isDark ? '#334155' : '#CBD5E1', borderRadius: 10, padding: 12, color: isDark ? '#FFFFFF' : '#0F172A', marginBottom: 14, fontSize: 16, fontWeight: '800' }}
-              placeholder="Enter Amount (e.g. 5000)"
-              placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
-              keyboardType="numeric"
-              value={extraAmount}
-              onChangeText={setExtraAmount}
-            />
-
-            {/* Notes */}
-            <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#94A3B8' : '#64748B', marginBottom: 6 }}>
-              Notes & Service Remarks
-            </Text>
-            <TextInput
-              style={{ borderWidth: 1, borderColor: isDark ? '#334155' : '#CBD5E1', borderRadius: 10, padding: 12, color: isDark ? '#FFFFFF' : '#0F172A', marginBottom: 16, fontSize: 13, height: 60 }}
-              placeholder="Details of cleaning or extra work..."
-              placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
-              multiline
-              value={extraNotes}
-              onChangeText={setExtraNotes}
-            />
-
-            {/* Action Button */}
-            <TouchableOpacity
-              style={{ backgroundColor: '#10B981', paddingVertical: 14, borderRadius: 12, alignItems: 'center' }}
-              onPress={() => {
-                if (!extraTitle.trim() || !extraAmount.trim()) {
-                  showAlert('Validation Error', 'Please enter both service title and amount.', 'warning');
-                  return;
-                }
-                addExtraCharge(app.id, {
-                  title: extraTitle,
-                  amount: Number(extraAmount),
-                  notes: extraNotes,
-                  isPaid: false,
-                });
-                setShowExtraChargeModal(false);
-                setExtraTitle('');
-                setExtraAmount('');
-                setExtraNotes('');
-                showAlert('Success', 'Lump Sum Extra Charge recorded successfully!', 'success');
-              }}
-            >
-              <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '800' }}>Save Extra Charge</Text>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
-
       {/* PREVIOUS QUOTATION DETAIL INSPECTION MODAL */}
       <Modal
         animationType="slide"
@@ -3655,17 +5803,49 @@ export default function CustomerDetailScreen() {
                   <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }}>View PDF</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={{ flex: 1, backgroundColor: '#10B981', paddingVertical: 12, borderRadius: 10, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }}
-                  onPress={() => {
-                    const qId = selectedHistoryQuote.id;
-                    setSelectedHistoryQuote(null);
-                    router.push({ pathname: '/edit-quotation', params: { id: qId, quoteId: qId, appointmentId: app.appointmentId || app.id, customerId: app.id } });
-                  }}
-                >
-                  <Ionicons name="create" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-                  <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }}>Edit / Revise</Text>
-                </TouchableOpacity>
+                {(() => {
+                  const isHistQuoteLocked = Boolean(
+                    selectedHistoryQuote && (
+                      String(app?.confirmedQuoteId) === String(selectedHistoryQuote.id) ||
+                      selectedHistoryQuote.isConfirmed ||
+                      selectedHistoryQuote.isLocked ||
+                      selectedHistoryQuote.status === 'CONFIRMED' ||
+                      selectedHistoryQuote.status === 'LOCKED' ||
+                      Boolean(app?.confirmedQuoteId || quotationsList.some(q => q.isConfirmed || q.status === 'CONFIRMED')) ||
+                      isInitialPaymentReceived
+                    )
+                  );
+                  return (
+                    <TouchableOpacity
+                      disabled={isHistQuoteLocked}
+                      style={{
+                        flex: 1,
+                        backgroundColor: isHistQuoteLocked ? (isDark ? '#334155' : '#94A3B8') : '#10B981',
+                        paddingVertical: 12,
+                        borderRadius: 10,
+                        flexDirection: 'row',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        opacity: isHistQuoteLocked ? 0.6 : 1,
+                      }}
+                      onPress={() => {
+                        if (isHistQuoteLocked) {
+                          Alert.alert('Quotation Locked', 'This quotation is locked and cannot be edited.');
+                          return;
+                        }
+                        const qId = selectedHistoryQuote.id;
+                        setSelectedHistoryQuote(null);
+                        router.push({ pathname: '/edit-quotation', params: { id: qId, quoteId: qId, appointmentId: app.appointmentId || app.id, customerId: app.id } });
+                      }}
+                      activeOpacity={isHistQuoteLocked ? 1 : 0.8}
+                    >
+                      <Ionicons name={isHistQuoteLocked ? "lock-closed" : "create"} size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                      <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }}>
+                        {isHistQuoteLocked ? 'Locked' : 'Edit / Revise'}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })()}
               </View>
             </ScrollView>
           </TouchableOpacity>
@@ -3809,7 +5989,7 @@ export default function CustomerDetailScreen() {
                 style={[styles.editInput, isDark && styles.editInputDark]}
                 value={editAppDate}
                 onChangeText={setEditAppDate}
-                placeholder="DD-MM-YYYY"
+                placeholder="DD-MM-YY"
                 placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
               />
 
@@ -3908,7 +6088,7 @@ export default function CustomerDetailScreen() {
         transparent
         animationType="fade"
         visible={lockConfirmModal.visible}
-        onRequestClose={() => setLockConfirmModal((prev) => ({ ...prev, visible: false }))}
+        onRequestClose={() => !isLockActionLoading && setLockConfirmModal((prev) => ({ ...prev, visible: false }))}
         statusBarTranslucent
       >
         <View style={styles.customModalBackdrop}>
@@ -3920,11 +6100,13 @@ export default function CustomerDetailScreen() {
                   styles.customModalIconAura,
                   {
                     backgroundColor:
-                      lockConfirmModal.actionType === 'lock' || lockConfirmModal.actionType === 'initial_payment'
-                        ? 'rgba(16, 185, 129, 0.18)'
-                        : lockConfirmModal.actionType === 'unlock'
-                          ? 'rgba(245, 158, 11, 0.18)'
-                          : 'rgba(37, 99, 235, 0.18)',
+                      lockConfirmModal.actionType === 'error'
+                        ? 'rgba(239, 68, 68, 0.18)'
+                        : lockConfirmModal.actionType === 'lock' || lockConfirmModal.actionType === 'initial_payment' || lockConfirmModal.isDone
+                          ? 'rgba(16, 185, 129, 0.18)'
+                          : lockConfirmModal.actionType === 'unlock'
+                            ? 'rgba(245, 158, 11, 0.18)'
+                            : 'rgba(37, 99, 235, 0.18)',
                   },
                 ]}
               />
@@ -3933,29 +6115,35 @@ export default function CustomerDetailScreen() {
                   styles.customModalIconCircle,
                   {
                     backgroundColor:
-                      lockConfirmModal.actionType === 'lock' || lockConfirmModal.actionType === 'initial_payment'
-                        ? (isDark ? '#064E3B' : '#DCFCE7')
-                        : lockConfirmModal.actionType === 'unlock'
-                          ? (isDark ? '#451A03' : '#FEF3C7')
-                          : (isDark ? '#1E293B' : '#EFF6FF'),
+                      lockConfirmModal.actionType === 'error'
+                        ? (isDark ? '#450A0A' : '#FEE2E2')
+                        : lockConfirmModal.actionType === 'lock' || lockConfirmModal.actionType === 'initial_payment' || lockConfirmModal.isDone
+                          ? (isDark ? '#064E3B' : '#DCFCE7')
+                          : lockConfirmModal.actionType === 'unlock'
+                            ? (isDark ? '#451A03' : '#FEF3C7')
+                            : (isDark ? '#1E293B' : '#EFF6FF'),
                   },
                 ]}
               >
                 <Ionicons
                   name={
-                    lockConfirmModal.actionType === 'lock' || lockConfirmModal.actionType === 'initial_payment'
-                      ? 'shield-checkmark'
-                      : lockConfirmModal.actionType === 'unlock'
-                        ? 'lock-open-outline'
-                        : 'swap-horizontal'
+                    lockConfirmModal.actionType === 'error'
+                      ? 'close-circle'
+                      : lockConfirmModal.actionType === 'lock' || lockConfirmModal.actionType === 'initial_payment' || lockConfirmModal.isDone
+                        ? 'shield-checkmark'
+                        : lockConfirmModal.actionType === 'unlock'
+                          ? 'lock-open-outline'
+                          : 'swap-horizontal'
                   }
                   size={30}
                   color={
-                    lockConfirmModal.actionType === 'lock' || lockConfirmModal.actionType === 'initial_payment'
-                      ? '#10B981'
-                      : lockConfirmModal.actionType === 'unlock'
-                        ? '#F59E0B'
-                        : '#2563EB'
+                    lockConfirmModal.actionType === 'error'
+                      ? '#EF4444'
+                      : lockConfirmModal.actionType === 'lock' || lockConfirmModal.actionType === 'initial_payment' || lockConfirmModal.isDone
+                        ? '#10B981'
+                        : lockConfirmModal.actionType === 'unlock'
+                          ? '#F59E0B'
+                          : '#2563EB'
                   }
                 />
               </View>
@@ -3967,110 +6155,210 @@ export default function CustomerDetailScreen() {
             </Text>
 
             {/* Message */}
-            <Text style={[styles.customModalMessage, isDark && styles.subtextDark]}>
+            <Text style={[styles.customModalMessage, isDark && styles.subtextDark, Boolean(lockConfirmModal.warningNote) && { marginBottom: 12 }]}>
               {lockConfirmModal.message}
             </Text>
 
+            {/* Warning Note Callout */}
+            {Boolean(lockConfirmModal.warningNote) && (
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  backgroundColor: isDark ? 'rgba(239, 68, 68, 0.12)' : '#FEF2F2',
+                  borderWidth: 1,
+                  borderColor: isDark ? 'rgba(239, 68, 68, 0.3)' : '#FECACA',
+                  borderRadius: 12,
+                  paddingHorizontal: 12,
+                  paddingVertical: 10,
+                  marginBottom: 20,
+                  gap: 8,
+                  width: '100%',
+                }}
+              >
+                <Ionicons name="alert-circle" size={18} color="#EF4444" />
+                <Text
+                  style={{
+                    fontSize: 12.5,
+                    fontWeight: '700',
+                    color: isDark ? '#FCA5A5' : '#DC2626',
+                    flex: 1,
+                    lineHeight: 17,
+                  }}
+                >
+                  {lockConfirmModal.warningNote}
+                </Text>
+              </View>
+            )}
+
             {/* Dual Action Buttons */}
             <View style={styles.customModalButtonRow}>
-              <TouchableOpacity
-                style={[styles.customModalCancelBtn, isDark && styles.customModalCancelBtnDark]}
-                onPress={() => setLockConfirmModal((prev) => ({ ...prev, visible: false }))}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.customModalCancelText, isDark && styles.textDark]}>
-                  {lockConfirmModal.cancelText || 'Cancel'}
-                </Text>
-              </TouchableOpacity>
+              {Boolean(lockConfirmModal.cancelText) && !lockConfirmModal.isDone && (
+                <TouchableOpacity
+                  style={[styles.customModalCancelBtn, isDark && styles.customModalCancelBtnDark, isLockActionLoading && { opacity: 0.5 }]}
+                  onPress={() => !isLockActionLoading && setLockConfirmModal((prev) => ({ ...prev, visible: false, isDone: false }))}
+                  activeOpacity={0.8}
+                  disabled={isLockActionLoading}
+                >
+                  <Text style={[styles.customModalCancelText, isDark && styles.textDark]}>
+                    {lockConfirmModal.cancelText || 'Cancel'}
+                  </Text>
+                </TouchableOpacity>
+              )}
 
               <TouchableOpacity
                 style={[
                   styles.customModalConfirmBtn,
                   {
                     backgroundColor:
-                      lockConfirmModal.actionType === 'lock' || lockConfirmModal.actionType === 'initial_payment'
-                        ? '#059669'
-                        : lockConfirmModal.actionType === 'unlock'
-                          ? '#D97706'
-                          : '#2563EB',
+                      lockConfirmModal.actionType === 'error'
+                        ? '#EF4444'
+                        : lockConfirmModal.actionType === 'lock' || lockConfirmModal.actionType === 'initial_payment' || lockConfirmModal.isDone
+                          ? '#059669'
+                          : lockConfirmModal.actionType === 'unlock'
+                            ? '#D97706'
+                            : '#2563EB',
                   },
+                  lockConfirmModal.isDone && { flex: 1 },
+                  isLockActionLoading && { opacity: 0.8 },
                 ]}
-                onPress={() => {
+                onPress={async () => {
+                  if (isLockActionLoading) return;
+                  if (lockConfirmModal.isDone) {
+                    setLockConfirmModal((prev) => ({ ...prev, visible: false, isDone: false }));
+                    return;
+                  }
+
                   const targetId = lockConfirmModal.quoteId;
                   const action = lockConfirmModal.actionType;
-                  setLockConfirmModal((prev) => ({ ...prev, visible: false }));
+                  setIsLockActionLoading(true);
 
                   if (action === 'initial_payment') {
-                    const chosenQuote = quotationsList.find(q => q.id === app?.confirmedQuoteId) || quotationsList[0];
-                    const quoteTotal = Number(chosenQuote?.total || 0);
-                    const advance50 = Math.round(quoteTotal * 0.5);
+                    try {
+                      const chosenQuote = quotationsList.find(q => q.id === app?.confirmedQuoteId) || quotationsList[0];
+                      const quoteTotal = Number(chosenQuote?.total || 0);
+                      const advance50 = Math.round(quoteTotal * 0.5);
 
-                    updateAppointment(app.id, {
-                      initialPaymentReceived: true,
-                      initialPaid: true,
-                      initialPaidAmount: advance50,
-                      initialPaidDetails: {
-                        amount: advance50,
-                        date: new Date().toLocaleDateString('en-GB'),
-                        paymentDate: new Date().toLocaleDateString('en-GB'),
-                        method: 'Advance Received',
-                        status: 'Completed',
-                      },
-                      confirmedQuoteId: app.confirmedQuoteId || chosenQuote?.id,
-                      projectStatus: 'In Progress',
-                    });
+                      updateAppointment(app.id, {
+                        initialPaymentReceived: true,
+                        initialPaid: true,
+                        initialPaidAmount: advance50,
+                        initialPaidDetails: {
+                          amount: advance50,
+                          date: formatDateDDMMYY(new Date()),
+                          paymentDate: formatDateDDMMYY(new Date()),
+                          method: 'Advance Received',
+                          status: 'Completed',
+                        },
+                        confirmedQuoteId: app.confirmedQuoteId || chosenQuote?.id,
+                        projectStatus: 'In Progress',
+                      });
 
-                    showAlert(
-                      'Payment Confirmed ✅',
-                      'Initial advance payment recorded successfully. The quotation is now locked and protected from any edits.',
-                      'success',
-                      'Done'
-                    );
+                      setIsLockActionLoading(false);
+                      setLockConfirmModal({
+                        visible: true,
+                        isDone: true,
+                        actionType: 'success',
+                        title: 'Payment Confirmed ✅',
+                        message: 'Initial advance payment recorded successfully. The quotation is now locked and protected from any edits.',
+                        warningNote: '',
+                        confirmText: 'Done',
+                        cancelText: '',
+                      });
+                    } catch (_err) {
+                      setIsLockActionLoading(false);
+                      setLockConfirmModal((prev) => ({ ...prev, visible: false, isDone: false }));
+                    }
                     return;
                   }
 
                   if (targetId) {
-                    confirmAndLockQuotation(app.id, targetId);
-                    if (action === 'lock') {
-                      showAlert(
-                        'Quotation Locked',
-                        'This quotation has been confirmed and locked for this project.',
-                        'success',
-                        'Done'
-                      );
-                    } else if (action === 'unlock') {
-                      showAlert(
-                        'Quotation Unlocked',
-                        'The quotation has been unlocked. You can now select or edit other tiers.',
-                        'info',
-                        'OK'
-                      );
-                    } else if (action === 'switch') {
-                      showAlert(
-                        'Quotation Switched',
-                        'The project has been switched and locked to this quotation.',
-                        'success',
-                        'Done'
-                      );
+                    try {
+                      let res = null;
+                      if (action === 'lock') {
+                        res = await handleConfirmQuotation(targetId);
+                      } else if (action === 'unlock') {
+                        res = await handleUnlockQuotation(targetId, false);
+                      } else if (action === 'switch') {
+                        if (app?.confirmedQuoteId) {
+                          await quotationRepository.unlockQuotation(app.confirmedQuoteId);
+                        }
+                        res = await handleConfirmQuotation(targetId);
+                      }
+
+                      setIsLockActionLoading(false);
+                      if (res?.success) {
+                        setLockConfirmModal({
+                          visible: true,
+                          isDone: true,
+                          actionType: 'success',
+                          title: action === 'unlock' ? 'Quotation Unlocked 🔓' : 'Quotation Confirmed & Locked! 🔒',
+                          message: action === 'unlock'
+                            ? 'The quotation has been unlocked. You can now select other tiers, edit, or create new revisions.'
+                            : 'This quotation has been confirmed and locked for this project. Other draft proposals have been automatically cleaned up.',
+                          warningNote: '',
+                          confirmText: 'Done',
+                          cancelText: '',
+                        });
+                      } else if (res) {
+                        setLockConfirmModal({
+                          visible: true,
+                          isDone: true,
+                          actionType: 'error',
+                          title: res.title || 'Action Failed',
+                          message: res.message || 'Could not complete quotation operation.',
+                          warningNote: '',
+                          confirmText: 'OK',
+                          cancelText: '',
+                        });
+                      } else {
+                        setLockConfirmModal((prev) => ({ ...prev, visible: false, isDone: false }));
+                      }
+                    } catch (err) {
+                      setIsLockActionLoading(false);
+                      setLockConfirmModal({
+                        visible: true,
+                        isDone: true,
+                        actionType: 'error',
+                        title: 'Error',
+                        message: err?.message || 'An unexpected error occurred.',
+                        warningNote: '',
+                        confirmText: 'OK',
+                        cancelText: '',
+                      });
                     }
+                  } else {
+                    setIsLockActionLoading(false);
+                    setLockConfirmModal((prev) => ({ ...prev, visible: false, isDone: false }));
                   }
                 }}
                 activeOpacity={0.85}
+                disabled={isLockActionLoading}
               >
-                <Ionicons
-                  name={
-                    lockConfirmModal.actionType === 'lock' || lockConfirmModal.actionType === 'initial_payment'
-                      ? 'shield-checkmark'
-                      : lockConfirmModal.actionType === 'unlock'
-                        ? 'lock-open-outline'
-                        : 'checkmark'
-                  }
-                  size={15}
-                  color="#FFFFFF"
-                  style={{ marginRight: 6 }}
-                />
+                {isLockActionLoading ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" style={{ marginRight: 6 }} />
+                ) : (
+                  <Ionicons
+                    name={
+                      lockConfirmModal.actionType === 'error'
+                        ? 'close'
+                        : lockConfirmModal.isDone
+                          ? 'checkmark'
+                          : lockConfirmModal.actionType === 'lock' || lockConfirmModal.actionType === 'initial_payment'
+                            ? 'shield-checkmark'
+                            : lockConfirmModal.actionType === 'unlock'
+                              ? 'lock-open-outline'
+                              : 'checkmark'
+                    }
+                    size={15}
+                    color="#FFFFFF"
+                    style={{ marginRight: 6 }}
+                  />
+                )}
                 <Text style={styles.customModalConfirmText}>
-                  {lockConfirmModal.confirmText || 'Confirm & Lock'}
+                  {isLockActionLoading
+                    ? 'Processing...'
+                    : (lockConfirmModal.confirmText || (lockConfirmModal.isDone ? 'Done' : 'Confirm & Lock'))}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -4087,6 +6375,1365 @@ export default function CustomerDetailScreen() {
         onConfirm={handleConfirmSelectTiers}
         isDark={isDark}
       />
+
+      {/* Stitch Payment Details Popup Modal */}
+      <Modal
+        visible={Boolean(selectedPaymentDetailModal)}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setSelectedPaymentDetailModal(null)}
+      >
+        <TouchableOpacity
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(15, 23, 42, 0.65)',
+            justifyContent: 'flex-end',
+          }}
+          activeOpacity={1}
+          onPress={() => setSelectedPaymentDetailModal(null)}
+        >
+          <View
+            style={{
+              backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+              borderTopLeftRadius: 28,
+              borderTopRightRadius: 28,
+              padding: 20,
+              paddingBottom: Platform.OS === 'ios' ? 34 : 20,
+              maxHeight: '88%',
+            }}
+            onStartShouldSetResponder={() => true}
+          >
+            <View
+              style={{
+                width: 44,
+                height: 4,
+                backgroundColor: '#CBD5E1',
+                borderRadius: 2,
+                alignSelf: 'center',
+                marginBottom: 14,
+              }}
+            />
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: isDark ? '#334155' : '#F1F5F9' }}>
+              <View>
+                <Text style={{ fontSize: 17, fontWeight: '800', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                  Payment Details
+                </Text>
+                <Text style={{ fontSize: 11, color: isDark ? '#94A3B8' : '#64748B', marginTop: 2 }}>
+                  Transaction #{selectedPaymentDetailModal?.voucher || 'VCH-88219'}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setSelectedPaymentDetailModal(null)}
+                style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: isDark ? '#334155' : '#F1F5F9', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <Ionicons name="close" size={20} color={isDark ? '#CBD5E1' : '#64748B'} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingBottom: 16 }}
+            >
+              {/* Amount Banner: Verified vs Pending */}
+              {selectedPaymentDetailModal?.isVerified ? (
+              <View
+                style={{
+                  backgroundColor: isDark ? '#064E3B' : 'rgba(236, 253, 245, 0.8)',
+                  borderWidth: 1,
+                  borderColor: isDark ? '#047857' : '#A7F3D0',
+                  borderRadius: 18,
+                  padding: 16,
+                  alignItems: 'center',
+                  marginVertical: 14,
+                }}
+              >
+                <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 10, paddingVertical: 2, borderRadius: 9999, marginBottom: 6, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Ionicons name="checkmark-circle" size={12} color="#166534" />
+                  <Text style={{ color: '#166534', fontSize: 11, fontWeight: '700' }}>✓ Verified by Admin</Text>
+                </View>
+                <Text style={{ fontSize: 26, fontWeight: '900', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                  ₹{Number(selectedPaymentDetailModal?.amount || 0).toLocaleString()}
+                </Text>
+                <Text style={{ fontSize: 12, fontWeight: '600', color: '#047857', marginTop: 2 }}>
+                  {selectedPaymentDetailModal?.stage}
+                </Text>
+                {Boolean(selectedPaymentDetailModal?.verifiedBy) && (
+                  <Text style={{ fontSize: 10, color: isDark ? '#A7F3D0' : '#065F46', marginTop: 4 }}>
+                    Approved by {selectedPaymentDetailModal.verifiedBy}
+                  </Text>
+                )}
+              </View>
+            ) : (
+              <View
+                style={{
+                  backgroundColor: isDark ? 'rgba(120, 53, 15, 0.25)' : '#FEF3C7',
+                  borderWidth: 1,
+                  borderColor: isDark ? '#B45309' : '#FDE68A',
+                  borderRadius: 18,
+                  padding: 16,
+                  alignItems: 'center',
+                  marginVertical: 14,
+                }}
+              >
+                <View style={{ backgroundColor: '#FDE68A', paddingHorizontal: 10, paddingVertical: 2, borderRadius: 9999, marginBottom: 6, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Ionicons name="time-outline" size={12} color="#92400E" />
+                  <Text style={{ color: '#92400E', fontSize: 11, fontWeight: '700' }}>⏳ Admin Verification Needed</Text>
+                </View>
+                <Text style={{ fontSize: 26, fontWeight: '900', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                  ₹{Number(selectedPaymentDetailModal?.amount || 0).toLocaleString()}
+                </Text>
+                <Text style={{ fontSize: 12, fontWeight: '600', color: isDark ? '#FBBF24' : '#B45309', marginTop: 2 }}>
+                  {selectedPaymentDetailModal?.stage}
+                </Text>
+                <Text style={{ fontSize: 10, color: isDark ? '#CBD5E1' : '#78350F', marginTop: 4, textAlign: 'center' }}>
+                  {isAdminOrMaster
+                    ? 'Inspect payment details and proof image below to approve this transaction.'
+                    : 'Awaiting Admin verification. Receipt access is locked until verified.'}
+                </Text>
+              </View>
+            )}
+
+            {/* Specification Rows */}
+            <View
+              style={{
+                backgroundColor: isDark ? '#0F172A' : '#F8FAFC',
+                borderWidth: 1,
+                borderColor: isDark ? '#334155' : '#E2E8F0',
+                borderRadius: 16,
+                padding: 14,
+                gap: 10,
+              }}
+            >
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B' }}>Payment Stage</Text>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                  {selectedPaymentDetailModal?.stage}
+                </Text>
+              </View>
+              <View style={{ height: 1, backgroundColor: isDark ? '#334155' : '#E2E8F0' }} />
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B' }}>Verification Status</Text>
+                {selectedPaymentDetailModal?.isVerified ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <Ionicons name="checkmark-circle" size={13} color="#10B981" />
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#10B981' }}>
+                      Verified
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <Ionicons name="time-outline" size={13} color="#F59E0B" />
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#F59E0B' }}>
+                      Pending Admin Verification
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <View style={{ height: 1, backgroundColor: isDark ? '#334155' : '#E2E8F0' }} />
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B' }}>Payment Method</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons
+                    name={
+                      selectedPaymentDetailModal?.method === 'UPI'
+                        ? 'qr-code-outline'
+                        : selectedPaymentDetailModal?.method?.toLowerCase().includes('bank') || selectedPaymentDetailModal?.method === 'Accounts'
+                          ? 'card-outline'
+                          : 'cash-outline'
+                    }
+                    size={14}
+                    color="#1E488F"
+                  />
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                    {selectedPaymentDetailModal?.method || 'Cash'}
+                  </Text>
+                </View>
+              </View>
+              <View style={{ height: 1, backgroundColor: isDark ? '#334155' : '#E2E8F0' }} />
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B' }}>Voucher / Ref Number</Text>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#1E488F', fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' }}>
+                  #{selectedPaymentDetailModal?.voucher || 'VCH-88219'}
+                </Text>
+              </View>
+              <View style={{ height: 1, backgroundColor: isDark ? '#334155' : '#E2E8F0' }} />
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B' }}>Payment Date</Text>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                  {selectedPaymentDetailModal?.date || '16 Sep 2026'}
+                </Text>
+              </View>
+              <View style={{ height: 1, backgroundColor: isDark ? '#334155' : '#E2E8F0' }} />
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B' }}>Customer</Text>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                    {app?.clientName || 'Anita Raman'}
+                  </Text>
+                  <Text style={{ fontSize: 10, color: isDark ? '#94A3B8' : '#64748B' }}>
+                    Cust ID: DR{app?.id}
+                  </Text>
+                </View>
+              </View>
+
+              {Boolean(
+                selectedPaymentDetailModal?.proofImageUrl ||
+                selectedPaymentDetailModal?.referenceImage ||
+                selectedPaymentDetailModal?.details?.proofImageUrl ||
+                selectedPaymentDetailModal?.details?.proofImage ||
+                selectedPaymentDetailModal?.details?.referenceImage ||
+                selectedPaymentDetailModal?.details?.documentUri ||
+                app?.referenceImage
+              ) && (() => {
+                const modalProofUri = resolveProofImageUrl(
+                  selectedPaymentDetailModal?.proofImageUrl ||
+                  selectedPaymentDetailModal?.referenceImage ||
+                  selectedPaymentDetailModal?.details?.proofImageUrl ||
+                  selectedPaymentDetailModal?.details?.proofImage ||
+                  selectedPaymentDetailModal?.details?.referenceImage ||
+                  selectedPaymentDetailModal?.details?.documentUri ||
+                  app?.referenceImage
+                );
+                if (!modalProofUri) return null;
+                return (
+                  <>
+                    <View style={{ height: 1, backgroundColor: isDark ? '#334155' : '#E2E8F0', marginVertical: 8 }} />
+                    <View>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B' }}>Reference Image / Payment Proof</Text>
+                        <View style={{ backgroundColor: '#EFF6FF', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                          <Ionicons name="shield-checkmark" size={10} color="#1E488F" />
+                          <Text style={{ color: '#1E488F', fontSize: 10, fontWeight: '700' }}>Proof Document</Text>
+                        </View>
+                      </View>
+                      <View style={{ borderRadius: 10, overflow: 'hidden', backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: isDark ? '#334155' : '#E2E8F0' }}>
+                        <Image
+                          source={{ uri: modalProofUri }}
+                          style={{ width: '100%', height: 140 }}
+                          resizeMode="cover"
+                        />
+                      </View>
+                    </View>
+                  </>
+                );
+              })()}
+            </View>
+
+            {/* Bottom Actions */}
+            {selectedPaymentDetailModal?.isVerified ? (
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
+                <TouchableOpacity
+                  style={{
+                    flex: 1,
+                    height: 44,
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor: isDark ? '#334155' : '#E2E8F0',
+                    backgroundColor: isDark ? '#1E3A8A' : '#EDF4FF',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                  }}
+                  onPress={() => {
+                    const mId = selectedPaymentDetailModal?.id || 'initialPaid';
+                    const amt = selectedPaymentDetailModal?.amount || 0;
+                    const stg = selectedPaymentDetailModal?.stage || 'Service Payment';
+                    const qId = selectedPaymentDetailModal?.quotationId || payView?.id || app?.confirmedQuoteId || app?.activeQuotationId || '';
+                    const sId = selectedPaymentDetailModal?.serviceId || selectedPaymentDetailModal?.additionalServiceId || '';
+                    const sqft = selectedPaymentDetailModal?.sqft || '';
+                    const rate = selectedPaymentDetailModal?.rate || '';
+                    const totCost = selectedPaymentDetailModal?.totalCost || amt;
+                    const vch = selectedPaymentDetailModal?.voucher || '';
+                    const mth = selectedPaymentDetailModal?.method || '';
+                    const dt = selectedPaymentDetailModal?.date || '';
+                    setSelectedPaymentDetailModal(null);
+                    router.push({
+                      pathname: '/receipt',
+                      params: {
+                        id: app.id,
+                        quotationId: String(qId),
+                        serviceId: String(sId),
+                        sqft: String(sqft),
+                        rate: String(rate),
+                        totalCost: String(totCost),
+                        receiptNumber: vch && vch !== 'N/A' ? vch : '',
+                        milestone: mId,
+                        amount: amt,
+                        stage: stg,
+                        voucher: vch,
+                        method: mth,
+                        date: dt,
+                      },
+                    });
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="eye-outline" size={16} color={isDark ? '#93C5FD' : '#1E488F'} />
+                  <Text style={{ color: isDark ? '#93C5FD' : '#1E488F', fontSize: 12, fontWeight: '700' }}>View Receipt</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={{
+                    flex: 1,
+                    height: 44,
+                    borderRadius: 12,
+                    backgroundColor: '#21498B',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                  onPress={() => setSelectedPaymentDetailModal(null)}
+                  activeOpacity={0.85}
+                >
+                  <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>Close</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={{ gap: 10, marginTop: 16 }}>
+                {isAdminOrMaster ? (
+                  <TouchableOpacity
+                    style={{
+                      height: 46,
+                      borderRadius: 12,
+                      backgroundColor: isVerifyingPayment ? '#047857' : '#059669',
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                    }}
+                    disabled={isVerifyingPayment}
+                    onPress={() => handleAdminVerifyPayment(selectedPaymentDetailModal)}
+                    activeOpacity={0.85}
+                  >
+                    {isVerifyingPayment ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Ionicons name="checkmark-circle-outline" size={18} color="#FFFFFF" />
+                    )}
+                    <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '800' }}>
+                      {isVerifyingPayment ? 'Verifying Payment...' : 'Verify Payment'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : (
+                  <View
+                    style={{
+                      backgroundColor: isDark ? 'rgba(245, 158, 11, 0.1)' : '#FFFBEB',
+                      borderColor: isDark ? '#78350F' : '#FDE68A',
+                      borderWidth: 1,
+                      borderRadius: 10,
+                      padding: 10,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 8,
+                    }}
+                  >
+                    <Ionicons name="lock-closed" size={14} color="#D97706" />
+                    <Text style={{ flex: 1, fontSize: 11, color: isDark ? '#FBBF24' : '#B45309', fontWeight: '600' }}>
+                      This payment is awaiting Admin verification. Receipt download and sharing will be available once approved.
+                    </Text>
+                  </View>
+                )}
+
+                <TouchableOpacity
+                  style={{
+                    height: 42,
+                    borderRadius: 12,
+                    backgroundColor: isDark ? '#334155' : '#F1F5F9',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                  onPress={() => setSelectedPaymentDetailModal(null)}
+                  activeOpacity={0.85}
+                >
+                  <Text style={{ color: isDark ? '#CBD5E1' : '#475569', fontSize: 12, fontWeight: '700' }}>Close</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Stitch Activate Warranty Bottom Sheet Modal */}
+      <Modal
+        visible={showStitchWarrantyModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowStitchWarrantyModal(false)}
+      >
+        <TouchableOpacity
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(15, 23, 42, 0.65)',
+            justifyContent: 'flex-end',
+          }}
+          activeOpacity={1}
+          onPress={() => setShowStitchWarrantyModal(false)}
+        >
+          <View
+            style={{
+              backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+              borderTopLeftRadius: 28,
+              borderTopRightRadius: 28,
+              padding: 20,
+              paddingBottom: 28,
+            }}
+            onStartShouldSetResponder={() => true}
+          >
+            <View
+              style={{
+                width: 44,
+                height: 4,
+                backgroundColor: '#CBD5E1',
+                borderRadius: 2,
+                alignSelf: 'center',
+                marginBottom: 14,
+              }}
+            />
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: isDark ? '#334155' : '#F1F5F9' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: '#EEF2FF', alignItems: 'center', justifyContent: 'center' }}>
+                  <Ionicons name="shield-checkmark" size={20} color="#5145CD" />
+                </View>
+                <View>
+                  <Text style={{ fontSize: 17, fontWeight: '800', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                    Activate Warranty
+                  </Text>
+                  <Text style={{ fontSize: 11, color: isDark ? '#94A3B8' : '#64748B', marginTop: 1 }}>
+                    Set warranty validity start date to activate coverage.
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                onPress={() => setShowStitchWarrantyModal(false)}
+                style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: isDark ? '#334155' : '#F1F5F9', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <Ionicons name="close" size={20} color={isDark ? '#CBD5E1' : '#64748B'} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ marginTop: 16 }}>
+              <Text style={{ fontSize: 13, fontWeight: '600', color: isDark ? '#FFFFFF' : '#1E293B', marginBottom: 6 }}>
+                Valid From Date <Text style={{ color: '#EF4444' }}>*</Text>
+              </Text>
+
+              <TouchableOpacity
+                style={{
+                  backgroundColor: isDark ? '#0F172A' : '#F8FAFC',
+                  borderWidth: 1,
+                  borderColor: isDark ? '#334155' : '#CBD5E1',
+                  borderRadius: 14,
+                  paddingHorizontal: 14,
+                  paddingVertical: 12,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                }}
+                onPress={() => setShowWarrantyDatePicker(true)}
+                activeOpacity={0.8}
+              >
+                <Text style={{ fontSize: 14, fontWeight: '600', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                  {warrantyStartDate}
+                </Text>
+                <Ionicons name="calendar-outline" size={20} color="#5145CD" />
+              </TouchableOpacity>
+
+              <Text style={{ fontSize: 11, color: isDark ? '#94A3B8' : '#94A3B8', marginTop: 6 }}>
+                Warranty coverage period will be calculated from this date.
+              </Text>
+            </View>
+
+            {showWarrantyDatePicker && (
+              <DateTimePicker
+                value={warrantyDateObj}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={(_evt, selDate) => {
+                  setShowWarrantyDatePicker(false);
+                  if (selDate) {
+                    setWarrantyDateObj(selDate);
+                    setWarrantyStartDate(formatDateDDMMYY(selDate));
+                  }
+                }}
+              />
+            )}
+
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 22 }}>
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  height: 46,
+                  borderRadius: 12,
+                  borderWidth: 1,
+                  borderColor: isDark ? '#334155' : '#E2E8F0',
+                  backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                onPress={() => setShowStitchWarrantyModal(false)}
+                activeOpacity={0.8}
+              >
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#64748B' }}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{
+                  flex: 1.4,
+                  height: 46,
+                  borderRadius: 12,
+                  backgroundColor: '#5145CD',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  shadowColor: '#5145CD',
+                  shadowOpacity: 0.3,
+                  shadowOffset: { width: 0, height: 3 },
+                  shadowRadius: 6,
+                  elevation: 3,
+                }}
+                onPress={async () => {
+                  setShowStitchWarrantyModal(false);
+                  await generateWarranty(app.id, warrantyStartDate, '10 Years');
+                  showAlert(
+                    'Warranty Activated! 🛡️',
+                    `10 Years Warranty coverage successfully activated starting from ${warrantyStartDate}. Certificate is now active.`,
+                    'success',
+                    'View Certificate'
+                  );
+                }}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="flash" size={16} color="#FFFFFF" />
+                <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>Activate Warranty</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Generate Full Receipt Bottom Sheet Modal */}
+      <Modal
+        visible={showFullReceiptModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          setShowFullReceiptModal(false);
+          setFullReceiptStep('options');
+        }}
+      >
+        <TouchableOpacity
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(15, 23, 42, 0.65)',
+            justifyContent: 'flex-end',
+          }}
+          activeOpacity={1}
+          onPress={() => {
+            setShowFullReceiptModal(false);
+            setFullReceiptStep('options');
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+              borderTopLeftRadius: 28,
+              borderTopRightRadius: 28,
+              padding: 22,
+              paddingBottom: Platform.OS === 'ios' ? 38 : 28,
+              maxHeight: '92%',
+            }}
+            onStartShouldSetResponder={() => true}
+          >
+            {/* Grab handle */}
+            <View
+              style={{
+                width: 44,
+                height: 4,
+                backgroundColor: isDark ? '#475569' : '#CBD5E1',
+                borderRadius: 2,
+                alignSelf: 'center',
+                marginBottom: 16,
+              }}
+            />
+
+            {fullReceiptStep === 'options' ? (
+              <>
+                {/* Header */}
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginBottom: 6,
+                  }}
+                >
+                  <View style={{ flex: 1, paddingRight: 12 }}>
+                    <Text
+                      style={{
+                        fontSize: 18,
+                        fontWeight: '800',
+                        color: isDark ? '#FFFFFF' : '#0F172A',
+                      }}
+                    >
+                      Generate Full Receipt
+                    </Text>
+                    <Text
+                      style={{
+                        fontSize: 13,
+                        color: isDark ? '#94A3B8' : '#64748B',
+                        marginTop: 2,
+                      }}
+                    >
+                      Choose receipt type for this completed project
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setShowFullReceiptModal(false);
+                      setFullReceiptStep('options');
+                    }}
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 16,
+                      backgroundColor: isDark ? '#334155' : '#F1F5F9',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Ionicons name="close" size={18} color={isDark ? '#E2E8F0' : '#475569'} />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Options List */}
+                <View style={{ gap: 12, marginTop: 14 }}>
+                  {/* Option 1: Without GST */}
+                  <TouchableOpacity
+                    style={{
+                      padding: 16,
+                      borderRadius: 16,
+                      backgroundColor: isDark ? '#0F172A' : '#F8FAFC',
+                      borderWidth: 1.5,
+                      borderColor: isDark ? '#334155' : '#E2E8F0',
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 14,
+                    }}
+                    onPress={() => {
+                      setFullReceiptStep('without_gst');
+                    }}
+                    activeOpacity={0.75}
+                  >
+                    <View
+                      style={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: 12,
+                        backgroundColor: isDark ? 'rgba(37, 99, 235, 0.15)' : '#EFF6FF',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Ionicons name="document-text-outline" size={24} color="#2563EB" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={{
+                          fontSize: 15,
+                          fontWeight: '700',
+                          color: isDark ? '#FFFFFF' : '#0F172A',
+                        }}
+                      >
+                        Without GST
+                      </Text>
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          color: isDark ? '#94A3B8' : '#64748B',
+                          marginTop: 2,
+                        }}
+                      >
+                        Generate full settlement receipt based on collected payments
+                      </Text>
+                    </View>
+                    <Ionicons
+                      name="chevron-forward"
+                      size={18}
+                      color={isDark ? '#64748B' : '#94A3B8'}
+                    />
+                  </TouchableOpacity>
+
+                  {/* Option 2: With GST */}
+                  <TouchableOpacity
+                    style={{
+                      padding: 16,
+                      borderRadius: 16,
+                      backgroundColor: isDark ? '#0F172A' : '#F8FAFC',
+                      borderWidth: 1.5,
+                      borderColor: isDark ? '#1E3A8A' : '#DBEAFE',
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 14,
+                    }}
+                    onPress={() => {
+                      setShowFullReceiptModal(false);
+                      setFullReceiptStep('options');
+                      const qId =
+                        payView?.id ||
+                        app?.confirmedQuoteId ||
+                        app?.activeQuotationId ||
+                        (Array.isArray(app?.quotations) &&
+                          app.quotations.find((q) => q.isConfirmed)?.id) ||
+                        null;
+                      const baseTotalValue =
+                        payView?.totalPrice ||
+                        payView?.totalCost ||
+                        app?.totalPayment ||
+                        app?.totalCost ||
+                        app?.cost ||
+                        0;
+                      const gstAmt = Math.round(baseTotalValue * 0.18);
+
+                      router.push({
+                        pathname: '/payment-form',
+                        params: {
+                          id: app?.id,
+                          baseCost: String(baseTotalValue),
+                          totalCost: String(baseTotalValue),
+                          quotationId: qId || '',
+                          stage: 'final',
+                          hasGst: 'true',
+                          gstPercent: '18',
+                          amount: String(gstAmt),
+                        },
+                      });
+                    }}
+                    activeOpacity={0.75}
+                  >
+                    <View
+                      style={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: 12,
+                        backgroundColor: isDark ? 'rgba(33, 73, 139, 0.25)' : '#EEF2FF',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Ionicons name="receipt-outline" size={24} color="#21498B" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={{
+                          fontSize: 15,
+                          fontWeight: '700',
+                          color: isDark ? '#FFFFFF' : '#0F172A',
+                        }}
+                      >
+                        With GST
+                      </Text>
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          color: isDark ? '#94A3B8' : '#64748B',
+                          marginTop: 2,
+                        }}
+                      >
+                        Go to payment page to choose GST percentage & record invoice
+                      </Text>
+                    </View>
+                    <Ionicons
+                      name="chevron-forward"
+                      size={18}
+                      color={isDark ? '#64748B' : '#94A3B8'}
+                    />
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              /* Step 2: Without GST or With GST Details, Payment Done & GST Number Input */
+              (() => {
+                const isWithGstReceipt = fullReceiptStep === 'with_gst_receipt';
+                const qId =
+                  payView?.id ||
+                  app?.confirmedQuoteId ||
+                  app?.activeQuotationId ||
+                  (Array.isArray(app?.quotations) &&
+                    app.quotations.find((q) => q.isConfirmed)?.id) ||
+                  null;
+                const baseTotalValue =
+                  payView?.totalPrice ||
+                  payView?.totalCost ||
+                  app?.totalPayment ||
+                  app?.totalCost ||
+                  app?.cost ||
+                  0;
+                const totalPaidSoFar =
+                  payView?.totalPaid ??
+                  (app?.fullPaid
+                    ? Number(app?.fullPaidDetails?.amount || baseTotalValue)
+                    : Number(app?.advancePaidAmount || app?.advanceDetails?.amount || 0) +
+                      Number(app?.initialPaidAmount || app?.initialPaidDetails?.amount || 0) +
+                      Number(app?.midTermPaidAmount || app?.midTermPaidDetails?.amount || 0) +
+                      Number(app?.finalPaidAmount || app?.finalPaidDetails?.amount || 0));
+
+                const gstPaidAmount = Number(
+                  app?.gstPaidAmount ||
+                  app?.gstPaidDetails?.amount ||
+                  app?.finalPaidDetails?.amount ||
+                  payView?.gstPayment?.paidAmount ||
+                  payView?.withGstPayment?.paidAmount ||
+                  payView?.settlement?.amount ||
+                  (isWithGstReceipt ? Math.round(baseTotalValue * (Number(gstPercentVal || 18) / 100)) : 0)
+                );
+                const gstPercentVal =
+                  app?.gstPercentage ||
+                  app?.gstPaidDetails?.gstPercentage ||
+                  app?.finalPaidDetails?.gstPercentage ||
+                  '18';
+
+                const clientName = app?.clientName || app?.name || app?.customerName || 'Customer';
+                const clientPhone = app?.phone || app?.mobile || app?.clientPhone || 'N/A';
+                const clientAddress = app?.address || app?.location || app?.area || 'N/A';
+
+                return (
+                  <ScrollView
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    contentContainerStyle={{ paddingBottom: 10 }}
+                  >
+                    {/* Header with Back button */}
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        marginBottom: 16,
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                        <TouchableOpacity
+                          onPress={() => {
+                            if (isWithGstReceipt) {
+                              setShowFullReceiptModal(false);
+                              setFullReceiptStep('options');
+                            } else {
+                              setFullReceiptStep('options');
+                            }
+                          }}
+                          style={{
+                            width: 34,
+                            height: 34,
+                            borderRadius: 17,
+                            backgroundColor: isDark ? '#334155' : '#F1F5F9',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          <Ionicons name="arrow-back" size={18} color={isDark ? '#E2E8F0' : '#334155'} />
+                        </TouchableOpacity>
+                        <View style={{ flex: 1 }}>
+                          <Text
+                            style={{
+                              fontSize: 17,
+                              fontWeight: '800',
+                              color: isDark ? '#FFFFFF' : '#0F172A',
+                            }}
+                          >
+                            {isWithGstReceipt ? 'Generate Full Receipt with GST' : 'Without GST Receipt'}
+                          </Text>
+                          <Text
+                            style={{
+                              fontSize: 12,
+                              color: isDark ? '#94A3B8' : '#64748B',
+                              marginTop: 1,
+                            }}
+                          >
+                            {isWithGstReceipt
+                              ? 'Customer & GST payment summary'
+                              : 'Review details & generate receipt'}
+                          </Text>
+                        </View>
+                      </View>
+                      <TouchableOpacity
+                        onPress={() => {
+                          setShowFullReceiptModal(false);
+                          setFullReceiptStep('options');
+                        }}
+                        style={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: 16,
+                          backgroundColor: isDark ? '#334155' : '#F1F5F9',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <Ionicons name="close" size={18} color={isDark ? '#E2E8F0' : '#475569'} />
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* 1. Customer Details Card */}
+                    <View
+                      style={{
+                        backgroundColor: isDark ? '#0F172A' : '#F8FAFC',
+                        borderRadius: 16,
+                        borderWidth: 1,
+                        borderColor: isDark ? '#334155' : '#E2E8F0',
+                        padding: 14,
+                        marginBottom: 12,
+                      }}
+                    >
+                      <View
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 6,
+                          marginBottom: 10,
+                        }}
+                      >
+                        <Ionicons name="person-outline" size={15} color="#2563EB" />
+                        <Text
+                          style={{
+                            fontSize: 12,
+                            fontWeight: '800',
+                            color: isDark ? '#94A3B8' : '#64748B',
+                            letterSpacing: 0.5,
+                            textTransform: 'uppercase',
+                          }}
+                        >
+                          Customer Details
+                        </Text>
+                      </View>
+
+                      <View style={{ gap: 6 }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B' }}>Customer Name</Text>
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                            {clientName}
+                          </Text>
+                        </View>
+
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B' }}>Phone / Mobile</Text>
+                          <Text style={{ fontSize: 13, fontWeight: '600', color: isDark ? '#E2E8F0' : '#1E293B' }}>
+                            {clientPhone}
+                          </Text>
+                        </View>
+
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', width: 90 }}>Address</Text>
+                          <Text
+                            style={{
+                              flex: 1,
+                              textAlign: 'right',
+                              fontSize: 12,
+                              color: isDark ? '#CBD5E1' : '#334155',
+                            }}
+                            numberOfLines={2}
+                          >
+                            {clientAddress}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    {/* 2. Payment Done Summary Card */}
+                    <View
+                      style={{
+                        backgroundColor: isDark ? '#0F172A' : '#F0FDF4',
+                        borderRadius: 16,
+                        borderWidth: 1,
+                        borderColor: isDark ? '#166534' : '#BBF7D0',
+                        padding: 14,
+                        marginBottom: 14,
+                      }}
+                    >
+                      <View
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          marginBottom: 10,
+                        }}
+                      >
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Ionicons name="wallet-outline" size={15} color="#16A34A" />
+                          <Text
+                            style={{
+                              fontSize: 12,
+                              fontWeight: '800',
+                              color: isDark ? '#86EFAC' : '#166534',
+                              letterSpacing: 0.5,
+                              textTransform: 'uppercase',
+                            }}
+                          >
+                            Payment Summary
+                          </Text>
+                        </View>
+                        <View
+                          style={{
+                            backgroundColor: '#DCFCE7',
+                            paddingHorizontal: 8,
+                            paddingVertical: 2,
+                            borderRadius: 9999,
+                          }}
+                        >
+                          <Text style={{ color: '#166534', fontSize: 10, fontWeight: '700' }}>
+                            {isWithGstReceipt ? '✓ Settled with GST' : '✓ 100% Paid'}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <View style={{ gap: 6 }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B' }}>Total Project Cost</Text>
+                          <Text style={{ fontSize: 13, fontWeight: '600', color: isDark ? '#E2E8F0' : '#1E293B' }}>
+                            ₹{Number(baseTotalValue).toLocaleString('en-IN')}
+                          </Text>
+                        </View>
+
+                        {isWithGstReceipt ? (
+                          <>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B' }}>
+                                GST Settled ({gstPercentVal}%)
+                              </Text>
+                              <Text style={{ fontSize: 13, fontWeight: '600', color: '#2563EB' }}>
+                                ₹{Number(gstPaidAmount).toLocaleString('en-IN')}
+                              </Text>
+                            </View>
+
+                            <View
+                              style={{
+                                flexDirection: 'row',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                paddingTop: 6,
+                                borderTopWidth: 1,
+                                borderTopColor: isDark ? '#334155' : '#DCFCE7',
+                              }}
+                            >
+                              <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#E2E8F0' : '#0F172A' }}>
+                                Total Paid (with GST)
+                              </Text>
+                              <Text style={{ fontSize: 15, fontWeight: '800', color: '#16A34A' }}>
+                                ₹{(Number(baseTotalValue) + Number(gstPaidAmount)).toLocaleString('en-IN')}
+                              </Text>
+                            </View>
+                          </>
+                        ) : (
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#E2E8F0' : '#0F172A' }}>
+                              Total Amount Paid
+                            </Text>
+                            <Text style={{ fontSize: 15, fontWeight: '800', color: '#16A34A' }}>
+                              ₹{Number(totalPaidSoFar).toLocaleString('en-IN')}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+
+                    {/* 3. GST Number Input Field */}
+                    <View style={{ marginBottom: 18 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Ionicons name="business-outline" size={14} color={isDark ? '#94A3B8' : '#64748B'} />
+                          <Text
+                            style={{
+                              fontSize: 13,
+                              fontWeight: '700',
+                              color: isDark ? '#E2E8F0' : '#1E293B',
+                            }}
+                          >
+                            GST Number
+                          </Text>
+                        </View>
+                        <View
+                          style={{
+                            backgroundColor: isDark ? '#334155' : '#F1F5F9',
+                            paddingHorizontal: 7,
+                            paddingVertical: 1.5,
+                            borderRadius: 6,
+                          }}
+                        >
+                          <Text style={{ fontSize: 10, fontWeight: '600', color: isDark ? '#94A3B8' : '#64748B' }}>
+                            {isWithGstReceipt ? 'Customer GSTIN' : 'Optional'}
+                          </Text>
+                        </View>
+                      </View>
+                      <TextInput
+                        value={gstNumberInput}
+                        onChangeText={(text) => setGstNumberInput(text.toUpperCase())}
+                        placeholder="Enter GSTIN (e.g. 33AAAAA0000A1Z5)"
+                        placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
+                        autoCapitalize="characters"
+                        maxLength={15}
+                        style={{
+                          height: 46,
+                          borderRadius: 12,
+                          backgroundColor: isDark ? '#0F172A' : '#FFFFFF',
+                          borderWidth: 1.5,
+                          borderColor: isDark ? '#334155' : '#CBD5E1',
+                          paddingHorizontal: 14,
+                          fontSize: 14,
+                          fontWeight: '600',
+                          color: isDark ? '#FFFFFF' : '#0F172A',
+                          letterSpacing: 0.5,
+                        }}
+                      />
+                    </View>
+
+                    {/* 4. Generate Receipt Button */}
+                    <TouchableOpacity
+                      style={{
+                        height: 50,
+                        borderRadius: 14,
+                        backgroundColor: '#21498B',
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 8,
+                        shadowColor: '#21498B',
+                        shadowOpacity: 0.3,
+                        shadowOffset: { width: 0, height: 3 },
+                        shadowRadius: 6,
+                        elevation: 3,
+                      }}
+                      onPress={async () => {
+                        const gstVal = gstNumberInput.trim();
+                        setShowFullReceiptModal(false);
+                        setFullReceiptStep('options');
+
+                        const generatedRecNo =
+                          payView?.receiptNumber ||
+                          app?.receiptNumber ||
+                          `REC-${app?.id || '101'}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
+
+                        const finalGstPaidAmt = isWithGstReceipt
+                          ? (Number(gstPaidAmount) || Math.round(Number(baseTotalValue) * (Number(gstPercentVal || 18) / 100)))
+                          : 0;
+                        const finalGstPct = Number(gstPercentVal) || 18;
+
+                        // API v2: Confirm GST settlement first if needed, then generate final receipt & lock
+                        if (qId) {
+                          try {
+                            if (!payView?.isGstConfirmed) {
+                              const settlementPayload = {
+                                withGst: isWithGstReceipt,
+                                ...(gstVal ? { customerGstNumber: gstVal } : {}),
+                                ...(isWithGstReceipt && finalGstPaidAmt ? {
+                                  amount: finalGstPaidAmt,
+                                  paymentMethod: 'UPI',
+                                  voucher: `GST-${Date.now().toString().slice(-6)}`,
+                                  notes: 'GST settlement upon completion',
+                                } : {}),
+                              };
+                              const settleRes = await paymentRepository.confirmFinalSettlement(qId, settlementPayload);
+                              if (!settleRes?.success) {
+                                await paymentRepository.updatePricingConfig(qId, {
+                                  withGst: isWithGstReceipt,
+                                  ...(isWithGstReceipt ? { gstPercentage: finalGstPct } : {}),
+                                });
+                              }
+                            }
+                            await paymentRepository.generateFinalReceipt(qId, gstVal, isWithGstReceipt);
+                            await paymentRepository.toggleReceiptLock(qId, true, 'Full receipt created');
+                          } catch (recErr) {
+                            console.warn('Final receipt generation/locking error:', recErr?.message);
+                          }
+                        }
+
+                        if (isWithGstReceipt) {
+                          const finalHalfGst = Math.round(finalGstPaidAmt / 2);
+                          const gstDetailsObj = {
+                            amount: finalGstPaidAmt,
+                            gstPercentage: finalGstPct,
+                            paymentMethod: 'UPI',
+                            paymentDate: formatDateDDMMYY(new Date()),
+                            transactionId: `GST-${Date.now().toString().slice(-6)}`,
+                            verificationStatus: 'verified',
+                            isVerified: true,
+                          };
+
+                          setClientData((prev) => {
+                            if (!prev) return prev;
+                            return {
+                              ...prev,
+                              hasGst: true,
+                              gstPaid: true,
+                              gstNumber: gstVal,
+                              gstin: gstVal,
+                              customerGstNumber: gstVal,
+                              gstPaidAmount: finalGstPaidAmt,
+                              gstPercentage: finalGstPct,
+                              gstPaidDetails: gstDetailsObj,
+                              isReceiptGenerated: true,
+                              fullReceiptGenerated: true,
+                              receiptNumber: generatedRecNo,
+                              receiptGeneratedAt: new Date().toISOString(),
+                              isReceiptLocked: true,
+                              receiptStatus: 'GENERATED',
+                            };
+                          });
+
+                          if (app?.id) {
+                            appointmentService.updateAppointment(app.id, {
+                              hasGst: true,
+                              gstPaid: true,
+                              gstNumber: gstVal,
+                              gstin: gstVal,
+                              customerGstNumber: gstVal,
+                              gstPaidAmount: finalGstPaidAmt,
+                              gstPercentage: finalGstPct,
+                              gstPaidDetails: gstDetailsObj,
+                              isReceiptGenerated: true,
+                              fullReceiptGenerated: true,
+                              receiptNumber: generatedRecNo,
+                              receiptGeneratedAt: new Date().toISOString(),
+                              isReceiptLocked: true,
+                              receiptStatus: 'GENERATED',
+                            }).catch(() => {});
+                          }
+
+                          setPayView((prev) => {
+                            if (!prev) return prev;
+                            return {
+                              ...prev,
+                              withGst: true,
+                              isGst: true,
+                              isGstConfirmed: true,
+                              customerGstNumber: gstVal,
+                              gstAmount: finalGstPaidAmt,
+                              gstPercentage: finalGstPct,
+                              totalWithGst: (Number(prev.subtotalAfterDiscount || prev.totalPrice || baseTotalValue)) + finalGstPaidAmt,
+                              totalPaid: (Number(prev.totalPaid || baseTotalValue)) + finalGstPaidAmt,
+                              balanceAmount: 0,
+                              isReceiptGenerated: true,
+                              fullReceiptGenerated: true,
+                              receiptNumber: generatedRecNo,
+                              receiptGeneratedAt: new Date().toISOString(),
+                              isReceiptLocked: true,
+                              receiptStatus: 'GENERATED',
+                              gstPayment: {
+                                ...(prev.gstPayment || {}),
+                                id: 0,
+                                title: 'GST Tax Clearance',
+                                totalPrice: finalGstPaidAmt,
+                                paidAmount: finalGstPaidAmt,
+                                balanceAmount: 0,
+                                gstPercentage: finalGstPct,
+                                gstAmount: finalGstPaidAmt,
+                                cgst: finalHalfGst,
+                                sgst: finalHalfGst,
+                                status: 'COMPLETED',
+                                payments: [
+                                  {
+                                    id: `gst_pay_${Date.now()}`,
+                                    amount: finalGstPaidAmt,
+                                    paymentMethod: 'UPI',
+                                    voucher: `GST-${Date.now().toString().slice(-6)}`,
+                                    isVerified: true,
+                                    date: formatDateDDMMYY(new Date()),
+                                    createdAt: new Date().toISOString(),
+                                  },
+                                ],
+                              },
+                            };
+                          });
+
+                          router.push({
+                            pathname: '/receipt',
+                            params: {
+                              id: app?.id,
+                              quotationId: qId || '',
+                              isFullServiceReceipt: 'true',
+                              stage: 'Full Project Settlement (with GST)',
+                              hasGst: 'true',
+                              gstPercent: String(finalGstPct),
+                              gstPaidAmount: String(finalGstPaidAmt),
+                              amount: String(Number(baseTotalValue) + Number(finalGstPaidAmt)),
+                              totalCost: String(Number(baseTotalValue) + Number(finalGstPaidAmt)),
+                              gstNumber: gstVal,
+                              receiptNumber: generatedRecNo,
+                            },
+                          });
+                        } else {
+                          setClientData((prev) => (prev ? {
+                            ...prev,
+                            isReceiptGenerated: true,
+                            fullReceiptGenerated: true,
+                            receiptNumber: generatedRecNo,
+                            receiptGeneratedAt: new Date().toISOString(),
+                            isReceiptLocked: true,
+                            receiptStatus: 'GENERATED',
+                            ...(gstVal ? { gstNumber: gstVal, gstin: gstVal, customerGstNumber: gstVal } : {}),
+                          } : prev));
+
+                          if (app?.id) {
+                            appointmentService.updateAppointment(app.id, {
+                              isReceiptGenerated: true,
+                              fullReceiptGenerated: true,
+                              receiptNumber: generatedRecNo,
+                              receiptGeneratedAt: new Date().toISOString(),
+                              isReceiptLocked: true,
+                              receiptStatus: 'GENERATED',
+                              ...(gstVal ? { gstNumber: gstVal, gstin: gstVal, customerGstNumber: gstVal } : {}),
+                            }).catch(() => {});
+                          }
+
+                          setPayView((prev) => (prev ? {
+                            ...prev,
+                            withGst: false,
+                            isGstConfirmed: true,
+                            isReceiptGenerated: true,
+                            fullReceiptGenerated: true,
+                            receiptNumber: generatedRecNo,
+                            receiptGeneratedAt: new Date().toISOString(),
+                            isReceiptLocked: true,
+                            receiptStatus: 'GENERATED',
+                            ...(gstVal ? { customerGstNumber: gstVal } : {}),
+                          } : prev));
+
+                          router.push({
+                            pathname: '/receipt',
+                            params: {
+                              id: app?.id,
+                              quotationId: qId || '',
+                              isFullServiceReceipt: 'true',
+                              stage: 'Full Project Settlement',
+                              amount: String(totalPaidSoFar || baseTotalValue),
+                              totalCost: String(baseTotalValue),
+                              gstNumber: gstVal,
+                              receiptNumber: generatedRecNo,
+                            },
+                          });
+                        }
+                      }}
+                      activeOpacity={0.85}
+                    >
+                      <Ionicons name="receipt-outline" size={20} color="#FFFFFF" />
+                      <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '700' }}>
+                        Generate Receipt
+                      </Text>
+                    </TouchableOpacity>
+                  </ScrollView>
+                );
+              })()
+            )}
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
     </KeyboardAvoidingView>
   );

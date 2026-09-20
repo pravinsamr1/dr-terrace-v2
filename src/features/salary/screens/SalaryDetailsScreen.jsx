@@ -19,6 +19,7 @@ import { authRepository } from '../../auth/api/authRepository';
 import InnerHeader from '../../../shared/components/InnerHeader';
 import { SALARY_DEFAULTS } from '../constants/salaryConstants';
 import { DEFAULT_FALLBACKS } from '../../../shared/constants/fallbackDefaults';
+import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
 
 export default function SalaryDetailsScreen() {
   const router = useRouter();
@@ -60,7 +61,7 @@ export default function SalaryDetailsScreen() {
       id: Date.now(),
       ...payoutRecord,
       status: SALARY_DEFAULTS.PAYOUT_STATUS.PAID,
-      paymentDate: new Date().toLocaleDateString('en-GB').replace(/\//g, '-'),
+      paymentDate: formatDateDDMMYY(new Date()),
     };
     setSalaryPayouts(prev => [newPayout, ...prev]);
   };

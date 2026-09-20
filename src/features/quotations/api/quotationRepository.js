@@ -252,6 +252,8 @@ export const quotationRepository = {
   /**
    * API v2: Confirm a quotation (Admin or Field Employee)
    * POST /quotations/:id/confirm
+   * Body: { isConfirmed: true }
+   * Note: Other unconfirmed drafts for this appointment are automatically cleaned up
    */
   confirmQuotation: async (quotationId, isConfirmed = true) => {
     try {
@@ -263,14 +265,56 @@ export const quotationRepository = {
       );
       return {
         success: true,
+        statusCode: response.status || 200,
         data: response.data?.data || response.data,
         message: response.data?.message || 'Quotation confirmed successfully',
       };
     } catch (error) {
-      console.warn(`[confirmQuotation] Failed to confirm quotation ${quotationId}:`, error?.response?.data || error.message);
+      const status = error?.response?.status;
+      const message = error.response?.data?.message || error.response?.data?.error || error.message || 'Failed to confirm quotation';
+      console.warn(`[confirmQuotation] Failed to confirm quotation ${quotationId}:`, status, message);
       return {
         success: false,
-        message: error.response?.data?.message || error.response?.data?.error || error.message || 'Failed to confirm quotation',
+        statusCode: status,
+        message,
+      };
+    }
+  },
+
+  /**
+   * API v2: Unlock a quotation (Admin Only)
+   * POST /quotations/:id/unlock
+   */
+  unlockQuotation: async (quotationId) => {
+    try {
+      const cleanId = String(quotationId).replace(/\D/g, '') || quotationId;
+      console.log(`[unlockQuotation] POST ${API_ENDPOINTS.QUOTATIONS}/${cleanId}/unlock`);
+      const response = await apiClient.post(
+        `${API_ENDPOINTS.QUOTATIONS}/${cleanId}/unlock`
+      );
+      return {
+        success: true,
+        statusCode: response.status || 200,
+        data: response.data?.data || response.data,
+        message: response.data?.message || 'Quotation unlocked successfully',
+      };
+    } catch (error) {
+      const status = error?.response?.status;
+      let message = error.response?.data?.message || error.response?.data?.error;
+      if (!message && typeof error.response?.data === 'string') {
+        try {
+          const parsed = JSON.parse(error.response.data);
+          message = parsed?.message || parsed?.error;
+        } catch (_e) {}
+      }
+      if (!message) {
+        message = error.message || 'Failed to unlock quotation';
+      }
+      console.warn(`[unlockQuotation] Failed to unlock quotation ${quotationId}:`, status, message);
+      return {
+        success: false,
+        statusCode: status,
+        message,
       };
     }
   },

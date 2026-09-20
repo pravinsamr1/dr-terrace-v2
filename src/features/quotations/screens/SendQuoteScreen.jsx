@@ -136,6 +136,7 @@ export default function SendQuoteScreen() {
           day = parseInt(parts[0], 10);
           month = parseInt(parts[1], 10) - 1;
           year = parseInt(parts[2], 10);
+          if (year < 100) year += 2000;
         }
       }
     } else if (typeof month === 'string') {
@@ -237,9 +238,8 @@ export default function SendQuoteScreen() {
         ) : (
           displayList.map((app) => {
             const isCompleted = app.status === 'Completed';
-            const clientName = app.clientName || app.client_name || app.name || 'Client';
-            const prefix = clientName.trim().toLowerCase().startsWith('mr.') ? '' : 'Mr. ';
-            const displayName = `${prefix}${clientName}`;
+            const clientName = app.clientName || app.client_name || app.name;
+            const displayName = `${clientName}`;
 
             const { month: displayMonth, day: displayDay } = getAppointmentDateBadge(app);
             const timeText = (app.time || '').toLowerCase();
@@ -325,7 +325,7 @@ export default function SendQuoteScreen() {
                           !isCompleted && isDark && styles.statusTextBlueDark
                         ]}
                       >
-                        {app.assignedTo || 'Unassigned'}
+                        {app.assignedTo}
                       </Text>
                     </View>
                   </View>

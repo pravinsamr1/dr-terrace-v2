@@ -32,8 +32,10 @@ const parseDateToDateObj = (dateStr) => {
       const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
       if (!isNaN(d.getTime())) return d;
     } else {
-      // DD-MM-YYYY
-      const d = new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
+      // DD-MM-YYYY or DD-MM-YY
+      let year = parseInt(parts[2], 10);
+      if (year < 100) year += 2000;
+      const d = new Date(year, parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
       if (!isNaN(d.getTime())) return d;
     }
   }
@@ -134,12 +136,12 @@ export default function ReassignScreen() {
     };
   }, [id]);
 
-  // Date formatter DD-MM-YYYY
+  // Date formatter DD-MM-YY (e.g. 12-12-26)
   const formatDate = (date) => {
     if (!date || !(date instanceof Date) || isNaN(date.getTime())) return '';
     const day = String(date.getDate()).padStart(2, '0');
     const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = date.getFullYear();
+    const year = String(date.getFullYear()).slice(-2);
     return `${day}-${month}-${year}`;
   };
 

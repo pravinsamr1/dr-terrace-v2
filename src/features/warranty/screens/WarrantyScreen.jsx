@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useColorScheme } from '../../../core/hooks/useColorScheme';
 import { isValidPositiveNumber } from '../../../core/utils/validation';
+import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
 import InnerHeader from '../../../shared/components/InnerHeader';
 import { MaterialAlertModal } from '../../../shared/components/material';
 import { WARRANTY_DEFAULTS } from '../constants/warrantyConstants';
@@ -72,10 +73,7 @@ export default function GenerateWarrantyScreen() {
   const durations = WARRANTY_DEFAULTS.DURATIONS;
 
   const formatDate = (date) => {
-    const day = String(date.getDate()).padStart(2, '0');
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = date.getFullYear();
-    return `${day}-${month}-${year}`;
+    return formatDateDDMMYY(date);
   };
 
   const validateForm = () => {

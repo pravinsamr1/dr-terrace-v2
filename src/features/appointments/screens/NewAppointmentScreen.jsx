@@ -28,12 +28,14 @@ import { employeeRepository as employeeService } from '../../employees/api/emplo
 import { appointmentRepository as appointmentService } from '../../appointments/api/appointmentRepository';
 import { MaterialAlertModal, MaterialOverlayLoader, MaterialSuccessModal } from '../../../shared/components/material';
 import InnerHeader from '../../../shared/components/InnerHeader';
+import TitleDropdown from '../../../shared/components/TitleDropdown';
 
-// Date formatter DD-MM-YYYY
+// Date formatter DD-MM-YY (e.g. 12-12-26)
 const formatDate = (date) => {
+  if (!date) return '';
   const day = String(date.getDate()).padStart(2, '0');
   const month = String(date.getMonth() + 1).padStart(2, '0');
-  const year = date.getFullYear();
+  const year = String(date.getFullYear()).slice(-2);
   return `${day}-${month}-${year}`;
 };
 
@@ -48,12 +50,13 @@ const toApiDateString = (dateInput) => {
   }
   const str = String(dateInput).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
-  const parts = str.split(/[-/]/);
+  const parts = str.split(/[-/.]/);
   if (parts.length === 3) {
     if (parts[0].length === 4) {
       return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
     }
-    return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+    const yearPart = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
+    return `${yearPart}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
   }
   return new Date().toISOString().split('T')[0];
 };
@@ -128,6 +131,7 @@ export default function NewAppointmentScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Form states
+  const [customerTitle, setCustomerTitle] = useState('Mr');
   const [customerName, setCustomerName] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
   
@@ -328,7 +332,7 @@ export default function NewAppointmentScreen() {
     if (!dateText.trim()) {
       newErrors.date = 'Appointment Date is required.';
     } else if (!isValidDateString(dateText) && !/custom/i.test(dateText)) {
-      newErrors.date = 'Invalid date format (use DD-MM-YYYY).';
+      newErrors.date = 'Invalid date format (use DD-MM-YY).';
     } else if (isPastDate(dateText)) {
       newErrors.date = 'Appointment Date cannot be in the past.';
     }
@@ -336,7 +340,7 @@ export default function NewAppointmentScreen() {
     if (!fixDateText.trim()) {
       newErrors.fixDate = 'Appointment Fix Date is required.';
     } else if (!isValidDateString(fixDateText) && !/custom/i.test(fixDateText)) {
-      newErrors.fixDate = 'Invalid date format (use DD-MM-YYYY).';
+      newErrors.fixDate = 'Invalid date format (use DD-MM-YY).';
     } else if (isPastDate(fixDateText)) {
       newErrors.fixDate = 'Appointment Fix Date cannot be in the past.';
     }
@@ -371,9 +375,19 @@ export default function NewAppointmentScreen() {
       .filter(Boolean)
       .join(', ');
 
+    const trimmedCustomerName = customerName.trim();
+    const alreadyHasCustomerPrefix = /^(mr|mrs|ms|m\/s)\b/i.test(trimmedCustomerName);
+    const finalCustomerName = alreadyHasCustomerPrefix
+      ? trimmedCustomerName
+      : `${customerTitle} ${trimmedCustomerName}`;
+
     const appointmentPayload = {
       // Exact Backend Payload Contract
-      customerName: customerName.trim(),
+      customerName: finalCustomerName,
+      customerTitle,
+      title: customerTitle,
+      prefix: customerTitle,
+      salutation: customerTitle,
       mobileNumber: mobileNumber.replace(/[^0-9]/g, ''),
       address: {
         doorNo: doorNo.trim(),
@@ -393,8 +407,8 @@ export default function NewAppointmentScreen() {
       assignedEmployeeId: Number(selectedEmployeeId) || (employeeList[0] ? Number(employeeList[0].id) : null),
 
       // App context & UI display fields
-      clientName: customerName.trim(),
-      name: customerName.trim(),
+      clientName: finalCustomerName,
+      name: finalCustomerName,
       phone: mobileNumber.replace(/[^0-9]/g, ''),
       mobile: mobileNumber.replace(/[^0-9]/g, ''),
       clientPhone: mobileNumber.replace(/[^0-9]/g, ''),
@@ -436,7 +450,7 @@ export default function NewAppointmentScreen() {
         setSuccessModal({
           visible: true,
           title: 'Appointment Booked!',
-          message: `Appointment for ${customerName} has been booked successfully.`,
+          message: `Appointment for ${finalCustomerName} has been booked successfully.`,
         });
       }
     } catch (err) {
@@ -481,16 +495,28 @@ export default function NewAppointmentScreen() {
         <Text style={[styles.label, isDark && styles.labelDark]}>
           Customer Name <Text style={styles.star}>*</Text>
         </Text>
-        <TextInput
-          style={[styles.input, isDark && styles.inputDark, errors.customerName && styles.inputError, { marginBottom: errors.customerName ? 4 : 20 }]}
-          placeholder="Enter Customer Name"
-          placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
-          value={customerName}
-          onChangeText={(val) => {
-            setCustomerName(val);
-            if (errors.customerName) setErrors((prev) => ({ ...prev, customerName: null }));
-          }}
-        />
+        <View style={[styles.nameRow, { marginBottom: errors.customerName ? 4 : 20 }]}>
+          <TitleDropdown
+            value={customerTitle}
+            onChange={(val) => setCustomerTitle(val)}
+            isDark={isDark}
+          />
+          <TextInput
+            style={[
+              styles.input,
+              styles.nameInputWithDropdown,
+              isDark && styles.inputDark,
+              errors.customerName && styles.inputError,
+            ]}
+            placeholder="Enter Customer Name"
+            placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
+            value={customerName}
+            onChangeText={(val) => {
+              setCustomerName(val);
+              if (errors.customerName) setErrors((prev) => ({ ...prev, customerName: null }));
+            }}
+          />
+        </View>
         {errors.customerName && <Text style={styles.errorText}>{errors.customerName}</Text>}
 
         {/* Mobile Number */}
@@ -756,7 +782,7 @@ export default function NewAppointmentScreen() {
         <View style={[styles.inputWrapper, isDark && styles.inputWrapperDark, errors.date && styles.inputError]}>
           <TextInput
             style={[styles.inputWithIcon, isDark && styles.inputWithIconDark]}
-            placeholder="DD-MM-YYYY"
+            placeholder="DD-MM-YY"
             placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
             value={dateText}
             onChangeText={(val) => {
@@ -777,7 +803,7 @@ export default function NewAppointmentScreen() {
         <View style={[styles.inputWrapper, isDark && styles.inputWrapperDark, errors.fixDate && styles.inputError]}>
           <TextInput
             style={[styles.inputWithIcon, isDark && styles.inputWithIconDark]}
-            placeholder="DD-MM-YYYY"
+            placeholder="DD-MM-YY"
             placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
             value={fixDateText}
             onChangeText={(val) => {
@@ -1520,5 +1546,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#1E293B',
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  nameInputWithDropdown: {
+    flex: 1,
+    marginBottom: 0,
+    marginLeft: 8,
   },
 });

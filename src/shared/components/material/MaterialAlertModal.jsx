@@ -27,6 +27,8 @@ import { useColorScheme } from '../../../core/hooks/useColorScheme';
  * @param {string} [props.buttonText='Got It']
  * @param {string} [props.secondaryButtonText]
  * @param {boolean} [props.isLoading=false]
+ * @param {boolean} [props.dismissible=true]
+ * @param {boolean} [props.closeOnConfirm]
  * @param {() => void} [props.onClose]
  * @param {() => void} [props.onConfirm]
  * @param {() => void} [props.onDismiss]
@@ -41,6 +43,8 @@ export default function MaterialAlertModal({
   buttonText = 'Got It',
   secondaryButtonText,
   isLoading = false,
+  dismissible = true,
+  closeOnConfirm,
   onClose,
   onConfirm,
   onDismiss,
@@ -57,6 +61,7 @@ export default function MaterialAlertModal({
   const iconBounce = useRef(new Animated.Value(0)).current;
   const pulseScale = useRef(new Animated.Value(0.85)).current;
   const pulseOpacity = useRef(new Animated.Value(0.65)).current;
+  const isClosingRef = useRef(false);
 
   // Type-specific color themes
   const themeConfig = {
@@ -139,6 +144,7 @@ export default function MaterialAlertModal({
     let pulseLoop = null;
 
     if (visible) {
+      isClosingRef.current = false;
       // Reset values
       backdropOpacity.setValue(0);
       cardScale.setValue(0.82);
@@ -222,6 +228,16 @@ export default function MaterialAlertModal({
   }, [visible]);
 
   const handleClose = () => {
+    if (isClosingRef.current) return;
+    isClosingRef.current = true;
+
+    const dismissCallback = onClose || onConfirm || onDismiss;
+
+    // Safety fallback: ensure dismiss callback fires even if animation interrupted or dropped
+    const fallbackTimer = setTimeout(() => {
+      if (dismissCallback) dismissCallback();
+    }, 200);
+
     // Smooth exit animations
     Animated.parallel([
       Animated.timing(backdropOpacity, {
@@ -241,22 +257,39 @@ export default function MaterialAlertModal({
         useNativeDriver: true,
       }),
     ]).start(() => {
-      const dismissCallback = onClose || onConfirm || onDismiss;
+      clearTimeout(fallbackTimer);
       if (dismissCallback) dismissCallback();
     });
   };
 
   const handlePrimaryPress = () => {
     if (isLoading) return;
-    if (onConfirm && secondaryButtonText) {
+    const shouldKeepOpen =
+      closeOnConfirm === false ||
+      (!dismissible && onConfirm) ||
+      (onConfirm && secondaryButtonText);
+
+    if (shouldKeepOpen && onConfirm) {
       onConfirm();
     } else {
+      const dismissCallback = onClose || onConfirm || onDismiss;
+      if (dismissCallback) dismissCallback();
       handleClose();
     }
   };
 
   const handleSecondaryPress = () => {
-    if (isLoading) return;
+    if (isLoading || !dismissible || isClosingRef.current) return;
+    isClosingRef.current = true;
+
+    const secondaryCallback = onSecondaryAction || onClose || onDismiss;
+    if (secondaryCallback) secondaryCallback();
+
+    // Safety fallback: ensure dismiss callback fires even if animation interrupted or dropped
+    const fallbackTimer = setTimeout(() => {
+      if (secondaryCallback) secondaryCallback();
+    }, 200);
+
     Animated.parallel([
       Animated.timing(backdropOpacity, {
         toValue: 0,
@@ -275,7 +308,7 @@ export default function MaterialAlertModal({
         useNativeDriver: true,
       }),
     ]).start(() => {
-      const secondaryCallback = onSecondaryAction || onClose || onDismiss;
+      clearTimeout(fallbackTimer);
       if (secondaryCallback) secondaryCallback();
     });
   };
@@ -287,7 +320,11 @@ export default function MaterialAlertModal({
       transparent
       visible={visible}
       animationType="none"
-      onRequestClose={handleSecondaryPress}
+      onRequestClose={
+        dismissible
+          ? (secondaryButtonText ? handleSecondaryPress : handleClose)
+          : undefined
+      }
       statusBarTranslucent
     >
       <Animated.View
@@ -298,11 +335,15 @@ export default function MaterialAlertModal({
           },
         ]}
       >
-        {/* Tap outside to dismiss */}
+        {/* Tap outside to dismiss (disabled if dismissible === false) */}
         <TouchableOpacity
           style={StyleSheet.absoluteFill}
           activeOpacity={1}
-          onPress={secondaryButtonText ? handleSecondaryPress : handleClose}
+          onPress={
+            dismissible
+              ? (secondaryButtonText ? handleSecondaryPress : handleClose)
+              : undefined
+          }
         />
 
         {/* Animated Card Content */}
@@ -437,6 +478,7 @@ const styles = StyleSheet.create({
     paddingTop: 28,
     paddingBottom: 24,
     alignItems: 'center',
+    zIndex: 10,
     ...Platform.select({
       ios: {
         shadowColor: '#0F172A',
@@ -526,6 +568,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 20,
     ...Platform.select({
       ios: {
         shadowColor: '#F59E0B',
