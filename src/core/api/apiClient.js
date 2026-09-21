@@ -370,6 +370,70 @@ export const ApiV2 = {
 
   payments: {
     getBankAccounts: () => apiClient.get('/bank-accounts'),
+    getPayView: (quotationId) =>
+      apiClient.get(`/quotations/${quotationId}/pay-view`),
+    recordServicePayment: (quotationId, serviceId, data) => {
+      if (typeof FormData !== 'undefined' && data instanceof FormData) {
+        return apiClient.post(`/quotations/${quotationId}/services/${serviceId}/payments`, data, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+      }
+      return apiClient.post(`/quotations/${quotationId}/services/${serviceId}/payments`, data);
+    },
+    addAdditionalService: (quotationId, data) => {
+      if (typeof FormData !== 'undefined' && data instanceof FormData) {
+        return apiClient.post(`/quotations/${quotationId}/additional-services`, data, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+      }
+      return apiClient.post(`/quotations/${quotationId}/additional-services`, data);
+    },
+    recordAdditionalServicePayment: (quotationId, serviceId, data) => {
+      if (typeof FormData !== 'undefined' && data instanceof FormData) {
+        return apiClient.post(`/quotations/${quotationId}/additional-services/${serviceId}/payments`, data, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+      }
+      return apiClient.post(`/quotations/${quotationId}/additional-services/${serviceId}/payments`, data);
+    },
+    confirmFinalSettlement: (quotationId, data) => {
+      if (typeof FormData !== 'undefined' && data instanceof FormData) {
+        return apiClient.post(`/quotations/${quotationId}/final-settlement`, data, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+      }
+      return apiClient.post(`/quotations/${quotationId}/final-settlement`, data);
+    },
+    updatePricingConfig: (quotationId, data) =>
+      apiClient.patch(`/quotations/${quotationId}/pricing-config`, data),
+    verifyChain: (quotationId) =>
+      apiClient.get(`/quotations/${quotationId}/payments/verify-chain`),
+    verifyPayment: (quotationId, paymentId, data) =>
+      apiClient.post(`/quotations/${quotationId}/payments/${paymentId}/verify`, data),
+    getSinglePaymentVerifyView: (paymentId, quotationId) =>
+      quotationId
+        ? apiClient.get(`/quotations/${quotationId}/payments/${paymentId}/verify-view`)
+        : apiClient.get(`/payments/${paymentId}/verify-view`),
+    recordGstPayment: (quotationId, data) => {
+      if (typeof FormData !== 'undefined' && data instanceof FormData) {
+        return apiClient.post(`/quotations/${quotationId}/gst-payment`, data, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+      }
+      return apiClient.post(`/quotations/${quotationId}/gst-payment`, data);
+    },
+    generateFinalReceipt: (quotationId, data) =>
+      apiClient.post(`/quotations/${quotationId}/final-receipt`, data || {}),
+    toggleReceiptLock: (quotationId, data) =>
+      apiClient.patch(`/quotations/${quotationId}/receipt-lock`, data),
+    getReceiptSettings: () =>
+      apiClient.get('/receipt-settings'),
+    updateReceiptSettings: (data) =>
+      apiClient.put('/receipt-settings', data),
+    deletePayment: (paymentId, quotationId) =>
+      quotationId
+        ? apiClient.delete(`/quotations/${quotationId}/payments/${paymentId}`)
+        : apiClient.delete(`/payments/${paymentId}`),
   },
 
   health: {

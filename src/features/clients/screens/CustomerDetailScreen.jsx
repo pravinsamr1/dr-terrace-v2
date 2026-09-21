@@ -342,6 +342,7 @@ export default function CustomerDetailScreen() {
   const addServiceCycle = () => { };
 
   // Find current appointment or client data
+  // Find current appointment or client data
   const app = React.useMemo(() => {
     if (clientData) {
       return clientData;
@@ -351,12 +352,93 @@ export default function CustomerDetailScreen() {
 
   // API v2: PayView state for the payments tab (live blockchain ledger)
   const [payView, setPayView] = useState(null);
+
+  // Unified Additional Payments / Variation Work Orders resolver
+  // Merges and normalizes items across payView (additionalPayment, additionalPayments, additionalServices)
+  // and appointment/clientData (additionalPayments, additionalPayment)
+  const resolvedAdditionalPayments = React.useMemo(() => {
+    const list = [];
+    const seenIds = new Set();
+
+    const addItems = (items, source) => {
+      if (!items) return;
+      const arr = Array.isArray(items) ? items : (typeof items === 'object' ? [items] : []);
+      arr.forEach((item, idx) => {
+        if (!item) return;
+        const rawId = item.id || item._id;
+        const key = rawId != null ? String(rawId) : `${source}_${idx}`;
+        if (seenIds.has(key)) return;
+
+        const totalPrice = Number(item.totalPrice ?? item.amount ?? item.price ?? item.cost ?? 0);
+        const paidAmount = Number(
+          item.paidAmount ??
+          (item.status === 'paid' || item.status === 'COMPLETED' || item.isPaid
+            ? totalPrice
+            : (Array.isArray(item.payments) && item.payments.length > 0
+                ? item.payments.reduce((acc, p) => acc + Number(p?.amount || 0), 0)
+                : 0))
+        );
+        const balanceAmount = Number(
+          item.balanceAmount ?? Math.max(0, totalPrice - paidAmount)
+        );
+        const title = item.title || item.workDescription || item.description || item.name || item.serviceName || `Variation ${list.length + 1}`;
+
+        if (item.id || (title && String(title).trim() !== '') || totalPrice > 0 || paidAmount > 0) {
+          seenIds.add(key);
+
+          // Normalize payments receipts array
+          let payments = [];
+          if (Array.isArray(item.payments) && item.payments.length > 0) {
+            payments = item.payments;
+          } else if (paidAmount > 0 || item.status === 'paid' || item.voucherNumber || item.transactionId) {
+            payments = [{
+              id: item.paymentId || item.id || `pay_${key}`,
+              amount: paidAmount > 0 ? paidAmount : totalPrice,
+              paymentMethod: item.paymentMethod || item.method || 'CASH',
+              voucher: item.voucherNumber || item.voucher || item.transactionId || item.upiId || (rawId ? String(rawId).slice(0, 8) : 'N/A'),
+              createdAt: item.paymentDate || item.date || item.createdAt || new Date().toISOString(),
+              isVerified: item.isVerified !== undefined ? Boolean(item.isVerified) : true,
+              proofImageUrl: item.document || item.proofImageUrl || item.proofImage || null,
+            }];
+          }
+
+          list.push({
+            ...item,
+            id: item.id || key,
+            title,
+            totalPrice,
+            paidAmount,
+            balanceAmount,
+            sqft: item.sqft || item.area || 0,
+            rate: item.rate || (item.sqft > 0 && totalPrice > 0 ? Math.round(totalPrice / item.sqft) : null),
+            status: item.status || (balanceAmount <= 0 && totalPrice > 0 ? 'COMPLETED' : 'PENDING'),
+            payments,
+          });
+        }
+      });
+    };
+
+    addItems(payView?.additionalPayment, 'pv_add');
+    addItems(payView?.additionalPayments, 'pv_adds');
+    addItems(payView?.additionalServices, 'pv_services');
+    addItems(app?.additionalPayments, 'app_adds');
+    addItems(app?.additionalPayment, 'app_add');
+    addItems(clientData?.additionalPayments, 'cd_adds');
+    addItems(clientData?.additionalPayment, 'cd_add');
+
+    return list;
+  }, [payView, app, clientData]);
   const [isLoadingPayView, setIsLoadingPayView] = useState(false);
+  const payViewRef = React.useRef(payView);
+  payViewRef.current = payView;
   const payViewIdRef = React.useRef(null);
   const activeTabSectionRef = React.useRef('profile');
   const isFetchingPayViewRef = React.useRef(false);
   const isFetchingCustomerDataRef = React.useRef(false);
+  const isFetchingQuotationsRef = React.useRef(false);
+  const hasLoadedQuotationsRef = React.useRef(false);
   const isFirstFocusRef = React.useRef(true);
+  const prevTabRef = React.useRef(null);
 
   const appRef = React.useRef(app);
   appRef.current = app;
@@ -370,21 +452,92 @@ export default function CustomerDetailScreen() {
     }
   }, [payView?.id]);
 
+  // Fetch quotations strictly for the Quotation tab on demand
+  const fetchCustomerQuotations = useCallback(async (force = false) => {
+    const targetId = params.id;
+    if (!targetId) return;
+    if (isFetchingQuotationsRef.current) return;
+    if (!force && hasLoadedQuotationsRef.current && apiQuotationsRef.current.length > 0) return;
+
+    isFetchingQuotationsRef.current = true;
+    setIsLoadingQuotations(true);
+    const cleanId = String(targetId).replace(/^DR/i, '').trim();
+
+    try {
+      const quotsRes = await clientService.getCustomerQuotations(cleanId);
+      if (quotsRes && quotsRes.success) {
+        hasLoadedQuotationsRef.current = true;
+        if (Array.isArray(quotsRes.packages)) {
+          setApiPackages(quotsRes.packages);
+        }
+        if (Array.isArray(quotsRes.quotations)) {
+          setApiQuotations(quotsRes.quotations);
+          const confirmedQ = quotsRes.quotations.find(
+            (q) =>
+              q.isConfirmed === true ||
+              q.isConfirmed === 1 ||
+              q.isConfirmed === 'true' ||
+              q.status === 'CONFIRMED' ||
+              q.status === 'confirmed' ||
+              q.confirmed === true
+          );
+          if (confirmedQ) {
+            setClientData((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    confirmedQuoteId: confirmedQ.id,
+                    activeQuotationId: confirmedQ.id,
+                    totalPayment: confirmedQ.grandTotal || confirmedQ.total || prev.totalPayment,
+                  }
+                : prev
+            );
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to load customer quotations from API:', err?.message);
+    } finally {
+      setIsLoadingQuotations(false);
+      isFetchingQuotationsRef.current = false;
+    }
+  }, [params.id]);
+
   // API v2: Fetch fresh PayView from API for the payments tab (strictly on demand)
-  const fetchPayView = useCallback(async (quoteIdOverride = null) => {
+  const fetchPayView = useCallback(async (quoteIdOverride = null, force = false) => {
+    // Never make payView requests if not on the payment tab (unless explicit quoteIdOverride is provided)
+    if (activeTabSectionRef.current !== 'payment' && !quoteIdOverride) {
+      return null;
+    }
+
+    if (isFetchingPayViewRef.current) return null;
+
     const currentApp = appRef.current;
     const currentApiQuots = apiQuotationsRef.current;
+    const cleanParamId = params.id ? String(params.id).replace(/^DR/i, '').trim() : null;
     const confirmedQuoteId =
       quoteIdOverride ||
+      params.quotationId ||
       currentApp?.confirmedQuoteId ||
       currentApp?.activeQuotationId ||
-      (Array.isArray(currentApp?.quotations) && currentApp.quotations.find((q) => q.isConfirmed)?.id) ||
-      (Array.isArray(currentApiQuots) && currentApiQuots.find((q) => q.isConfirmed)?.id) ||
+      currentApp?.quotationId ||
+      (Array.isArray(currentApp?.quotations) && (
+        currentApp.quotations.find((q) => q.isConfirmed || q.status === 'CONFIRMED' || q.status === 'confirmed' || q.confirmed)?.id ||
+        (currentApp.quotations.length === 1 ? currentApp.quotations[0].id : null)
+      )) ||
+      (Array.isArray(currentApiQuots) && (
+        currentApiQuots.find((q) => q.isConfirmed || q.status === 'CONFIRMED' || q.status === 'confirmed' || q.confirmed)?.id ||
+        (currentApiQuots.length === 1 ? currentApiQuots[0].id : null)
+      )) ||
       payViewIdRef.current ||
-      null;
+      (cleanParamId && !isNaN(Number(cleanParamId)) ? cleanParamId : null);
 
     if (!confirmedQuoteId) return null;
-    if (isFetchingPayViewRef.current) return null;
+
+    // Return existing payView if already loaded and not forced
+    if (!force && payViewRef.current && String(payViewRef.current.id) === String(confirmedQuoteId)) {
+      return payViewRef.current;
+    }
 
     isFetchingPayViewRef.current = true;
     setIsLoadingPayView(true);
@@ -392,6 +545,7 @@ export default function CustomerDetailScreen() {
       const res = await paymentRepository.getPayView(String(confirmedQuoteId));
       if (res?.success && res.data) {
         payViewIdRef.current = String(res.data.id || confirmedQuoteId);
+        payViewRef.current = res.data;
         setPayView(res.data);
         return res.data;
       }
@@ -402,21 +556,19 @@ export default function CustomerDetailScreen() {
       isFetchingPayViewRef.current = false;
     }
     return null;
-  }, []);
+  }, [params.quotationId, params.id]);
 
+  // Load customer profile data strictly (no unwanted extra tab calls)
   const loadCustomerData = useCallback(async () => {
     const targetId = params.id;
     if (!targetId) {
       setIsLoadingClient(false);
-      setIsLoadingQuotations(false);
       return;
     }
     if (isFetchingCustomerDataRef.current) return;
     isFetchingCustomerDataRef.current = true;
 
     setIsLoadingClient(true);
-    setIsLoadingQuotations(true);
-
     const cleanId = String(targetId).replace(/^DR/i, '').trim();
 
     try {
@@ -433,31 +585,6 @@ export default function CustomerDetailScreen() {
       console.warn('Failed to load client details from API:', err?.message);
     } finally {
       setIsLoadingClient(false);
-    }
-
-    try {
-      const quotsRes = await clientService.getCustomerQuotations(cleanId);
-      if (quotsRes && quotsRes.success) {
-        if (Array.isArray(quotsRes.packages)) {
-          setApiPackages(quotsRes.packages);
-        }
-        if (Array.isArray(quotsRes.quotations)) {
-          setApiQuotations(quotsRes.quotations);
-          const confirmedQ = quotsRes.quotations.find(q => q.isConfirmed === true);
-          if (confirmedQ) {
-            setClientData(prev => prev ? {
-              ...prev,
-              confirmedQuoteId: confirmedQ.id,
-              activeQuotationId: confirmedQ.id,
-              totalPayment: confirmedQ.grandTotal || confirmedQ.total || prev.totalPayment,
-            } : prev);
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('Failed to load customer quotations from API:', err?.message);
-    } finally {
-      setIsLoadingQuotations(false);
       isFetchingCustomerDataRef.current = false;
     }
   }, [params.id]);
@@ -466,8 +593,10 @@ export default function CustomerDetailScreen() {
     setRefreshing(true);
     try {
       await loadCustomerData();
-      if (activeTabSectionRef.current === 'payment') {
-        await fetchPayView();
+      if (activeTabSectionRef.current === 'quotation') {
+        await fetchCustomerQuotations(true);
+      } else if (activeTabSectionRef.current === 'payment') {
+        await fetchPayView(null, true);
       }
     } catch (err) {
       console.warn('CustomerDetailScreen refresh error:', err?.message);
@@ -477,21 +606,31 @@ export default function CustomerDetailScreen() {
   };
 
   // Load customer data strictly ONCE when screen mounts or params.id changes
+  const prevIdRef = React.useRef(params.id);
   useEffect(() => {
+    if (prevIdRef.current !== params.id) {
+      prevIdRef.current = params.id;
+      setPayView(null);
+      payViewRef.current = null;
+      payViewIdRef.current = null;
+      hasLoadedQuotationsRef.current = false;
+      prevTabRef.current = null;
+    }
     loadCustomerData();
-  }, [loadCustomerData]);
+  }, [loadCustomerData, params.id]);
 
-  // When returning to this screen after recording a payment, refresh payView if currently on payments tab
+  // When returning to this screen after recording a payment, refresh customer data and payView
   useFocusEffect(
     useCallback(() => {
       if (isFirstFocusRef.current) {
         isFirstFocusRef.current = false;
         return;
       }
+      loadCustomerData();
       if (activeTabSectionRef.current === 'payment') {
-        fetchPayView();
+        fetchPayView(null, true);
       }
-    }, [fetchPayView])
+    }, [fetchPayView, loadCustomerData])
   );
 
   // Stitch Payment Details Modal state
@@ -742,17 +881,20 @@ export default function CustomerDetailScreen() {
       setActiveTabSection(isQuotationConfirmed ? 'payment' : (isAttendedLocked ? 'quotation' : 'profile'));
     }
   }, [activeTabSection, isAttendedLocked, isQuotationConfirmed, isReceiptGenerated]);
-  // Keep activeTabSectionRef in sync
+  // On tab switch: keep ref in sync and lazy-load tab-specific data strictly once when active tab changes
   useEffect(() => {
     activeTabSectionRef.current = activeTabSection;
-  }, [activeTabSection]);
 
-  // Fetch fresh payView from API every time the payments tab is opened
-  useEffect(() => {
-    if (activeTabSection === 'payment') {
-      fetchPayView();
+    if (prevTabRef.current !== activeTabSection) {
+      prevTabRef.current = activeTabSection;
+
+      if (activeTabSection === 'quotation') {
+        fetchCustomerQuotations();
+      } else if (activeTabSection === 'payment') {
+        fetchPayView();
+      }
     }
-  }, [activeTabSection, fetchPayView]);
+  }, [activeTabSection, fetchCustomerQuotations, fetchPayView]);
 
   const [expandedServiceReceipts, setExpandedServiceReceipts] = useState({});
   const [showFullReceiptModal, setShowFullReceiptModal] = useState(false);
@@ -781,7 +923,7 @@ export default function CustomerDetailScreen() {
   const toggleAllServiceReceipts = () => {
     const allKeys = [
       ...(Array.isArray(payView?.services) ? payView.services.map((s, i) => s.id || `svc_${i}`) : []),
-      ...(Array.isArray(payView?.additionalPayment) ? payView.additionalPayment.map((s, i) => s.id || `add_${i}`) : []),
+      ...resolvedAdditionalPayments.map((s, i) => s.id || `add_${i}`),
       'gst_clearance',
     ];
     const isAnyCollapsed = allKeys.some((k) => !expandedServiceReceipts[k]);
@@ -844,8 +986,9 @@ export default function CustomerDetailScreen() {
               return svc;
             });
           }
-          if (Array.isArray(updated.additionalPayment)) {
-            updated.additionalPayment = updated.additionalPayment.map((addSvc) => {
+          const updateAddSvcs = (list) => {
+            if (!Array.isArray(list)) return list;
+            return list.map((addSvc) => {
               if (Array.isArray(addSvc.payments)) {
                 return {
                   ...addSvc,
@@ -864,6 +1007,15 @@ export default function CustomerDetailScreen() {
               }
               return addSvc;
             });
+          };
+          if (Array.isArray(updated.additionalPayment)) {
+            updated.additionalPayment = updateAddSvcs(updated.additionalPayment);
+          }
+          if (Array.isArray(updated.additionalPayments)) {
+            updated.additionalPayments = updateAddSvcs(updated.additionalPayments);
+          }
+          if (Array.isArray(updated.additionalServices)) {
+            updated.additionalServices = updateAddSvcs(updated.additionalServices);
           }
           return updated;
         });
@@ -1934,9 +2086,6 @@ export default function CustomerDetailScreen() {
                       'Got It'
                     );
                     return;
-                  }
-                  if (tab.id === 'payment') {
-                    fetchPayView();
                   }
                   setActiveTabSection(tab.id);
                 }}
@@ -3147,29 +3296,43 @@ export default function CustomerDetailScreen() {
                   : (advanceAmt + (app.initialPaid ? m1Amt : 0) + (app.midTermPaid ? m2Amt : 0) + (app.finalPaid ? m3Amt : 0));
                 const calcRemaining = Math.max(0, dynamicCategoryTotal - calcPaidSoFar);
 
-                const totalCostValue = payView ? (payView.totalWithGst || payView.totalPrice || dynamicCategoryTotal) : dynamicCategoryTotal;
-                const totalPaidSoFar = payView ? (payView.totalPaid ?? calcPaidSoFar) : calcPaidSoFar;
-                const remainingBalance = payView ? (payView.balanceAmount ?? calcRemaining) : calcRemaining;
+                const additionalTotalValue = resolvedAdditionalPayments.reduce(
+                  (sum, item) => sum + Number(item?.totalPrice || item?.amount || 0),
+                  0
+                );
+                const additionalPaidValue = resolvedAdditionalPayments.reduce(
+                  (sum, item) => sum + Number(item?.paidAmount || 0),
+                  0
+                );
+
+                const primaryServicesTotal = payView ? Number(payView.totalPrice || dynamicCategoryTotal || 0) : Number(dynamicCategoryTotal || 0);
+                const baseTotalValue = primaryServicesTotal + additionalTotalValue;
+
+                const totalCostValue = payView ? (payView.totalWithGst || payView.subtotalAfterDiscount || payView.grossSubtotal || baseTotalValue) : baseTotalValue;
+                const totalPaidSoFar = payView?.totalPaid != null ? Number(payView.totalPaid) : (calcPaidSoFar + additionalPaidValue);
+                const remainingBalance = payView?.balanceAmount != null ? Number(payView.balanceAmount) : Math.max(0, totalCostValue - totalPaidSoFar);
                 const paidPercentage = totalCostValue > 0 ? Math.min(100, Math.round((totalPaidSoFar / totalCostValue) * 100)) : 0;
 
                 const allServiceKeys = [
                   ...(Array.isArray(payView?.services) ? payView.services.map((s, i) => s.id || `svc_${i}`) : []),
-                  ...(Array.isArray(payView?.additionalPayment) ? payView.additionalPayment.map((s, i) => s.id || `add_${i}`) : []),
+                  ...resolvedAdditionalPayments.map((s, i) => s.id || `add_${i}`),
                 ];
                 const isAllExpanded = allServiceKeys.length > 0 && allServiceKeys.every((k) => Boolean(expandedServiceReceipts[k]));
 
-                const isAllServicesCompleted =
-                  Array.isArray(payView?.services) && payView.services.length > 0
-                    ? payView.services.every((s) => s.status === 'COMPLETED' || Number(s.balanceAmount || 0) <= 0)
-                    : false;
+                const isAllServicesCompleted = payView?.allServicesCompleted !== undefined
+                  ? Boolean(payView.allServicesCompleted)
+                  : (
+                      (Array.isArray(payView?.services) && payView.services.length > 0
+                        ? payView.services.every((s) => s.status === 'COMPLETED' || Number(s.balanceAmount || 0) <= 0)
+                        : false) &&
+                      (resolvedAdditionalPayments.length > 0
+                        ? resolvedAdditionalPayments.every((s) => s.status === 'COMPLETED' || Number(s.balanceAmount || 0) <= 0)
+                        : true)
+                    );
 
                 const isFullPaymentFinished =
-                  Boolean(app?.fullPaid) ||
-                  (remainingBalance <= 0 && totalCostValue > 0) ||
-                  paidPercentage === 100 ||
-                  isAllServicesCompleted;
-
-                const baseTotalValue = payView ? (payView.totalPrice || dynamicCategoryTotal) : dynamicCategoryTotal;
+                  (Boolean(payView?.allServicesCompleted) || (remainingBalance <= 0 && totalCostValue > 0) || paidPercentage === 100 || isAllServicesCompleted) &&
+                  remainingBalance <= 0;
 
                 const gstPaymentsList = (Array.isArray(payView?.withGstPayments) && payView.withGstPayments.length > 0)
                   ? payView.withGstPayments
@@ -3212,11 +3375,10 @@ export default function CustomerDetailScreen() {
                       Array.isArray(svc.payments) &&
                       svc.payments.some((p) => p.isVerified === false || p.verificationStatus === 'pending')
                     )) ||
-                  (Array.isArray(payView?.additionalPayment) &&
-                    payView.additionalPayment.some((svc) =>
-                      Array.isArray(svc.payments) &&
-                      svc.payments.some((p) => p.isVerified === false || p.verificationStatus === 'pending')
-                    )) ||
+                  (resolvedAdditionalPayments.some((svc) =>
+                    Array.isArray(svc.payments) &&
+                    svc.payments.some((p) => p.isVerified === false || p.verificationStatus === 'pending')
+                  )) ||
                   (Array.isArray(gstPaymentsList) &&
                     gstPaymentsList.some((p) => p.isVerified === false || p.verificationStatus === 'pending')) ||
                   app?.verificationStatus === 'pending' ||
@@ -3262,8 +3424,37 @@ export default function CustomerDetailScreen() {
                   app?.customerGstNumber ||
                   '';
 
+                const renderTaxDecisionCard = () => null;
+
                 const renderStandaloneGstCard = () => {
-                  if (!isGstPaid || (gstPaidAmount <= 0 && gstPaymentsList.length === 0)) return null;
+                  const hasGstActive = Boolean(
+                    payView?.withGst ||
+                    payView?.isGstConfirmed ||
+                    isGstPaid ||
+                    (app?.hasGst && (gstPaidAmount > 0 || app?.gstPaid))
+                  );
+                  if (!hasGstActive) return null;
+
+                  const totalGstAmount = Number(
+                    payView?.gstPayment?.totalPrice ??
+                    (payView?.gstAmount != null && Number(payView.gstAmount) > 0
+                      ? Number(payView.gstAmount)
+                      : gstPaidAmount)
+                  );
+                  if (totalGstAmount <= 0 && gstPaidAmount <= 0 && gstPaymentsList.length === 0) {
+                    return null;
+                  }
+
+                  const paidGstAmount = Number(
+                    payView?.gstPayment?.paidAmount ?? gstPaidAmount
+                  );
+                  const balanceGstAmount = Number(
+                    payView?.gstPayment?.balanceAmount !== undefined
+                      ? payView.gstPayment.balanceAmount
+                      : Math.max(0, totalGstAmount - paidGstAmount)
+                  );
+                  const isGstFullyPaid = balanceGstAmount <= 0 && (paidGstAmount > 0 || isGstPaid);
+
                   return (
                     <View style={{ marginTop: 12 }}>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingHorizontal: 2 }}>
@@ -3279,7 +3470,9 @@ export default function CustomerDetailScreen() {
                           padding: 14,
                           marginBottom: 10,
                           borderWidth: 1.5,
-                          borderColor: isDark ? '#166534' : '#86EFAC',
+                          borderColor: isDark
+                            ? (isGstFullyPaid ? '#166534' : '#B45309')
+                            : (isGstFullyPaid ? '#86EFAC' : '#FDE68A'),
                           shadowColor: '#000',
                           shadowOpacity: 0.03,
                           shadowOffset: { width: 0, height: 1 },
@@ -3295,19 +3488,23 @@ export default function CustomerDetailScreen() {
                                 width: 28,
                                 height: 28,
                                 borderRadius: 14,
-                                backgroundColor: '#DCFCE7',
+                                backgroundColor: isGstFullyPaid ? '#DCFCE7' : '#FEF3C7',
                                 justifyContent: 'center',
                                 alignItems: 'center',
                               }}
                             >
-                              <Ionicons name="shield-checkmark" size={15} color="#16A34A" />
+                              <Ionicons
+                                name={isGstFullyPaid ? 'shield-checkmark' : 'time-outline'}
+                                size={15}
+                                color={isGstFullyPaid ? '#16A34A' : '#D97706'}
+                              />
                             </View>
                             <View style={{ flex: 1 }}>
                               <Text style={{ fontSize: 13, fontWeight: '700', color: isDark ? '#FFFFFF' : '#0F172A' }} numberOfLines={1}>
                                 GST Tax Clearance ({gstPercentVal}%)
                               </Text>
                               <Text style={{ fontSize: 11, color: isDark ? '#94A3B8' : '#64748B', marginTop: 1 }}>
-                                CGST 9%: ₹{Math.round(gstPaidAmount / 2).toLocaleString('en-IN')} • SGST 9%: ₹{Math.round(gstPaidAmount / 2).toLocaleString('en-IN')}
+                                CGST 9%: ₹{Math.round(totalGstAmount / 2).toLocaleString('en-IN')} • SGST 9%: ₹{Math.round(totalGstAmount / 2).toLocaleString('en-IN')}
                               </Text>
                               {customerGstNumber ? (
                                 <Text style={{ fontSize: 11, fontWeight: '600', color: '#1E488F', marginTop: 2 }}>
@@ -3319,9 +3516,13 @@ export default function CustomerDetailScreen() {
 
                           <View
                             style={{
-                              backgroundColor: gstVerificationStatus === 'verified' ? '#ECFDF5' : '#FFFBEB',
+                              backgroundColor: !isGstFullyPaid
+                                ? '#FFFBEB'
+                                : gstVerificationStatus === 'verified' ? '#ECFDF5' : '#FFFBEB',
                               borderWidth: 1,
-                              borderColor: gstVerificationStatus === 'verified' ? '#A7F3D0' : '#FDE68A',
+                              borderColor: !isGstFullyPaid
+                                ? '#FDE68A'
+                                : gstVerificationStatus === 'verified' ? '#A7F3D0' : '#FDE68A',
                               paddingHorizontal: 8,
                               paddingVertical: 3,
                               borderRadius: 9999,
@@ -3331,18 +3532,18 @@ export default function CustomerDetailScreen() {
                             }}
                           >
                             <Ionicons
-                              name={gstVerificationStatus === 'verified' ? 'checkmark-circle' : 'time'}
+                              name={!isGstFullyPaid ? 'time' : (gstVerificationStatus === 'verified' ? 'checkmark-circle' : 'time')}
                               size={11}
-                              color={gstVerificationStatus === 'verified' ? '#047857' : '#D97706'}
+                              color={!isGstFullyPaid ? '#D97706' : (gstVerificationStatus === 'verified' ? '#047857' : '#D97706')}
                             />
                             <Text
                               style={{
-                                color: gstVerificationStatus === 'verified' ? '#047857' : '#D97706',
+                                color: !isGstFullyPaid ? '#D97706' : (gstVerificationStatus === 'verified' ? '#047857' : '#D97706'),
                                 fontSize: 10,
                                 fontWeight: '700',
                               }}
                             >
-                              {gstVerificationStatus === 'verified' ? 'Verified' : 'Pending'}
+                              {!isGstFullyPaid ? 'Payment Pending' : (gstVerificationStatus === 'verified' ? 'Verified' : 'Pending')}
                             </Text>
                           </View>
                         </View>
@@ -3364,7 +3565,7 @@ export default function CustomerDetailScreen() {
                               Total GST
                             </Text>
                             <Text style={{ fontSize: 13, fontWeight: '700', color: isDark ? '#E2E8F0' : '#0F172A', marginTop: 2 }}>
-                              ₹{gstPaidAmount.toLocaleString('en-IN')}
+                              ₹{totalGstAmount.toLocaleString('en-IN')}
                             </Text>
                           </View>
                           <View>
@@ -3372,18 +3573,56 @@ export default function CustomerDetailScreen() {
                               Paid
                             </Text>
                             <Text style={{ fontSize: 13, fontWeight: '700', color: '#16A34A', marginTop: 2 }}>
-                              ₹{gstPaidAmount.toLocaleString('en-IN')}
+                              ₹{paidGstAmount.toLocaleString('en-IN')}
                             </Text>
                           </View>
                           <View>
                             <Text style={{ fontSize: 10, color: isDark ? '#94A3B8' : '#64748B', textTransform: 'uppercase', letterSpacing: 0.5 }}>
                               Balance
                             </Text>
-                            <Text style={{ fontSize: 13, fontWeight: '700', color: isDark ? '#94A3B8' : '#64748B', marginTop: 2 }}>
-                              ₹0
+                            <Text style={{ fontSize: 13, fontWeight: '700', color: balanceGstAmount > 0 ? '#EF4444' : (isDark ? '#94A3B8' : '#64748B'), marginTop: 2 }}>
+                              ₹{balanceGstAmount.toLocaleString('en-IN')}
                             </Text>
                           </View>
                         </View>
+
+                        {/* Record GST Payment Action Button if balance remains */}
+                        {balanceGstAmount > 0 && (
+                          <TouchableOpacity
+                            style={{
+                              marginTop: 12,
+                              height: 44,
+                              borderRadius: 12,
+                              backgroundColor: '#21498B',
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: 8,
+                            }}
+                            onPress={() => {
+                              const qId = payView?.id || app?.confirmedQuoteId || app?.activeQuotationId;
+                              router.push({
+                                pathname: '/payment-form',
+                                params: {
+                                  id: app?.id,
+                                  quotationId: qId ? String(qId) : '',
+                                  stage: 'gst',
+                                  isGstPayment: 'true',
+                                  hasGst: 'true',
+                                  gstPercent: String(gstPercentVal),
+                                  amount: String(balanceGstAmount),
+                                  totalCost: String(Number(baseTotalValue) + totalGstAmount),
+                                },
+                              });
+                            }}
+                            activeOpacity={0.8}
+                          >
+                            <Ionicons name="card-outline" size={16} color="#FFFFFF" />
+                            <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>
+                              Record GST Tax Payment (₹{balanceGstAmount.toLocaleString('en-IN')})
+                            </Text>
+                          </TouchableOpacity>
+                        )}
 
                         {/* Expand/Collapse Receipts Button */}
                         <TouchableOpacity
@@ -3535,10 +3774,24 @@ export default function CustomerDetailScreen() {
                 };
 
                 const renderFullReceiptActionButton = () => {
-                  if (!isFullPaymentFinished) return null;
+                  const isReceiptGen = Boolean(
+                    isReceiptGenerated ||
+                    payView?.isReceiptGenerated ||
+                    app?.isReceiptGenerated ||
+                    payView?.receiptStatus === 'GENERATED'
+                  );
+
+                  const canGenerate = Boolean(
+                    payView?.canGenerateReceipt ||
+                    payView?.canDecideGst ||
+                    payView?.receiptStatus === 'READY' ||
+                    ((isFullPaymentFinished || isAllServicesCompleted) && !hasPendingVerification)
+                  );
+
+                  if (!canGenerate && !isReceiptGen) return null;
 
                   // Do not show Generate Full Receipt button if any payment verification is pending
-                  if (!isReceiptGenerated && hasPendingVerification) {
+                  if (!isReceiptGen && (hasPendingVerification || payView?.hasUnverifiedPayments)) {
                     return null;
                   }
 
@@ -3558,7 +3811,7 @@ export default function CustomerDetailScreen() {
                     ? Number(baseTotalValue) + Number(gstPaidAmount)
                     : Number(totalPaidSoFar || baseTotalValue);
 
-                  if (isReceiptGenerated) {
+                  if (isReceiptGen) {
                     return (
                       <View style={{ marginBottom: 14, marginTop: 10 }}>
                         <View
@@ -3852,6 +4105,11 @@ export default function CustomerDetailScreen() {
                             <Text style={{ fontSize: 22, fontWeight: '800', color: isDark ? '#FFFFFF' : '#0F172A', marginTop: 2 }}>
                               ₹{totalCostValue.toLocaleString()}
                             </Text>
+                            {additionalTotalValue > 0 && (
+                              <Text style={{ fontSize: 11, color: isDark ? '#94A3B8' : '#64748B', marginTop: 2 }}>
+                                Scope: ₹{primaryServicesTotal.toLocaleString()} + Variations: ₹{additionalTotalValue.toLocaleString()}
+                              </Text>
+                            )}
                           </View>
 
                           {paidPercentage === 100 ? (
@@ -4023,8 +4281,8 @@ export default function CustomerDetailScreen() {
 
                           {payView.services.map((svc, sIdx) => {
                             const isCompleted = svc.status === 'COMPLETED' || (Number(svc.balanceAmount) === 0 && Number(svc.totalPrice) > 0);
-                            const isActive = payView.currentActiveServiceId === svc.id || (!isCompleted && sIdx === 0);
-                            const isLocked = !isCompleted && !isActive;
+                            const isActive = !isCompleted;
+                            const isLocked = false;
                             const svcKey = svc.id || `svc_${sIdx}`;
                             const isExpanded = Boolean(expandedServiceReceipts[svcKey]);
                             const servicePayments = Array.isArray(svc.payments) ? svc.payments : [];
@@ -4041,7 +4299,7 @@ export default function CustomerDetailScreen() {
                                   padding: 14,
                                   marginBottom: 10,
                                   borderWidth: 1,
-                                  borderColor: isActive ? '#2557C7' : (isDark ? '#334155' : '#E2E8F0'),
+                                  borderColor: isCompleted ? (isDark ? '#334155' : '#E2E8F0') : '#2557C7',
                                   shadowColor: '#000',
                                   shadowOpacity: 0.03,
                                   shadowOffset: { width: 0, height: 1 },
@@ -4068,7 +4326,7 @@ export default function CustomerDetailScreen() {
                                         service: svc.title || svc.name || '',
                                         serviceName: svc.title || svc.name || '',
                                         amount: (svc.balanceAmount != null && Number(svc.balanceAmount) > 0)
-                                          ? String(Math.round(Number(svc.balanceAmount)))
+                                          ? String(svc.balanceAmount)
                                           : '',
                                       },
                                     });
@@ -4395,6 +4653,11 @@ export default function CustomerDetailScreen() {
                                                           method: receiptItem.method,
                                                           date: receiptItem.date,
                                                           proofImage: receiptItem.proofImageUrl || receiptItem.proofImage || receiptItem.referenceImage,
+                                                          serviceId: receiptItem.serviceId || '',
+                                                          serviceTitle: receiptItem.serviceTitle || receiptItem.stage || '',
+                                                          sqft: receiptItem.sqft != null ? String(receiptItem.sqft) : '',
+                                                          rate: receiptItem.rate != null ? String(receiptItem.rate) : '',
+                                                          totalPrice: receiptItem.totalCost != null ? String(receiptItem.totalCost) : '',
                                                         },
                                                       });
                                                     }}
@@ -4439,20 +4702,20 @@ export default function CustomerDetailScreen() {
                       )}
 
                       {/* API v2: Additional Variation Work Orders Card */}
-                      {Array.isArray(payView?.additionalPayment) && payView.additionalPayment.length > 0 && (
+                      {resolvedAdditionalPayments.length > 0 && (
                         <View style={{ marginTop: 10 }}>
                           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingHorizontal: 2 }}>
                             <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#94A3B8' : '#64748B', letterSpacing: 0.5 }}>
-                              VARIATION WORK ORDERS
+                              ADDITIONAL PAYMENTS & VARIATIONS
                             </Text>
                             <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 9999 }}>
                               <Text style={{ color: '#92400E', fontSize: 10, fontWeight: '700' }}>
-                                {payView.additionalPayment.length} Orders
+                                {resolvedAdditionalPayments.length} Orders
                               </Text>
                             </View>
                           </View>
 
-                          {payView.additionalPayment.map((addSvc, aIdx) => {
+                          {resolvedAdditionalPayments.map((addSvc, aIdx) => {
                             const addKey = addSvc.id || `add_${aIdx}`;
                             const isExpanded = Boolean(expandedServiceReceipts[addKey]);
                             const addPayments = Array.isArray(addSvc.payments) ? addSvc.payments : [];
@@ -4470,7 +4733,7 @@ export default function CustomerDetailScreen() {
                                   padding: 14,
                                   marginBottom: 10,
                                   borderWidth: 1,
-                                  borderColor: isDark ? '#334155' : '#E2E8F0',
+                                  borderColor: isCompleted ? (isDark ? '#334155' : '#E2E8F0') : '#2557C7',
                                   shadowColor: '#000',
                                   shadowOpacity: 0.03,
                                   shadowOffset: { width: 0, height: 1 },
@@ -4490,18 +4753,24 @@ export default function CustomerDetailScreen() {
                                     )}
                                   </View>
                                   <View style={{
-                                    backgroundColor: isCompleted ? '#DCFCE7' : '#FEF3C7',
+                                    backgroundColor: isCompleted ? '#DCFCE7' : '#EFF6FF',
                                     paddingHorizontal: 8,
                                     paddingVertical: 3,
                                     borderRadius: 9999,
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    gap: 3,
                                   }}>
                                     <Text style={{
                                       fontSize: 10,
                                       fontWeight: '700',
-                                      color: isCompleted ? '#166534' : '#92400E',
+                                      color: isCompleted ? '#166534' : '#1E488F',
                                     }}>
-                                      {isCompleted ? 'COMPLETED' : (addSvc.status || 'ACTIVE')}
+                                      {isCompleted ? 'COMPLETED' : 'PAYABLE NOW'}
                                     </Text>
+                                    {!isCompleted && (
+                                      <Ionicons name="chevron-forward" size={11} color="#1E488F" />
+                                    )}
                                   </View>
                                 </View>
 
@@ -4530,6 +4799,48 @@ export default function CustomerDetailScreen() {
                                 <View style={{ marginTop: 8, height: 4, backgroundColor: isDark ? '#334155' : '#F1F5F9', borderRadius: 2, overflow: 'hidden' }}>
                                   <View style={{ width: `${paidPct}%`, height: '100%', backgroundColor: isCompleted ? '#16A34A' : '#D97706', borderRadius: 2 }} />
                                 </View>
+
+                                {/* Pay Balance Action Button if pending balance */}
+                                {!isCompleted && Number(addSvc.balanceAmount) > 0 && (
+                                  <TouchableOpacity
+                                    style={{
+                                      marginTop: 10,
+                                      height: 36,
+                                      borderRadius: 10,
+                                      backgroundColor: '#2557C7',
+                                      flexDirection: 'row',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      gap: 6,
+                                    }}
+                                    onPress={() => {
+                                      const qId = payView?.id
+                                        || app?.confirmedQuoteId
+                                        || app?.activeQuotationId
+                                        || (Array.isArray(app?.quotations) && app.quotations.find((q) => q.isConfirmed)?.id)
+                                        || null;
+                                      router.push({
+                                        pathname: '/payment-form',
+                                        params: {
+                                          id: app.id,
+                                          totalCost: dynamicCategoryTotal,
+                                          quotationId: qId || '',
+                                          serviceId: String(addSvc.id || ''),
+                                          isAdditional: 'true',
+                                          service: addSvc.title || 'Variation Payment',
+                                          serviceName: addSvc.title || 'Variation Payment',
+                                          amount: String(addSvc.balanceAmount || addSvc.totalPrice || ''),
+                                        },
+                                      });
+                                    }}
+                                    activeOpacity={0.8}
+                                  >
+                                    <Ionicons name="card-outline" size={14} color="#FFFFFF" />
+                                    <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>
+                                      Pay Balance ₹{Number(addSvc.balanceAmount).toLocaleString()}
+                                    </Text>
+                                  </TouchableOpacity>
+                                )}
 
                                 {/* Payment Receipts Dropdown Toggle */}
                                 <TouchableOpacity
@@ -4776,6 +5087,11 @@ export default function CustomerDetailScreen() {
                                                           method: receiptItem.method,
                                                           date: receiptItem.date,
                                                           proofImage: receiptItem.proofImageUrl || receiptItem.proofImage || receiptItem.referenceImage,
+                                                          serviceId: receiptItem.serviceId || '',
+                                                          serviceTitle: receiptItem.serviceTitle || receiptItem.stage || '',
+                                                          sqft: receiptItem.sqft != null ? String(receiptItem.sqft) : '',
+                                                          rate: receiptItem.rate != null ? String(receiptItem.rate) : '',
+                                                          totalPrice: receiptItem.totalCost != null ? String(receiptItem.totalCost) : '',
                                                         },
                                                       });
                                                     }}
@@ -7094,25 +7410,44 @@ export default function CustomerDetailScreen() {
                         (Array.isArray(app?.quotations) &&
                           app.quotations.find((q) => q.isConfirmed)?.id) ||
                         null;
-                      const baseTotalValue =
+                      const additionalTotal = resolvedAdditionalPayments.reduce(
+                        (sum, item) => sum + Number(item?.totalPrice || item?.amount || 0),
+                        0
+                      );
+
+                      const baseServiceCost = Number(
                         payView?.totalPrice ||
                         payView?.totalCost ||
                         app?.totalPayment ||
                         app?.totalCost ||
                         app?.cost ||
-                        0;
-                      const gstAmt = Math.round(baseTotalValue * 0.18);
+                        0
+                      );
+                      const baseTotalValue = baseServiceCost + additionalTotal;
+                      const gstPercentToUse = String(
+                        payView?.gstPayment?.gstPercentage ||
+                        payView?.withGstPayment?.gstPercentage ||
+                        payView?.gstPercentage ||
+                        app?.gstPercentage ||
+                        app?.gstPaidDetails?.gstPercentage ||
+                        app?.finalPaidDetails?.gstPercentage ||
+                        18
+                      );
+                      const gstAmt = Math.round(baseTotalValue * (Number(gstPercentToUse) / 100));
 
                       router.push({
                         pathname: '/payment-form',
                         params: {
                           id: app?.id,
                           baseCost: String(baseTotalValue),
-                          totalCost: String(baseTotalValue),
+                          totalCost: String(Number(baseTotalValue) + gstAmt),
+                          baseServiceCost: String(baseServiceCost),
+                          additionalCost: String(additionalTotal),
                           quotationId: qId || '',
-                          stage: 'final',
+                          stage: 'gst',
+                          isGstPayment: 'true',
                           hasGst: 'true',
-                          gstPercent: '18',
+                          gstPercent: gstPercentToUse,
                           amount: String(gstAmt),
                         },
                       });
@@ -7170,13 +7505,20 @@ export default function CustomerDetailScreen() {
                   (Array.isArray(app?.quotations) &&
                     app.quotations.find((q) => q.isConfirmed)?.id) ||
                   null;
-                const baseTotalValue =
+                const additionalTotal = resolvedAdditionalPayments.reduce(
+                  (sum, item) => sum + Number(item?.totalPrice || item?.amount || 0),
+                  0
+                );
+
+                const baseServiceCost = Number(
                   payView?.totalPrice ||
                   payView?.totalCost ||
                   app?.totalPayment ||
                   app?.totalCost ||
                   app?.cost ||
-                  0;
+                  0
+                );
+                const baseTotalValue = baseServiceCost + additionalTotal;
                 const totalPaidSoFar =
                   payView?.totalPaid ??
                   (app?.fullPaid
@@ -7185,6 +7527,12 @@ export default function CustomerDetailScreen() {
                       Number(app?.initialPaidAmount || app?.initialPaidDetails?.amount || 0) +
                       Number(app?.midTermPaidAmount || app?.midTermPaidDetails?.amount || 0) +
                       Number(app?.finalPaidAmount || app?.finalPaidDetails?.amount || 0));
+
+                const gstPercentVal =
+                  app?.gstPercentage ||
+                  app?.gstPaidDetails?.gstPercentage ||
+                  app?.finalPaidDetails?.gstPercentage ||
+                  '18';
 
                 const gstPaidAmount = Number(
                   app?.gstPaidAmount ||
@@ -7195,11 +7543,6 @@ export default function CustomerDetailScreen() {
                   payView?.settlement?.amount ||
                   (isWithGstReceipt ? Math.round(baseTotalValue * (Number(gstPercentVal || 18) / 100)) : 0)
                 );
-                const gstPercentVal =
-                  app?.gstPercentage ||
-                  app?.gstPaidDetails?.gstPercentage ||
-                  app?.finalPaidDetails?.gstPercentage ||
-                  '18';
 
                 const clientName = app?.clientName || app?.name || app?.customerName || 'Customer';
                 const clientPhone = app?.phone || app?.mobile || app?.clientPhone || 'N/A';
@@ -7401,6 +7744,11 @@ export default function CustomerDetailScreen() {
                             ₹{Number(baseTotalValue).toLocaleString('en-IN')}
                           </Text>
                         </View>
+                        {additionalTotal > 0 && (
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 8 }}>
+                            <Text style={{ fontSize: 11, color: isDark ? '#64748B' : '#94A3B8' }}>• Services: ₹{Number(baseServiceCost).toLocaleString('en-IN')} + Variations: ₹{Number(additionalTotal).toLocaleString('en-IN')}</Text>
+                          </View>
+                        )}
 
                         {isWithGstReceipt ? (
                           <>
@@ -7616,8 +7964,8 @@ export default function CustomerDetailScreen() {
                               customerGstNumber: gstVal,
                               gstAmount: finalGstPaidAmt,
                               gstPercentage: finalGstPct,
-                              totalWithGst: (Number(prev.subtotalAfterDiscount || prev.totalPrice || baseTotalValue)) + finalGstPaidAmt,
-                              totalPaid: (Number(prev.totalPaid || baseTotalValue)) + finalGstPaidAmt,
+                              totalWithGst: Number(baseTotalValue) + finalGstPaidAmt,
+                              totalPaid: Number(baseTotalValue) + finalGstPaidAmt,
                               balanceAmount: 0,
                               isReceiptGenerated: true,
                               fullReceiptGenerated: true,
@@ -7695,7 +8043,11 @@ export default function CustomerDetailScreen() {
                           setPayView((prev) => (prev ? {
                             ...prev,
                             withGst: false,
+                            isGst: false,
                             isGstConfirmed: true,
+                            gstPayment: null,
+                            gstPayments: [],
+                            gstAmount: 0,
                             isReceiptGenerated: true,
                             fullReceiptGenerated: true,
                             receiptNumber: generatedRecNo,

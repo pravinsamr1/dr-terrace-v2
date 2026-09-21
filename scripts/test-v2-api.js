@@ -64,6 +64,9 @@ test('API v2 Implementation Verification', async (t) => {
     assert.strictEqual(API_ENDPOINTS.SERVICES, '/services');
     assert.strictEqual(API_ENDPOINTS.SERVICE_DETAILS, '/service-details');
     assert.strictEqual(API_ENDPOINTS.WHERE_TO_WATERPROOF, '/where-to-waterproof');
+    assert.strictEqual(typeof API_ENDPOINTS.QUOTATION_PAYMENT_DELETE, 'function');
+    assert.strictEqual(typeof API_ENDPOINTS.PAYMENT_DELETE, 'function');
+    assert.strictEqual(API_ENDPOINTS.RECEIPT_SETTINGS, '/receipt-settings');
   });
 
   await t.test('2. ApiV2 facade exposes all required domains and methods', () => {
@@ -168,6 +171,20 @@ test('API v2 Implementation Verification', async (t) => {
     assert.strictEqual(typeof ApiV2.masterData.updateEmployee, 'function');
     assert.strictEqual(typeof ApiV2.masterData.deleteEmployee, 'function');
 
+    // Payments & Ledger
+    assert.strictEqual(typeof ApiV2.payments.getPayView, 'function');
+    assert.strictEqual(typeof ApiV2.payments.recordServicePayment, 'function');
+    assert.strictEqual(typeof ApiV2.payments.addAdditionalService, 'function');
+    assert.strictEqual(typeof ApiV2.payments.recordAdditionalServicePayment, 'function');
+    assert.strictEqual(typeof ApiV2.payments.confirmFinalSettlement, 'function');
+    assert.strictEqual(typeof ApiV2.payments.recordGstPayment, 'function');
+    assert.strictEqual(typeof ApiV2.payments.generateFinalReceipt, 'function');
+    assert.strictEqual(typeof ApiV2.payments.toggleReceiptLock, 'function');
+    assert.strictEqual(typeof ApiV2.payments.getReceiptSettings, 'function');
+    assert.strictEqual(typeof ApiV2.payments.updateReceiptSettings, 'function');
+    assert.strictEqual(typeof ApiV2.payments.deletePayment, 'function');
+    assert.strictEqual(typeof ApiV2.payments.verifyChain, 'function');
+
     // Health
     assert.strictEqual(typeof ApiV2.health.check, 'function');
   });
@@ -175,6 +192,15 @@ test('API v2 Implementation Verification', async (t) => {
   await t.test('3. Repositories have all missing v2 methods', () => {
     const { authRepository } = require('../src/features/auth/api/authRepository');
     assert.strictEqual(typeof authRepository.getProfile, 'function');
+
+    const paymentRepository = require('../src/features/payments/api/paymentRepository').default;
+    assert.strictEqual(typeof paymentRepository.getPayView, 'function');
+    assert.strictEqual(typeof paymentRepository.createAdditionalService, 'function');
+    assert.strictEqual(typeof paymentRepository.deletePayment, 'function');
+    assert.strictEqual(typeof paymentRepository.recordGstPayment, 'function');
+    assert.strictEqual(typeof paymentRepository.generateFinalReceipt, 'function');
+    assert.strictEqual(typeof paymentRepository.getReceiptSettings, 'function');
+    assert.strictEqual(typeof paymentRepository.updateReceiptSettings, 'function');
 
     const { appointmentRepository } = require('../src/features/appointments/api/appointmentRepository');
     assert.strictEqual(typeof appointmentRepository.deleteAppointment, 'function');

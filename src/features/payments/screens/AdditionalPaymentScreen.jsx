@@ -46,7 +46,7 @@ export default function AdditionalPaymentScreen() {
   const [rate, setRate] = useState(params.rate ? String(params.rate) : '');
   const [warranty, setWarranty] = useState(params.warranty || '');
   const [notes, setNotes] = useState(params.notes || '');
-  const [paymentAmount, setPaymentAmount] = useState(params.amount ? String(Math.round(Number(params.amount))) : '');
+  const [paymentAmount, setPaymentAmount] = useState(params.amount != null && params.amount !== '' ? String(params.amount) : '');
   const [isAmountManuallyEdited, setIsAmountManuallyEdited] = useState(false);
 
   // API v2: Quotation ID & PayView
@@ -220,8 +220,9 @@ export default function AdditionalPaymentScreen() {
       Alert.alert('Missing Field', 'Please enter a payment title or work description.');
       return;
     }
-    const numericAmt = Number(paymentAmount.replace(/[^0-9]/g, ''));
-    if (!numericAmt || numericAmt <= 0) {
+    const cleanAmtStr = String(paymentAmount ?? '').trim().replace(/[^0-9.]/g, '');
+    const numericAmt = parseFloat(cleanAmtStr) || 0;
+    if (isNaN(numericAmt) || numericAmt <= 0) {
       Alert.alert('Invalid Amount', 'Please enter a valid payment amount.');
       return;
     }
@@ -239,37 +240,60 @@ export default function AdditionalPaymentScreen() {
 
     try {
       if (quotationId) {
-        // ── API v2 Path ─────────────────────────────────────────────────────
-        // Step 1: Create the additional/variation service work order
+        // ── API v2 Path: Atomic Service Creation + Inline Payment (Endpoint 3 & Rule 17) ──
+        let methodFields = {};
+        if (paymentMethod === 'cash') {
+          methodFields = { paymentMethod: 'CASH', voucher: voucherNumber.trim() };
+        } else if (paymentMethod === 'accounts') {
+          const selBank = bankAccounts.find((b) => b.id === selectedBankId) || bankAccounts[0];
+          methodFields = { paymentMethod: 'ACCOUNT', accountId: selBank ? Number(selBank.id) || selBank.id : undefined };
+        } else if (paymentMethod === 'upi') {
+          methodFields = { paymentMethod: 'UPI', upiId: upiTransactionId.trim() };
+        }
+
         const servicePayload = {
           title: workDescription.trim(),
           sqft: numArea || undefined,
           rate: numRate || undefined,
           totalPrice: numericAmt,
           warranty: warranty.trim() || undefined,
-          notes: notes.trim() || undefined,
+          notes: (paymentDate ? `${paymentDate} - ` : '') + (notes.trim() || ''),
+          // Inline payment fields for atomic creation & ledger linking
+          amount: numericAmt,
+          ...methodFields,
+          ...(attachedDoc ? { proofImage: attachedDoc } : {}),
         };
+
         const createRes = await paymentRepository.createAdditionalService(quotationId, servicePayload);
         if (!createRes?.success) throw new Error(createRes?.message || 'Could not create variation service.');
 
-        // Step 2: Record the initial payment for this additional service
-        const createdServiceId = createRes.data?.service?.id || createRes.data?.id;
-        if (createdServiceId && numericAmt > 0) {
-          let methodFields = {};
-          if (paymentMethod === 'cash') {
-            methodFields = { paymentMethod: 'CASH', voucher: voucherNumber.trim() };
-          } else if (paymentMethod === 'accounts') {
-            const selBank = bankAccounts.find((b) => b.id === selectedBankId) || bankAccounts[0];
-            methodFields = { paymentMethod: 'ACCOUNT', accountId: selBank ? Number(selBank.id) || selBank.id : undefined };
-          } else if (paymentMethod === 'upi') {
-            methodFields = { paymentMethod: 'UPI', upiId: upiTransactionId.trim() };
+        // Update local appointment cache so the record is immediately visible on return
+        if (appId) {
+          try {
+            const additionalRecord = {
+              id: createRes?.data?.id || createRes?.data?.additionalService?.id || Date.now(),
+              type: 'additional',
+              title: workDescription.trim(),
+              area: numArea,
+              rate: numRate,
+              warranty: warranty.trim(),
+              notes: notes.trim(),
+              amount: numericAmt,
+              totalPrice: numericAmt,
+              paymentMethod,
+              voucherNumber: paymentMethod === 'cash' ? voucherNumber.trim() : null,
+              transactionId: paymentMethod === 'upi' ? upiTransactionId.trim() : null,
+              paymentDate: paymentDate || formatDateDDMMYY(new Date()),
+              document: attachedDoc ? attachedDoc.name : null,
+              status: 'paid',
+            };
+            const currentAdditionals = client?.additionalPayments || [];
+            await appointmentRepository.updateAppointment(appId, {
+              additionalPayments: [...currentAdditionals, additionalRecord],
+            });
+          } catch (_e) {
+            // Non-blocking local cache update
           }
-          const payRes = await paymentRepository.recordAdditionalServicePayment(quotationId, String(createdServiceId), {
-            amount: numericAmt,
-            notes: paymentDate || '',
-            ...methodFields,
-          });
-          if (!payRes?.success) throw new Error(payRes?.message || 'Could not record payment for variation service.');
         }
       } else {
         // ── Legacy Path ─────────────────────────────────────────────────────
@@ -319,7 +343,7 @@ export default function AdditionalPaymentScreen() {
             } else {
               router.replace({
                 pathname: '/customer-detail',
-                params: { id: client?.id || params.id, initialTab: 'payments' },
+                params: { id: client?.id || params.id, initialTab: 'payment' },
               });
             }
           },
@@ -372,7 +396,7 @@ export default function AdditionalPaymentScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingBottom: Math.max(insets.bottom + 90, 110) },
+          { paddingBottom: Math.max(insets.bottom + 24, 32) },
         ]}
         keyboardShouldPersistTaps="handled"
       >
@@ -503,12 +527,15 @@ export default function AdditionalPaymentScreen() {
             <Text style={[styles.currencyPrefix, isDark && styles.textDark]}>Rs.</Text>
             <TextInput
               style={[styles.amountInput, isDark && styles.textDark]}
-              keyboardType="numeric"
+              keyboardType="decimal-pad"
               placeholder="Enter amount"
               placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
               value={paymentAmount}
               onChangeText={(val) => {
-                setPaymentAmount(val);
+                const filtered = val.replace(/[^0-9.]/g, '');
+                const parts = filtered.split('.');
+                const sanitized = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join('')}` : filtered;
+                setPaymentAmount(sanitized);
                 setIsAmountManuallyEdited(true);
               }}
             />
@@ -745,34 +772,34 @@ export default function AdditionalPaymentScreen() {
             </View>
           )}
         </View>
+
+        {/* Action Buttons (Non-sticky, bottom of content) */}
+        <View style={[styles.bottomActionBar, isDark && styles.bottomActionBarDark]}>
+          <TouchableOpacity
+            style={[styles.cancelBtn, isDark && styles.cancelBtnDark]}
+            onPress={() => router.back()}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.cancelBtnText, isDark && styles.textDark]}>Cancel</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.submitBtn, isSubmitting && { opacity: 0.8 }]}
+            onPress={handleSubmit}
+            activeOpacity={0.85}
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? (
+              <ActivityIndicator size="small" color="#FFFFFF" style={{ marginRight: 6 }} />
+            ) : (
+              <Ionicons name="checkmark-sharp" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
+            )}
+            <Text style={styles.submitBtnText}>
+              {isSubmitting ? 'Submitting...' : 'Submit Additional Payment'}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
-
-      {/* Bottom Docked Action Bar */}
-      <View style={[styles.bottomActionBar, isDark && styles.bottomActionBarDark, { paddingBottom: Math.max(insets.bottom + 12, 20) }]}>
-        <TouchableOpacity
-          style={[styles.cancelBtn, isDark && styles.cancelBtnDark]}
-          onPress={() => router.back()}
-          activeOpacity={0.8}
-        >
-          <Text style={[styles.cancelBtnText, isDark && styles.textDark]}>Cancel</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.submitBtn, isSubmitting && { opacity: 0.8 }]}
-          onPress={handleSubmit}
-          activeOpacity={0.85}
-          disabled={isSubmitting}
-        >
-          {isSubmitting ? (
-            <ActivityIndicator size="small" color="#FFFFFF" style={{ marginRight: 6 }} />
-          ) : (
-            <Ionicons name="checkmark-sharp" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
-          )}
-          <Text style={styles.submitBtnText}>
-            {isSubmitting ? 'Submitting...' : 'Submit Additional Payment'}
-          </Text>
-        </TouchableOpacity>
-      </View>
 
       {/* Bank Account Selection Modal */}
       <Modal
@@ -1272,28 +1299,11 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   bottomActionBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
-    borderTopColor: '#E2E8F0',
-    paddingHorizontal: 16,
-    paddingTop: 12,
     flexDirection: 'row',
     gap: 12,
-    elevation: 20,
-    zIndex: 999,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowOffset: { width: 0, height: -2 },
-    shadowRadius: 8,
+    marginTop: 24,
   },
-  bottomActionBarDark: {
-    backgroundColor: '#1E293B',
-    borderTopColor: '#334155',
-  },
+  bottomActionBarDark: {},
   cancelBtn: {
     flex: 1,
     height: 48,

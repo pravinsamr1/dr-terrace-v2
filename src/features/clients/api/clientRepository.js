@@ -98,6 +98,17 @@ export const clientRepository = {
       sitePhotos: Array.isArray(raw.sitePhotos) ? raw.sitePhotos : [],
       inspections: Array.isArray(raw.inspections) ? raw.inspections : [],
       extraCharges: Array.isArray(raw.extraCharges) ? raw.extraCharges : [],
+      confirmedQuoteId: raw.confirmedQuoteId ?? raw.activeQuotationId ?? raw.quotationId ?? null,
+      activeQuotationId: raw.activeQuotationId ?? raw.confirmedQuoteId ?? raw.quotationId ?? null,
+      quotationId: raw.quotationId ?? raw.confirmedQuoteId ?? null,
+      totalPayment: raw.totalPayment ?? raw.totalAmount ?? raw.grandTotal ?? raw.total ?? 0,
+      warranty: raw.warranty ?? null,
+      warrantyClaims: Array.isArray(raw.warrantyClaims) ? raw.warrantyClaims : [],
+      isReceiptGenerated: Boolean(raw.isReceiptGenerated || raw.fullReceiptGenerated),
+      fullReceiptGenerated: Boolean(raw.fullReceiptGenerated || raw.isReceiptGenerated),
+      isReceiptLocked: Boolean(raw.isReceiptLocked),
+      receiptNumber: raw.receiptNumber ?? null,
+      siteVisited: Boolean(raw.siteVisited ?? raw.isSiteVisited),
     };
   },
 

@@ -24,7 +24,6 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { logoBase64 } from '../../../shared/constants/LogoBase64';
 import { sealBase64 } from '../../../shared/constants/SealBase64';
-import { signatureBase64 } from '../../../shared/constants/SignatureBase64';
 import { appointmentRepository } from '../../appointments/api/appointmentRepository';
 import { clientRepository } from '../../clients/api/clientRepository';
 import { paymentRepository } from '../api/paymentRepository';
@@ -717,10 +716,7 @@ const generateTaxInvoiceHTML = (app, customerGst, finalReceiptData = null, param
                 <td style="width: 50%; vertical-align: top;">
                   <div class="sign-block">
                     <div class="sign-title">With regards,</div>
-                    <div class="signature-container">
-                      <img src="data:image/png;base64,${signatureBase64}" class="signature-img" alt="Authorized Signature" />
-                    </div>
-                    <div class="signer-name">P.SRIDHAR</div>
+                    <div class="signer-name" style="margin-top: 6px;">P.SRIDHAR</div>
                     <div class="signer-role">ADMIN</div>
                     <div class="signer-phone">&#9742; 044 &ndash; 45 000 775</div>
                   </div>
@@ -1127,14 +1123,7 @@ export default function ReceiptScreen() {
           <View style={styles.bottomSignRow}>
             <View style={styles.signBlockLeft}>
               <Text style={styles.withRegardsLabel}>With regards,</Text>
-              <View style={styles.signatureImageContainer}>
-                <Image
-                  source={{ uri: `data:image/png;base64,${signatureBase64}` }}
-                  style={styles.signatureImage}
-                  resizeMode="contain"
-                />
-              </View>
-              <Text style={styles.signerNameBold}>P.SRIDHAR</Text>
+              <Text style={[styles.signerNameBold, { marginTop: 4 }]}>P.SRIDHAR</Text>
               <Text style={styles.signerRoleBold}>ADMIN</Text>
               <View style={styles.signerPhoneRow}>
                 <Ionicons name="call" size={11} color="#000000" style={{ marginRight: 4 }} />

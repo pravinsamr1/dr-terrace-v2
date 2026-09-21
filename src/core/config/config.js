@@ -10,13 +10,13 @@
 
 // ── API v2 Base URL ───────────────────────────────────────────────────────────
 export const API_BASE_URL =
-  // process.env.EXPO_PUBLIC_API_URL || 'https://amusement-easter-praising.ngrok-free.dev/api/v2';
-  process.env.EXPO_PUBLIC_API_URL || 'https://drterrace.pravinsam.in/api/v2';
+  process.env.EXPO_PUBLIC_API_URL || 'https://amusement-easter-praising.ngrok-free.dev/api/v2';
+  // process.env.EXPO_PUBLIC_API_URL || 'https://drterrace.pravinsam.in/api/v2';
   // process.env.EXPO_PUBLIC_API_URL || 'https://nexacrm.in/api/v2';
   
   // Legacy v1 base (kept for employee image URL construction only)
-  // export const API_V1_BASE_URL = 'https://amusement-easter-praising.ngrok-free.dev';
-  export const API_V1_BASE_URL = 'https://drterrace.pravinsam.in';
+  export const API_V1_BASE_URL = 'https://amusement-easter-praising.ngrok-free.dev';
+  // export const API_V1_BASE_URL = 'https://drterrace.pravinsam.in';
 // export const API_V1_BASE_URL = 'https://nexacrm.in';
 
 export const API_ENDPOINTS = {
@@ -53,6 +53,9 @@ export const API_ENDPOINTS = {
   QUOTATION_GST_PAYMENT: (quoteId) => `/quotations/${quoteId}/gst-payment`,
   QUOTATION_FINAL_RECEIPT: (quoteId) => `/quotations/${quoteId}/final-receipt`,
   QUOTATION_RECEIPT_LOCK: (quoteId) => `/quotations/${quoteId}/receipt-lock`,
+  QUOTATION_PAYMENT_DELETE: (quoteId, paymentId) => `/quotations/${quoteId}/payments/${paymentId}`,
+  PAYMENT_DELETE: (paymentId) => `/payments/${paymentId}`,
+  RECEIPT_SETTINGS: '/receipt-settings',
 
   // Master data & dropdowns
   WHERE_FOR_WATERPROOF: '/where-to-waterproof',

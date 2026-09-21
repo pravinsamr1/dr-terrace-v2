@@ -1422,8 +1422,7 @@ export default function MakeQuotationScreen() {
     const cleaned = rawClientName.replace(/^(mr\.|mrs\.|ms\.|dr\.)\s+/i, '').trim();
     return (cleaned || rawClientName).slice(0, 2).toUpperCase() || 'MR';
   })();
-  const prefix = (rawClientName && !rawClientName.trim().toLowerCase().startsWith('mr.')) ? 'Mr. ' : '';
-  const displayName = rawClientName ? `${prefix}${rawClientName.trim()}` : `Customer #${params.id || ''}`;
+  const displayName = rawClientName ? `${rawClientName.trim()}` : `Customer #${params.id || ''}`;
   const displayId = `DR${app?.customerId || app?.appointmentId || app?.id || params.id || ''}`.replace(/^DRDR/i, 'DR');
   const displayPhone = app?.mobileNumber || app?.phone || 'N/A';
 

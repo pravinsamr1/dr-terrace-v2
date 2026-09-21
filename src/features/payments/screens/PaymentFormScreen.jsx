@@ -53,8 +53,15 @@ export default function PaymentFormScreen() {
     params.stage || (params.milestone?.includes('final') ? 'final' : 'initial')
   );
   const [hasGst, setHasGst] = useState(params.hasGst === 'true' || params.hasGst === true);
+  const isGstPayment = Boolean(
+    stageId === 'gst' ||
+    params.isGstPayment === 'true' ||
+    params.isGstPayment === true ||
+    params.stage === 'GST Tax Clearance' ||
+    params.serviceTitle === 'GST Tax Clearance'
+  );
   const [gstPercent, setGstPercent] = useState(params.gstPercent ? String(params.gstPercent) : '18');
-  const [paymentAmount, setPaymentAmount] = useState(params.amount ? String(Math.round(Number(params.amount))) : '');
+  const [paymentAmount, setPaymentAmount] = useState(params.amount != null && params.amount !== '' ? String(params.amount) : '');
   const [paymentMethod, setPaymentMethod] = useState('cash'); // 'upi' | 'card' | 'cash'
   const [upiTransactionId, setUpiTransactionId] = useState('');
   const [bankAccounts, setBankAccounts] = useState([]);
@@ -104,21 +111,25 @@ export default function PaymentFormScreen() {
           const primary = normalized.find((b) => b.isPrimary) || normalized[0];
           if (primary) setSelectedBankId(primary.id);
         }
-        // Identify the target service (prefer route param serviceId/serviceName if passed)
-        if (Array.isArray(pv.services) && pv.services.length > 0) {
+        // Identify the target service from all services (including variation payments)
+        const allPvServices = [
+          ...(Array.isArray(pv.services) ? pv.services : []),
+          ...(Array.isArray(pv.additionalPayment) ? pv.additionalPayment : []),
+        ];
+        if (allPvServices.length > 0) {
           const paramSvcId = params.serviceId ? String(params.serviceId) : null;
           const paramSvcName = (params.serviceName || params.service || '').trim().toLowerCase();
-          const targetSvc = (paramSvcId && pv.services.find((s) => String(s.id) === paramSvcId))
-            || (paramSvcName && pv.services.find((s) => (s.title || s.name || '').trim().toLowerCase() === paramSvcName))
-            || (pv.currentActiveServiceId && pv.services.find((s) => String(s.id) === String(pv.currentActiveServiceId)))
-            || pv.services[0];
+          const targetSvc = (paramSvcId && allPvServices.find((s) => String(s.id) === paramSvcId))
+            || (paramSvcName && allPvServices.find((s) => (s.title || s.name || '').trim().toLowerCase() === paramSvcName))
+            || (pv.currentActiveServiceId && allPvServices.find((s) => String(s.id) === String(pv.currentActiveServiceId)))
+            || allPvServices[0];
           if (targetSvc) {
             setActiveService(targetSvc);
             setSelectedServiceId(String(targetSvc.id));
             setSelectedServiceName(targetSvc.title || targetSvc.name || '');
           }
 
-          const pvServices = pv.services.map((s, idx) => ({
+          const pvServices = allPvServices.map((s, idx) => ({
             id: String(s.id || `pv_svc_${idx}`),
             name: s.title || s.name || `Service ${idx + 1}`,
           }));
@@ -209,6 +220,14 @@ export default function PaymentFormScreen() {
         }
       });
     }
+    if (Array.isArray(app.additionalPayments)) {
+      app.additionalPayments.forEach((a, idx) => {
+        const name = a?.title || a?.name || a?.serviceName || `Variation ${idx + 1}`;
+        if (name && typeof name === 'string' && name.trim()) {
+          appServices.push({ id: String(a?.id || `app_add_${idx}`), name: name.trim() });
+        }
+      });
+    }
 
     if (appServices.length > 0) {
       setServices((prev) => {
@@ -289,9 +308,69 @@ export default function PaymentFormScreen() {
     });
   }, [params.id]);
 
-  const totalProjectCost = Number(params.totalCost) || Number(app?.totalPayment) || Number(app?.totalCost) || Number(app?.cost) || Number(app?.totalAmount) || 0;
+  const additionalPaymentsTotal = React.useMemo(() => {
+    if (payView) {
+      // API may return additionalPayment as a single object OR as an array
+      const addPayList = Array.isArray(payView?.additionalPayment)
+        ? payView.additionalPayment
+        : (payView?.additionalPayment && typeof payView.additionalPayment === 'object' ? [payView.additionalPayment] : []);
+      if (addPayList.length > 0) {
+        return addPayList.reduce(
+          (sum, item) => sum + Number(item?.totalPrice || item?.amount || item?.price || item?.paidAmount || 0),
+          0
+        );
+      }
+      // Also check additionalAmount from payView (pre-computed by API)
+      if (payView?.additionalAmount != null && Number(payView.additionalAmount) > 0) {
+        return Number(payView.additionalAmount);
+      }
+      return 0;
+    }
+    if (Array.isArray(app?.additionalPayments) && app.additionalPayments.length > 0) {
+      return app.additionalPayments.reduce(
+        (sum, item) => sum + Number(item?.totalPrice || item?.amount || item?.price || 0),
+        0
+      );
+    }
+    return Number(params.additionalCost || 0);
+  }, [payView, payView?.additionalPayment, payView?.additionalAmount, app?.additionalPayments, params.additionalCost]);
+
+  const primaryServicesCost = React.useMemo(() => {
+    if (payView?.totalPrice != null && Number(payView.totalPrice) > 0) {
+      return Number(payView.totalPrice);
+    }
+    const paramBase = Number(params.baseServiceCost);
+    if (paramBase > 0) return paramBase;
+    const paramCost = Number(params.baseCost || params.totalCost);
+    if (paramCost > 0) return Math.max(0, paramCost - additionalPaymentsTotal);
+    const appCost = Number(app?.cost || app?.totalPayment || app?.totalCost || app?.totalAmount || 0);
+    return appCost;
+  }, [payView?.totalPrice, params.baseServiceCost, params.baseCost, params.totalCost, app, additionalPaymentsTotal]);
 
   const baseTotal = React.useMemo(() => {
+    // For GST or Final settlement, base must include additional variation payments
+    if (hasGst || stageId === 'final' || isGstPayment) {
+      // Prefer API-computed totals that already include additional payments
+      const apiGrossTotal = Number(
+        payView?.grossSubtotal ||
+        payView?.subtotalAfterDiscount ||
+        payView?.totalPaid ||
+        0
+      );
+      if (apiGrossTotal > 0) return apiGrossTotal;
+
+      // Fall back to params.baseCost explicitly passed by the caller (already includes additional)
+      const paramCost = Number(params.baseCost);
+      if (paramCost > 0) return paramCost;
+
+      // Last resort: services total + additional
+      if (payView?.totalPrice != null && Number(payView.totalPrice) > 0) {
+        return Number(payView.totalPrice) + additionalPaymentsTotal;
+      }
+      const appCost = Number(app?.cost || app?.totalPayment || app?.totalCost || app?.totalAmount || 0);
+      return appCost + additionalPaymentsTotal;
+    }
+
     if (payView?.totalPrice != null && Number(payView.totalPrice) > 0) {
       return Number(payView.totalPrice);
     }
@@ -299,7 +378,25 @@ export default function PaymentFormScreen() {
     if (paramCost > 0) return paramCost;
     const appCost = Number(app?.cost || app?.totalPayment || app?.totalCost || app?.totalAmount || 0);
     return appCost;
-  }, [payView, params.baseCost, params.totalCost, app]);
+  }, [payView?.totalPrice, payView?.grossSubtotal, payView?.subtotalAfterDiscount, payView?.totalPaid, params.baseCost, params.totalCost, app, hasGst, stageId, isGstPayment, additionalPaymentsTotal, primaryServicesCost]);
+
+  const totalProjectCost = Math.max(
+    Number(params.totalCost) || 0,
+    Number(app?.totalPayment) || 0,
+    Number(app?.totalCost) || 0,
+    Number(app?.cost) || 0,
+    Number(app?.totalAmount) || 0,
+    baseTotal
+  );
+
+  // Auto-sync calculated GST amount when baseTotal or gstPercent updates
+  useEffect(() => {
+    if ((stageId === 'final' && hasGst || isGstPayment) && baseTotal > 0) {
+      const pct = parseFloat(gstPercent) || 18;
+      const calculatedGst = Math.round(baseTotal * (pct / 100));
+      setPaymentAmount(String(calculatedGst));
+    }
+  }, [baseTotal, stageId, hasGst, isGstPayment, gstPercent]);
 
   const handleGstPercentChange = (val) => {
     const cleaned = val.replace(/[^0-9.]/g, '');
@@ -356,7 +453,7 @@ export default function PaymentFormScreen() {
   // Initialize amount based on params or stage
   useEffect(() => {
     if (params.amount !== undefined && params.amount !== '') {
-      setPaymentAmount(String(Math.round(Number(params.amount))));
+      setPaymentAmount(String(params.amount));
     }
 
     if (params.hasGst !== undefined) {
@@ -470,16 +567,22 @@ export default function PaymentFormScreen() {
   };
 
   const handleSubmit = async () => {
-    const numericAmt = Number(paymentAmount.replace(/[^0-9]/g, ''));
+    const cleanAmtStr = String(paymentAmount ?? '').trim().replace(/[^0-9.]/g, '');
+    const numericAmt = parseFloat(cleanAmtStr) || 0;
     const isFinalSettlement = stageId === 'final';
+    const isGstPayment =
+      stageId === 'gst' ||
+      params.isGstPayment === 'true' ||
+      params.stage === 'GST Tax Clearance' ||
+      params.serviceTitle === 'GST Tax Clearance';
 
-    if ((!numericAmt || numericAmt < 0) || (numericAmt === 0 && !(isFinalSettlement && !hasGst))) {
+    if (isNaN(numericAmt) || numericAmt < 0 || (numericAmt === 0 && !(isFinalSettlement && !hasGst))) {
       Alert.alert('Invalid Amount', 'Please enter a valid positive payment amount.');
       return;
     }
 
     const maxQuotationBalance = payView?.balanceAmount != null ? Number(payView.balanceAmount) : null;
-    if (!isFinalSettlement && maxQuotationBalance !== null && maxQuotationBalance >= 0 && numericAmt > maxQuotationBalance) {
+    if (!isFinalSettlement && !isGstPayment && maxQuotationBalance !== null && maxQuotationBalance >= 0 && numericAmt > (maxQuotationBalance + 0.01)) {
       Alert.alert(
         'Amount Exceeds Balance',
         `Payment amount (₹${numericAmt.toLocaleString()}) exceeds remaining quotation balance (₹${maxQuotationBalance.toLocaleString()}).`
@@ -487,7 +590,54 @@ export default function PaymentFormScreen() {
       return;
     }
 
-    if (!isFinalSettlement && services.length > 0 && !selectedServiceName) {
+    if (isGstPayment) {
+      // Only enforce a GST balance cap when there is an existing GST service with a known balance.
+      // When gstPayment is null (first-time GST recording) and gstAmount is 0, there is no cap yet.
+      const hasExistingGstService = payView?.gstPayment != null && payView.gstPayment.balanceAmount != null;
+      const hasKnownGstAmount = payView?.gstAmount != null && Number(payView.gstAmount) > 0;
+
+      if (hasExistingGstService) {
+        const maxGstBalance = Number(payView.gstPayment.balanceAmount);
+        if (maxGstBalance >= 0 && numericAmt > (maxGstBalance + 0.01)) {
+          Alert.alert(
+            'Amount Exceeds GST Balance',
+            `Payment amount (₹${numericAmt.toLocaleString()}) exceeds remaining GST tax clearance balance (₹${maxGstBalance.toLocaleString()}).`
+          );
+          return;
+        }
+      } else if (hasKnownGstAmount) {
+        const maxGstBalance = Number(payView.gstAmount);
+        if (numericAmt > (maxGstBalance + 0.01)) {
+          Alert.alert(
+            'Amount Exceeds GST Balance',
+            `Payment amount (₹${numericAmt.toLocaleString()}) exceeds remaining GST tax clearance balance (₹${maxGstBalance.toLocaleString()}).`
+          );
+          return;
+        }
+      }
+      // If neither exists, this is a new GST payment — no cap applied.
+    }
+
+    const allKnownServices = [
+      ...(Array.isArray(payView?.services) ? payView.services : []),
+      ...(Array.isArray(payView?.additionalPayment) ? payView.additionalPayment : []),
+    ];
+    const targetService = (selectedServiceId && allKnownServices.find((s) => String(s.id) === String(selectedServiceId)))
+      || activeService;
+
+    const maxAllowedServiceAmt = targetService?.balanceAmount != null && Number(targetService.balanceAmount) > 0
+      ? Number(targetService.balanceAmount)
+      : (targetService?.totalPrice != null && Number(targetService.totalPrice) > 0 ? Number(targetService.totalPrice) : null);
+
+    if (!isFinalSettlement && !isGstPayment && maxAllowedServiceAmt !== null && maxAllowedServiceAmt > 0 && numericAmt > (maxAllowedServiceAmt + 0.01)) {
+      Alert.alert(
+        'Amount Exceeds Service Balance',
+        `Payment amount (₹${numericAmt.toLocaleString()}) cannot exceed the service balance (₹${maxAllowedServiceAmt.toLocaleString()}).`
+      );
+      return;
+    }
+
+    if (!isFinalSettlement && !isGstPayment && services.length > 0 && !selectedServiceName) {
       Alert.alert('Missing Service', 'Please select a service for this payment.');
       return;
     }
@@ -517,7 +667,8 @@ export default function PaymentFormScreen() {
   const processPaymentSubmission = async () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
-    const numericAmt = Number(paymentAmount.replace(/[^0-9]/g, ''));
+    const cleanAmtStr = String(paymentAmount ?? '').trim().replace(/[^0-9.]/g, '');
+    const numericAmt = parseFloat(cleanAmtStr) || 0;
     const isFinalSettlement = stageId === 'final';
     const cleanId = String(app?.id || params.id).replace(/^DR/i, '').trim();
 
@@ -559,7 +710,10 @@ export default function PaymentFormScreen() {
           ...(attachedDoc ? { proofImage: attachedDoc } : {}),
         };
 
-        if (isFinalSettlement) {
+        if (isGstPayment) {
+          const res = await paymentRepository.recordGstPayment(quotationId, basePayload);
+          if (!res?.success) throw new Error(res?.message || 'GST clearance payment failed');
+        } else if (isFinalSettlement) {
           const settlementPayload = {
             withGst: hasGst,
             gstPercentage: hasGst ? (Number(gstPercent) || 0) : 0,
@@ -590,7 +744,23 @@ export default function PaymentFormScreen() {
           const apptUpdate = {
             verificationStatus: 'pending',
             isVerified: false,
-            ...(isFinalSettlement ? {
+            ...(isGstPayment ? {
+              hasGst: true,
+              gstPaid: true,
+              gstPercentage: Number(gstPercent) || 18,
+              gstPaidAmount: numericAmt,
+              gstPaidDetails: {
+                amount: numericAmt,
+                paymentMethod,
+                paymentDate,
+                hasGst: true,
+                gstPercentage: Number(gstPercent) || 18,
+                voucherNumber: voucherNumber.trim(),
+                upiTransactionId: upiTransactionId.trim(),
+                verificationStatus: 'pending',
+                ...docInfo,
+              },
+            } : isFinalSettlement ? {
               hasGst: hasGst,
               gstPaid: hasGst,
               gstPercentage: hasGst ? (Number(gstPercent) || 0) : 0,
@@ -628,7 +798,7 @@ export default function PaymentFormScreen() {
               documentName: attachedDoc.name,
             } : {}),
           };
-          await appointmentRepository.updateAppointment(cleanId, apptUpdate).catch(() => {});
+          await appointmentRepository.updateAppointment(cleanId, apptUpdate).catch(() => { });
         }
       } else {
         // ── Legacy Path: no quotationId — update appointment directly ──────────
@@ -718,9 +888,11 @@ export default function PaymentFormScreen() {
       'Payment Recorded Successfully!',
       attachedDoc
         ? `Payment of ₹${numericAmt.toLocaleString()} and reference image recorded. Sent to Admin for verification.`
-        : isFinalSettlement
-        ? `Final Settlement of ₹${numericAmt.toLocaleString()} has been recorded. Warranty activation is now pending.`
-        : `Payment of ₹${numericAmt.toLocaleString()} recorded in the blockchain ledger.`,
+        : isGstPayment
+          ? `GST clearance payment of ₹${numericAmt.toLocaleString()} recorded in the blockchain ledger. Sent to Admin for verification.`
+          : isFinalSettlement
+            ? `Final Settlement of ₹${numericAmt.toLocaleString()} has been recorded. Warranty activation is now pending.`
+            : `Payment of ₹${numericAmt.toLocaleString()} recorded in the blockchain ledger.`,
       [
         {
           text: 'Done',
@@ -785,55 +957,216 @@ export default function PaymentFormScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingBottom: Math.max(insets.bottom + 90, 110) },
+          { paddingBottom: Math.max(insets.bottom + 24, 32) },
         ]}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Active Service Card - API v2 live balance info */}
-        {activeService && (
+        {/* Scope Card: If GST clearance, render Full Project Scope (Services + Additional Payments); else Active Service */}
+        {((stageId === 'final' && hasGst) || isGstPayment) ? (
           <View style={[styles.serviceInfoCard, isDark && styles.serviceInfoCardDark]}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-              <Text style={[styles.serviceInfoTitle, isDark && styles.textDark]} numberOfLines={1}>
-                {activeService.title || activeService.name}
-              </Text>
-              <View style={[styles.statusBadge, activeService.status === 'COMPLETED' ? styles.statusCompleted : styles.statusPending]}>
-                <Text style={styles.statusBadgeText}>{activeService.status || 'IN PROGRESS'}</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, marginRight: 8 }}>
+                <Ionicons name="document-text-outline" size={16} color="#2557C7" />
+                <Text style={[styles.serviceInfoTitle, isDark && styles.textDark]} numberOfLines={1}>
+                  GST Clearance Scope (Full Project)
+                </Text>
+              </View>
+              <View style={[styles.statusBadge, styles.statusCompleted]}>
+                <Text style={styles.statusBadgeText}>TAX INVOICE</Text>
               </View>
             </View>
-            {activeService.sqft > 0 && (
-              <Text style={[styles.serviceInfoMeta, isDark && styles.subtextDark]}>
-                {activeService.sqft} sqft
-              </Text>
+
+            {/* List of Primary Services */}
+            {Array.isArray(payView?.services) && payView.services.length > 0 && (
+              <View style={{ marginBottom: 6 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: isDark ? '#94A3B8' : '#64748B', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  Contract Services
+                </Text>
+                {payView.services.map((svc, sIdx) => (
+                  <View key={svc.id || `svc_${sIdx}`} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 2 }}>
+                    <Text style={{ fontSize: 12, color: isDark ? '#CBD5E1' : '#334155', flex: 1 }} numberOfLines={1}>
+                      • {svc.title || svc.name || `Service ${sIdx + 1}`}
+                    </Text>
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                      ₹{Number(svc.totalPrice || svc.paidAmount || 0).toLocaleString()}
+                    </Text>
+                  </View>
+                ))}
+              </View>
             )}
-            <View style={styles.serviceBalanceRow}>
+
+            {/* List of Additional Variation Payments */}
+            {Array.isArray(payView?.additionalPayment) && payView.additionalPayment.length > 0 && (
+              <View style={{ marginBottom: 6, marginTop: 4 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#D97706', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  Variation Work Orders ({payView.additionalPayment.length})
+                </Text>
+                {payView.additionalPayment.map((addSvc, aIdx) => (
+                  <View key={addSvc.id || `add_${aIdx}`} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 2 }}>
+                    <Text style={{ fontSize: 12, color: isDark ? '#CBD5E1' : '#334155', flex: 1 }} numberOfLines={1}>
+                      • {addSvc.title || `Variation Order ${aIdx + 1}`}
+                    </Text>
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                      ₹{Number(addSvc.totalPrice || addSvc.amount || addSvc.paidAmount || 0).toLocaleString()}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* If no payView but app has additionalPayments */}
+            {!payView && Array.isArray(app?.additionalPayments) && app.additionalPayments.length > 0 && (
+              <View style={{ marginBottom: 6, marginTop: 4 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#D97706', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  Variation Work Orders ({app.additionalPayments.length})
+                </Text>
+                {app.additionalPayments.map((addSvc, aIdx) => (
+                  <View key={addSvc.id || `app_add_${aIdx}`} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 2 }}>
+                    <Text style={{ fontSize: 12, color: isDark ? '#CBD5E1' : '#334155', flex: 1 }} numberOfLines={1}>
+                      • {addSvc.title || `Variation Order ${aIdx + 1}`}
+                    </Text>
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                      ₹{Number(addSvc.amount || addSvc.totalPrice || 0).toLocaleString()}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* 3-Column Summary Balance Row */}
+            <View style={[styles.serviceBalanceRow, { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: isDark ? '#334155' : '#E2E8F0' }]}>
               <View style={styles.serviceBalanceItem}>
-                <Text style={styles.serviceBalanceLabel}>Total</Text>
+                <Text style={styles.serviceBalanceLabel}>Services</Text>
                 <Text style={[styles.serviceBalanceValue, isDark && styles.textDark]}>
-                  ₹{(activeService.totalPrice || 0).toLocaleString()}
+                  ₹{primaryServicesCost.toLocaleString()}
                 </Text>
               </View>
               <View style={styles.serviceBalanceDivider} />
               <View style={styles.serviceBalanceItem}>
-                <Text style={styles.serviceBalanceLabel}>Paid</Text>
-                <Text style={[styles.serviceBalanceValue, { color: '#16A34A' }]}>
-                  ₹{(activeService.paidAmount || 0).toLocaleString()}
+                <Text style={styles.serviceBalanceLabel}>Variation</Text>
+                <Text style={[styles.serviceBalanceValue, { color: '#D97706' }]}>
+                  ₹{additionalPaymentsTotal.toLocaleString()}
                 </Text>
               </View>
               <View style={styles.serviceBalanceDivider} />
               <View style={styles.serviceBalanceItem}>
-                <Text style={styles.serviceBalanceLabel}>Remaining</Text>
-                <Text style={[styles.serviceBalanceValue, { color: activeService.balanceAmount > 0 ? '#DC2626' : '#16A34A' }]}>
-                  ₹{(activeService.balanceAmount || 0).toLocaleString()}
+                <Text style={styles.serviceBalanceLabel}>Taxable Base</Text>
+                <Text style={[styles.serviceBalanceValue, { color: '#2557C7', fontWeight: '800' }]}>
+                  ₹{baseTotal.toLocaleString()}
                 </Text>
               </View>
             </View>
           </View>
+        ) : (
+          <>
+            {/* Service Selector: Allows paying for ANY service regardless of order */}
+            {stageId !== 'final' && !isGstPayment && Array.isArray(payView?.services) && payView.services.length > 1 && (
+              <View style={{ marginBottom: 12 }}>
+                <Text style={[styles.label, isDark && styles.textDark, { marginBottom: 8, fontSize: 13, fontWeight: '700' }]}>
+                  Select Service to Pay <Text style={styles.requiredStar}>*</Text>
+                </Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 2 }}>
+                  {payView.services.map((svc) => {
+                    const isSelected = String(svc.id) === String(selectedServiceId || activeService?.id);
+                    const isCompleted = svc.status === 'COMPLETED' || (Number(svc.balanceAmount) === 0 && Number(svc.totalPrice) > 0);
+                    return (
+                      <TouchableOpacity
+                        key={svc.id}
+                        onPress={() => {
+                          setActiveService(svc);
+                          setSelectedServiceId(String(svc.id));
+                          setSelectedServiceName(svc.title || svc.name || '');
+                          if (svc.balanceAmount != null && Number(svc.balanceAmount) > 0) {
+                            setPaymentAmount(String(svc.balanceAmount));
+                          }
+                        }}
+                        style={{
+                          paddingHorizontal: 14,
+                          paddingVertical: 10,
+                          borderRadius: 12,
+                          borderWidth: 1.5,
+                          borderColor: isSelected ? '#2557C7' : (isDark ? '#334155' : '#E2E8F0'),
+                          backgroundColor: isSelected
+                            ? (isDark ? 'rgba(37, 87, 199, 0.25)' : '#EFF6FF')
+                            : (isDark ? '#1E293B' : '#FFFFFF'),
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 8,
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons
+                          name={isCompleted ? 'checkmark-circle' : (isSelected ? 'radio-button-on' : 'radio-button-off')}
+                          size={16}
+                          color={isSelected ? '#2557C7' : (isCompleted ? '#16A34A' : (isDark ? '#94A3B8' : '#64748B'))}
+                        />
+                        <View>
+                          <Text
+                            style={{
+                              fontSize: 13,
+                              fontWeight: isSelected ? '700' : '600',
+                              color: isSelected ? '#2557C7' : (isDark ? '#FFFFFF' : '#0F172A'),
+                            }}
+                          >
+                            {svc.title || svc.name}
+                          </Text>
+                          <Text style={{ fontSize: 10, fontWeight: '700', color: (svc.balanceAmount || 0) > 0 ? '#DC2626' : '#16A34A', marginTop: 1 }}>
+                            Bal: ₹{(svc.balanceAmount || 0).toLocaleString()}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            )}
+
+            {activeService && (
+              <View style={[styles.serviceInfoCard, isDark && styles.serviceInfoCardDark]}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <Text style={[styles.serviceInfoTitle, isDark && styles.textDark]} numberOfLines={1}>
+                  {activeService.title || activeService.name}
+                </Text>
+                <View style={[styles.statusBadge, activeService.status === 'COMPLETED' ? styles.statusCompleted : styles.statusPending]}>
+                  <Text style={styles.statusBadgeText}>{activeService.status || 'IN PROGRESS'}</Text>
+                </View>
+              </View>
+              {activeService.sqft > 0 && (
+                <Text style={[styles.serviceInfoMeta, isDark && styles.subtextDark]}>
+                  {activeService.sqft} sqft
+                </Text>
+              )}
+              <View style={styles.serviceBalanceRow}>
+                <View style={styles.serviceBalanceItem}>
+                  <Text style={styles.serviceBalanceLabel}>Total</Text>
+                  <Text style={[styles.serviceBalanceValue, isDark && styles.textDark]}>
+                    ₹{(activeService.totalPrice || 0).toLocaleString()}
+                  </Text>
+                </View>
+                <View style={styles.serviceBalanceDivider} />
+                <View style={styles.serviceBalanceItem}>
+                  <Text style={styles.serviceBalanceLabel}>Paid</Text>
+                  <Text style={[styles.serviceBalanceValue, { color: '#16A34A' }]}>
+                    ₹{(activeService.paidAmount || 0).toLocaleString()}
+                  </Text>
+                </View>
+                <View style={styles.serviceBalanceDivider} />
+                <View style={styles.serviceBalanceItem}>
+                  <Text style={styles.serviceBalanceLabel}>Remaining</Text>
+                  <Text style={[styles.serviceBalanceValue, { color: activeService.balanceAmount > 0 ? '#DC2626' : '#16A34A' }]}>
+                    ₹{(activeService.balanceAmount || 0).toLocaleString()}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
+        </>
         )}
 
 
 
-        {/* GST Percentage Input (When With GST is selected in Final Payment) */}
-        {stageId === 'final' && hasGst && (
+        {/* GST Percentage Input (When With GST is selected in Final Payment, or this is a GST clearance payment) */}
+        {(stageId === 'final' && hasGst || isGstPayment) && (
           <View style={styles.formGroup}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
               <Text style={[styles.label, isDark && styles.textDark]}>
@@ -911,22 +1244,67 @@ export default function PaymentFormScreen() {
           </View>
         )}
 
-        {/* 3. Payment Amount Input */}
+        {/* 3. Payment Amount Input (Read-only during GST Payment, derived from GST %) */}
         <View style={styles.formGroup}>
-          <Text style={[styles.label, isDark && styles.textDark]}>
-            Payment Amount (₹) <Text style={styles.requiredStar}>*</Text>
-          </Text>
-          <View style={[styles.amountInputBox, isDark && styles.amountInputBoxDark]}>
-            <Ionicons name="cash-outline" size={24} color="#2557C7" style={{ marginRight: 10 }} />
-            <Text style={[styles.currencyPrefix, isDark && styles.textDark]}>Rs.</Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <Text style={[styles.label, isDark && styles.textDark, { marginBottom: 0 }]}>
+              Payment Amount (₹) <Text style={styles.requiredStar}>*</Text>
+            </Text>
+            {Boolean(stageId === 'final' && hasGst || isGstPayment) && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: isDark ? 'rgba(56, 189, 248, 0.15)' : '#F0F9FF', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, borderWidth: 1, borderColor: isDark ? 'rgba(56, 189, 248, 0.3)' : '#BAE6FD' }}>
+                <Ionicons name="lock-closed" size={11} color={isDark ? '#38BDF8' : '#0284C7'} />
+                <Text style={{ fontSize: 10, fontWeight: '700', color: isDark ? '#38BDF8' : '#0284C7' }}>
+                  Locked ({gstPercent || 18}% of Base)
+                </Text>
+              </View>
+            )}
+          </View>
+          <View
+            style={[
+              styles.amountInputBox,
+              isDark && styles.amountInputBoxDark,
+              Boolean(stageId === 'final' && hasGst || isGstPayment) && {
+                backgroundColor: isDark ? '#0F172A' : '#F8FAFC',
+                borderColor: isDark ? '#334155' : '#E2E8F0',
+              },
+            ]}
+          >
+            <Ionicons
+              name="cash-outline"
+              size={24}
+              color={(stageId === 'final' && hasGst || isGstPayment) ? '#94A3B8' : '#2557C7'}
+              style={{ marginRight: 10 }}
+            />
+            <Text
+              style={[
+                styles.currencyPrefix,
+                isDark && styles.textDark,
+                Boolean(stageId === 'final' && hasGst) && { color: isDark ? '#94A3B8' : '#64748B' },
+              ]}
+            >
+              Rs.
+            </Text>
             <TextInput
-              style={[styles.amountInput, isDark && styles.textDark]}
-              keyboardType="numeric"
+              style={[
+                styles.amountInput,
+                isDark && styles.textDark,
+                Boolean(stageId === 'final' && hasGst || isGstPayment) && { color: isDark ? '#94A3B8' : '#334155' },
+              ]}
+              keyboardType="decimal-pad"
               placeholder="Enter amount"
               placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
               value={paymentAmount}
-              onChangeText={setPaymentAmount}
+              onChangeText={(val) => {
+                const filtered = val.replace(/[^0-9.]/g, '');
+                const parts = filtered.split('.');
+                const sanitized = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join('')}` : filtered;
+                setPaymentAmount(sanitized);
+              }}
+              editable={!(stageId === 'final' && hasGst || isGstPayment)}
             />
+            {Boolean(stageId === 'final' && hasGst || isGstPayment) && (
+              <Ionicons name="lock-closed" size={18} color={isDark ? '#64748B' : '#94A3B8'} style={{ marginLeft: 8 }} />
+            )}
           </View>
         </View>
 
@@ -1185,34 +1563,34 @@ export default function PaymentFormScreen() {
             </View>
           )}
         </View>
+
+        {/* Action Buttons (Non-sticky, bottom of content) */}
+        <View style={[styles.bottomActionBar, isDark && styles.bottomActionBarDark]}>
+          <TouchableOpacity
+            style={[styles.cancelBtn, isDark && styles.cancelBtnDark]}
+            onPress={() => router.back()}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.cancelBtnText, isDark && styles.textDark]}>Cancel</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.submitBtn, isSubmitting && { opacity: 0.8 }]}
+            onPress={handleSubmit}
+            activeOpacity={0.85}
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? (
+              <ActivityIndicator size="small" color="#FFFFFF" style={{ marginRight: 6 }} />
+            ) : (
+              <Ionicons name="checkmark-sharp" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
+            )}
+            <Text style={styles.submitBtnText}>
+              {isSubmitting ? 'Submitting...' : (isGstPayment ? 'Record GST Payment' : (stageId === 'final' ? 'Confirm Final Settlement' : 'Submit Payment'))}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
-
-      {/* Bottom Docked Action Buttons */}
-      <View style={[styles.bottomActionBar, isDark && styles.bottomActionBarDark, { paddingBottom: Math.max(insets.bottom + 12, 20) }]}>
-        <TouchableOpacity
-          style={[styles.cancelBtn, isDark && styles.cancelBtnDark]}
-          onPress={() => router.back()}
-          activeOpacity={0.8}
-        >
-          <Text style={[styles.cancelBtnText, isDark && styles.textDark]}>Cancel</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.submitBtn, isSubmitting && { opacity: 0.8 }]}
-          onPress={handleSubmit}
-          activeOpacity={0.85}
-          disabled={isSubmitting}
-        >
-          {isSubmitting ? (
-            <ActivityIndicator size="small" color="#FFFFFF" style={{ marginRight: 6 }} />
-          ) : (
-            <Ionicons name="checkmark-sharp" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
-          )}
-          <Text style={styles.submitBtnText}>
-            {isSubmitting ? 'Submitting...' : (stageId === 'final' ? 'Confirm Final Settlement' : 'Submit Payment')}
-          </Text>
-        </TouchableOpacity>
-      </View>
 
       {/* Bank Picker Modal */}
       <Modal
@@ -1717,28 +2095,11 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   bottomActionBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
-    borderTopColor: '#E2E8F0',
-    paddingHorizontal: 16,
-    paddingTop: 12,
     flexDirection: 'row',
     gap: 12,
-    elevation: 20,
-    zIndex: 999,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowOffset: { width: 0, height: -2 },
-    shadowRadius: 8,
+    marginTop: 24,
   },
-  bottomActionBarDark: {
-    backgroundColor: '#1E293B',
-    borderTopColor: '#334155',
-  },
+  bottomActionBarDark: {},
   cancelBtn: {
     flex: 1,
     height: 48,

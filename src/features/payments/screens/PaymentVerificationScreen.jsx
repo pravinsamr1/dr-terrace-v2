@@ -23,6 +23,7 @@ import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
 import { resolveProofImageUrl, getProofFilename } from '../../../core/utils/imageUtils';
+import { MaterialDeleteModal } from '../../../shared/components/material';
 
 export default function PaymentVerificationScreen() {
   const router = useRouter();
@@ -33,11 +34,14 @@ export default function PaymentVerificationScreen() {
 
   const [client, setClient] = useState(null);
   const [verifyData, setVerifyData] = useState(null);
-  const [isLoadingVerify, setIsLoadingVerify] = useState(false);
+  const [payView, setPayView] = useState(null);
+  const [isLoadingVerify, setIsLoadingVerify] = useState(Boolean(params.paymentId || params.milestone));
   const [isSubmittingApprove, setIsSubmittingApprove] = useState(false);
 
   const [copiedField, setCopiedField] = useState(null);
   const [showImageModal, setShowImageModal] = useState(false);
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [isDeletingPayment, setIsDeletingPayment] = useState(false);
 
   // Load appointment / client details
   useEffect(() => {
@@ -56,30 +60,327 @@ export default function PaymentVerificationScreen() {
     });
   }, [params.id]);
 
+  const quotationId =
+    params.quotationId ||
+    verifyData?.quotation?.quotationId ||
+    client?.confirmedQuoteId ||
+    client?.activeQuotationId;
+
+  // Load quotation payView for rich service context
+  useEffect(() => {
+    if (!quotationId) return;
+    paymentRepository
+      .getPayView(quotationId)
+      .then((res) => {
+        if (res?.success && res.data) {
+          setPayView(res.data);
+        }
+      })
+      .catch(() => {});
+  }, [quotationId]);
+
   // Fetch API v2 Single Payment Verification View (Section 9)
   useEffect(() => {
     const paymentId = params.paymentId || params.milestone;
     if (!paymentId) return;
 
-    setIsLoadingVerify(true);
-    const quotationId = params.quotationId || client?.confirmedQuoteId || client?.activeQuotationId;
-
+    let isMounted = true;
     paymentRepository
       .getPaymentVerifyView(paymentId, quotationId ? String(quotationId) : null)
       .then((res) => {
-        if (res?.success && res.data) {
+        if (isMounted && res?.success && res.data) {
           setVerifyData(res.data);
         }
       })
       .catch((_err) => {})
       .finally(() => {
-        setIsLoadingVerify(false);
+        if (isMounted) {
+          setIsLoadingVerify(false);
+        }
       });
-  }, [params.paymentId, params.milestone, params.quotationId, client?.confirmedQuoteId, client?.activeQuotationId]);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [params.paymentId, params.milestone, quotationId]);
+
+  // Match payment in payView for accurate service context
+  const matchedFromPayView = (() => {
+    if (!payView) return null;
+
+    const targetPayId = String(params.paymentId || params.milestone || verifyData?.paymentId || verifyData?.id || '').trim();
+    const targetVoucher = String(params.voucher || params.voucherCode || params.voucherNumber || verifyData?.voucher || '').trim();
+    const targetUpi = String(params.upiId || params.upiTransactionId || verifyData?.upiId || '').trim();
+    const targetServiceId = String(params.serviceId || '').trim();
+
+    // 1. Search in main quotation services by serviceId, payment ID, voucher, or UPI
+    if (Array.isArray(payView.services)) {
+      for (const svc of payView.services) {
+        if (targetServiceId && String(svc.id).trim() === targetServiceId) {
+          const p = Array.isArray(svc.payments)
+            ? svc.payments.find(
+                (item) =>
+                  (targetPayId && String(item.id).trim() === targetPayId) ||
+                  (targetVoucher && item.voucher && String(item.voucher).trim() === targetVoucher) ||
+                  (targetUpi && item.upiId && String(item.upiId).trim() === targetUpi)
+              ) || svc.payments[0]
+            : null;
+          return { service: svc, payment: p, type: 'milestone' };
+        }
+
+        if (Array.isArray(svc.payments)) {
+          const p = svc.payments.find(
+            (item) =>
+              (targetPayId && String(item.id).trim() === targetPayId) ||
+              (targetVoucher && item.voucher && String(item.voucher).trim() === targetVoucher) ||
+              (targetUpi && item.upiId && String(item.upiId).trim() === targetUpi)
+          );
+          if (p) {
+            return { service: svc, payment: p, type: 'milestone' };
+          }
+        }
+      }
+    }
+
+    // 2. Search in additionalPayment
+    if (Array.isArray(payView.additionalPayment)) {
+      for (const addSvc of payView.additionalPayment) {
+        if (targetServiceId && String(addSvc.id).trim() === targetServiceId) {
+          const p = Array.isArray(addSvc.payments)
+            ? addSvc.payments.find(
+                (item) =>
+                  (targetPayId && String(item.id).trim() === targetPayId) ||
+                  (targetVoucher && item.voucher && String(item.voucher).trim() === targetVoucher) ||
+                  (targetUpi && item.upiId && String(item.upiId).trim() === targetUpi)
+              ) || addSvc.payments[0]
+            : null;
+          return { service: addSvc, payment: p, type: 'additional' };
+        }
+
+        if (Array.isArray(addSvc.payments)) {
+          const p = addSvc.payments.find(
+            (item) =>
+              (targetPayId && String(item.id).trim() === targetPayId) ||
+              (targetVoucher && item.voucher && String(item.voucher).trim() === targetVoucher) ||
+              (targetUpi && item.upiId && String(item.upiId).trim() === targetUpi)
+          );
+          if (p) {
+            return { service: addSvc, payment: p, type: 'additional' };
+          }
+        }
+      }
+    }
+
+    // 3. Search in gstPayment
+    const isExplicitGst =
+      params.isGst === 'true' ||
+      params.stage === 'GST Tax Clearance' ||
+      params.serviceTitle === 'GST Tax Clearance' ||
+      (targetPayId && targetPayId.toLowerCase().startsWith('gst'));
+
+    const gstPayments = [
+      ...(Array.isArray(payView.gstPayment?.payments) ? payView.gstPayment.payments : []),
+      ...(Array.isArray(payView.gstPayments) ? payView.gstPayments : []),
+    ];
+
+    if (isExplicitGst || gstPayments.length > 0) {
+      const gp = gstPayments.find(
+        (item) =>
+          (targetPayId && String(item.id).trim() === targetPayId) ||
+          (targetVoucher && item.voucher && String(item.voucher).trim() === targetVoucher)
+      );
+      if (gp || isExplicitGst) {
+        return {
+          service: payView.gstPayment || {
+            title: 'GST Tax Clearance',
+            totalPrice: payView.gstAmount || 0,
+            paidAmount: payView.gstPaid || 0,
+            balanceAmount: (payView.gstAmount || 0) - (payView.gstPaid || 0),
+          },
+          payment: gp || gstPayments[0] || null,
+          type: 'gst',
+        };
+      }
+    }
+
+    // 4. If targetServiceId or serviceTitle matches a service by title
+    const searchTitle = (params.serviceTitle || params.stage || '').toLowerCase().trim();
+    if (searchTitle && searchTitle !== 'gst tax clearance') {
+      if (Array.isArray(payView.services)) {
+        const found = payView.services.find(
+          (s) => s.title && s.title.toLowerCase().trim() === searchTitle
+        );
+        if (found) {
+          return { service: found, payment: found.payments?.[0] || null, type: 'milestone' };
+        }
+      }
+    }
+
+    // 5. Check for any unverified payment in payView services
+    if (Array.isArray(payView.services)) {
+      for (const svc of payView.services) {
+        if (Array.isArray(svc.payments)) {
+          const p = svc.payments.find((item) => item.isVerified === false || item.verificationStatus === 'pending');
+          if (p) return { service: svc, payment: p, type: 'milestone' };
+        }
+      }
+    }
+
+    // 6. Check for unverified in additionalPayment
+    if (Array.isArray(payView.additionalPayment)) {
+      for (const addSvc of payView.additionalPayment) {
+        if (Array.isArray(addSvc.payments)) {
+          const p = addSvc.payments.find((item) => item.isVerified === false || item.verificationStatus === 'pending');
+          if (p) return { service: addSvc, payment: p, type: 'additional' };
+        }
+      }
+    }
+
+    // 7. Fallback to first service in quotation if available
+    if (Array.isArray(payView.services) && payView.services.length > 0) {
+      const firstSvc = payView.services[0];
+      const firstPay = Array.isArray(firstSvc.payments) && firstSvc.payments.length > 0 ? firstSvc.payments[0] : null;
+      return { service: firstSvc, payment: firstPay, type: 'milestone' };
+    }
+
+    return null;
+  })();
+
+  const matchedPay = matchedFromPayView?.payment;
+
+  // Service context resolution
+  const serviceContext = (() => {
+    const isExplicitGst =
+      params.isGst === 'true' ||
+      params.stage === 'GST Tax Clearance' ||
+      params.serviceTitle === 'GST Tax Clearance' ||
+      matchedFromPayView?.type === 'gst';
+
+    // 1. If we matched a service from payView:
+    if (matchedFromPayView?.service) {
+      const svc = matchedFromPayView.service;
+      const sqftVal = svc.sqft != null ? svc.sqft : (params.sqft ? Number(params.sqft) : null);
+      const rateVal = svc.rate != null ? svc.rate : (params.rate ? Number(params.rate) : null);
+      const totalVal = Number(
+        svc.totalPrice !== undefined
+          ? svc.totalPrice
+          : svc.originalPrice !== undefined
+          ? svc.originalPrice
+          : params.totalPrice
+          ? Number(params.totalPrice)
+          : (sqftVal && rateVal ? sqftVal * rateVal : 0)
+      );
+      const paidVal = Number(svc.paidAmount !== undefined ? svc.paidAmount : (params.amount || 0));
+      const balVal = Number(
+        svc.balanceAmount !== undefined
+          ? svc.balanceAmount
+          : Math.max(0, totalVal - paidVal)
+      );
+
+      return {
+        serviceId: svc.id || params.serviceId || null,
+        serviceTitle: svc.title || svc.serviceTitle || svc.name || params.serviceTitle || params.stage || (isExplicitGst ? 'GST Tax Clearance' : 'Service Payment'),
+        sqft: sqftVal,
+        rate: rateVal,
+        totalPrice: totalVal,
+        paidAmount: paidVal,
+        balanceAmount: balVal,
+        status: svc.status,
+      };
+    }
+
+    // 2. If verifyData has service and it is NOT bogus GST for non-GST payment
+    const isBogusVerifyGst = !isExplicitGst && verifyData?.service?.serviceTitle === 'GST Tax Clearance' && Number(verifyData?.service?.totalPrice || 0) === 0;
+    if (verifyData?.service && !isBogusVerifyGst) {
+      const sqftVal = verifyData.service.sqft != null ? verifyData.service.sqft : (params.sqft ? Number(params.sqft) : null);
+      const rateVal = verifyData.service.rate != null ? verifyData.service.rate : (params.rate ? Number(params.rate) : null);
+      const totalVal = Number(
+        verifyData.service.totalPrice !== undefined
+          ? verifyData.service.totalPrice
+          : (sqftVal && rateVal ? sqftVal * rateVal : 0)
+      );
+      const paidVal = Number(verifyData.service.paidAmount !== undefined ? verifyData.service.paidAmount : (params.amount || 0));
+      const balVal = Number(
+        verifyData.service.balanceAmount !== undefined
+          ? verifyData.service.balanceAmount
+          : Math.max(0, totalVal - paidVal)
+      );
+
+      return {
+        ...verifyData.service,
+        serviceTitle: verifyData.service.serviceTitle || params.serviceTitle || params.stage || 'Service Payment',
+        sqft: sqftVal,
+        rate: rateVal,
+        totalPrice: totalVal,
+        paidAmount: paidVal,
+        balanceAmount: balVal,
+      };
+    }
+
+    // 3. Fallback to route params (passed from CustomerDetailScreen)
+    if (params.serviceTitle || params.stage || params.totalPrice || params.sqft) {
+      const title = params.serviceTitle || params.stage || params.service || 'Service Payment';
+      const sqftVal = params.sqft ? Number(params.sqft) : null;
+      const rateVal = params.rate ? Number(params.rate) : null;
+      const totalVal = params.totalPrice ? Number(params.totalPrice) : (sqftVal && rateVal ? sqftVal * rateVal : Number(params.amount || 0));
+      const paidVal = Number(params.amount || 0);
+
+      return {
+        serviceId: params.serviceId || null,
+        serviceTitle: title,
+        sqft: sqftVal,
+        rate: rateVal,
+        totalPrice: totalVal,
+        paidAmount: paidVal,
+        balanceAmount: Math.max(0, totalVal - paidVal),
+      };
+    }
+
+    // 4. Fallback to client/appointment details
+    if (client?.service || client?.stageName) {
+      return {
+        serviceId: null,
+        serviceTitle: client?.service || client?.stageName || 'Terrace Waterproofing',
+        sqft: client?.sqft || null,
+        rate: client?.rate || null,
+        totalPrice: Number(client?.totalCost || client?.finalPaidAmount || 0),
+        paidAmount: Number(client?.advance || client?.finalPaidAmount || 0),
+        balanceAmount: Number(client?.remainingBalance || 0),
+      };
+    }
+
+    return null;
+  })();
+
+  // Quotation context resolution
+  const quotationContext = (() => {
+    if (verifyData?.quotation && Number(verifyData.quotation.totalWithGst || verifyData.quotation.totalAmount || 0) > 0) {
+      return verifyData.quotation;
+    }
+    if (payView) {
+      return {
+        quotationId: payView.id || payView.quotationId || quotationId,
+        quotationTitle: payView.title || `Quotation #${payView.id || quotationId}`,
+        siteAddress:
+          payView.propertyAddress ||
+          payView.siteAddress ||
+          payView.customer?.address ||
+          payView.customer?.area ||
+          client?.address ||
+          '',
+        clientName: payView.customer?.name || payView.clientName || client?.name || '',
+        totalWithGst: payView.totalPrice || payView.totalWithGst || 0,
+        totalPaid: payView.totalPaid || 0,
+        balanceAmount: payView.balanceAmount || 0,
+      };
+    }
+    return verifyData?.quotation || null;
+  })();
 
   // Client and Appointment details
   const rawClientName =
     verifyData?.quotation?.clientName ||
+    payView?.customer?.name ||
     client?.clientName ||
     client?.name ||
     client?.customerName ||
@@ -91,9 +392,10 @@ export default function PaymentVerificationScreen() {
   const displayId = rawId ? `DR${rawId}` : '';
 
   // Payment specs
-  const paymentId = verifyData?.paymentId || verifyData?.id || params.paymentId || params.milestone || '';
+  const paymentId = verifyData?.paymentId || verifyData?.id || matchedPay?.id || params.paymentId || params.milestone || '';
   const voucherCode =
     verifyData?.voucher ||
+    matchedPay?.voucher ||
     params.voucher ||
     params.voucherNumber ||
     params.voucherCode ||
@@ -101,11 +403,14 @@ export default function PaymentVerificationScreen() {
     client?.voucherNumber ||
     '';
   const paymentAmt = Number(
-    verifyData?.amount !== undefined
+    verifyData?.amount !== undefined && verifyData.amount !== null
       ? verifyData.amount
+      : matchedPay?.amount !== undefined && matchedPay.amount !== null
+      ? matchedPay.amount
       : params.amount || client?.finalPaidAmount || client?.finalPaidDetails?.amount || client?.paymentAmount || 0
   );
   const stageName =
+    serviceContext?.serviceTitle ||
     verifyData?.service?.serviceTitle ||
     params.stage ||
     params.paymentStage ||
@@ -116,6 +421,8 @@ export default function PaymentVerificationScreen() {
   const rawCollectedDate =
     verifyData?.paymentDate ||
     verifyData?.createdAt ||
+    matchedPay?.createdAt ||
+    matchedPay?.date ||
     params.date ||
     params.paymentDate ||
     client?.finalPaidDetails?.paymentDate ||
@@ -124,6 +431,7 @@ export default function PaymentVerificationScreen() {
   const collectedDate = rawCollectedDate ? formatDateDDMMYY(rawCollectedDate) : '';
   const paymentMethod =
     verifyData?.paymentMethod ||
+    matchedPay?.paymentMethod ||
     params.paymentMethod ||
     params.method ||
     params.mode ||
@@ -146,6 +454,7 @@ export default function PaymentVerificationScreen() {
   const rawUpiId =
     verifyData?.upiId ||
     verifyData?.upiTransactionId ||
+    matchedPay?.upiId ||
     params.upiId ||
     params.upiTransactionId ||
     params.transactionId ||
@@ -161,6 +470,8 @@ export default function PaymentVerificationScreen() {
     verifyData?.account ||
     verifyData?.bankDetails ||
     verifyData?.bankAccount ||
+    matchedPay?.bankDetails ||
+    matchedPay?.bankAccount ||
     (Array.isArray(verifyData?.accounts) && verifyData?.accountId
       ? verifyData.accounts.find((a) => a.id === verifyData.accountId)
       : null) ||
@@ -183,9 +494,10 @@ export default function PaymentVerificationScreen() {
   const hasGst =
     params.hasGst === 'true' ||
     params.hasGst === true ||
-    Boolean(client?.finalPaidDetails?.hasGst || client?.hasGst || verifyData?.quotation?.totalWithGst);
+    Boolean(client?.finalPaidDetails?.hasGst || client?.hasGst || verifyData?.quotation?.totalWithGst || payView?.withGst);
   const collectorName =
     verifyData?.receivedBy ||
+    matchedPay?.receivedBy ||
     client?.employeeName ||
     params.collectorName ||
     params.receivedBy ||
@@ -194,12 +506,14 @@ export default function PaymentVerificationScreen() {
   const displayPaymentId =
     verifyData?.paymentId ||
     verifyData?.id ||
+    matchedPay?.id ||
     params.paymentId ||
     params.milestone ||
     voucherCode ||
     (params.id ? `PAY-${params.id}` : '');
 
   const serviceTitle =
+    serviceContext?.serviceTitle ||
     verifyData?.service?.serviceTitle ||
     stageName ||
     params.stage ||
@@ -210,10 +524,21 @@ export default function PaymentVerificationScreen() {
 
   // Verification states & sequential guard (Section 8 & 9)
   const isVerified = Boolean(
-    verifyData?.verification?.isVerified ?? verifyData?.isVerified ?? client?.isVerified
+    verifyData?.verification?.isVerified ??
+    verifyData?.isVerified ??
+    matchedPay?.isVerified ??
+    client?.isVerified
   );
-  const verifiedBy = verifyData?.verification?.verifiedBy || verifyData?.verifiedBy || null;
-  const verifiedAt = verifyData?.verification?.verifiedAt || verifyData?.verifiedAt || null;
+  const verifiedBy =
+    verifyData?.verification?.verifiedBy ||
+    verifyData?.verifiedBy ||
+    matchedPay?.verifiedBy ||
+    null;
+  const verifiedAt =
+    verifyData?.verification?.verifiedAt ||
+    verifyData?.verifiedAt ||
+    matchedPay?.verifiedAt ||
+    null;
   const canVerify = verifyData?.verification?.canVerify !== false;
   const blockingPaymentId = verifyData?.verification?.blockingPaymentId || null;
 
@@ -223,6 +548,10 @@ export default function PaymentVerificationScreen() {
     verifyData?.proof?.proofImageUrl ||
     verifyData?.proofImage ||
     verifyData?.proof?.proofImage ||
+    matchedPay?.proofImageUrl ||
+    matchedPay?.proof?.proofImageUrl ||
+    matchedPay?.proofImage ||
+    matchedPay?.proof?.proofImage ||
     params.proofImage ||
     params.docUri ||
     client?.referenceImage ||
@@ -232,11 +561,6 @@ export default function PaymentVerificationScreen() {
     '';
   const docUri = resolveProofImageUrl(rawProofUri);
   const docName = getProofFilename(rawProofUri, 'Reference_Payment_Proof.jpg');
-
-  // Service context
-  const serviceContext = verifyData?.service || null;
-  // Quotation context
-  const quotationContext = verifyData?.quotation || null;
 
   const handleCopyText = async (text, fieldName = 'voucher') => {
     if (!text) return;
@@ -273,18 +597,23 @@ export default function PaymentVerificationScreen() {
             const quoteId =
               params.quotationId ||
               verifyData?.quotation?.quotationId ||
+              payView?.id ||
+              payView?.quotationId ||
               client?.confirmedQuoteId ||
               client?.activeQuotationId;
-            const payId = paymentId || params.paymentId || params.milestone;
+            const payId = paymentId || matchedFromPayView?.payment?.id || params.paymentId || params.milestone;
 
             setIsSubmittingApprove(true);
             try {
-              let targetPayId = payId;
+              let targetPayId = payId || matchedFromPayView?.payment?.id;
               const isGstPayment = Boolean(
                 params.isGst === 'true' ||
                 params.stage === 'GST Tax Clearance' ||
+                params.serviceTitle === 'GST Tax Clearance' ||
+                serviceContext?.serviceTitle === 'GST Tax Clearance' ||
                 stageName === 'GST Tax Clearance' ||
-                String(targetPayId).startsWith('gst_')
+                String(targetPayId).startsWith('gst_') ||
+                matchedFromPayView?.type === 'gst'
               );
 
               // API v2 verification: If it's a GST clearance, ensure backend has it recorded and verified
@@ -320,26 +649,48 @@ export default function PaymentVerificationScreen() {
               }
 
               if (appId) {
-                await appointmentRepository
-                  .updateAppointment(appId, {
-                    fullPaid: true,
-                    finalPaid: true,
+                const isFinal = Boolean(
+                  stageName.toLowerCase().includes('final') ||
+                  params.milestone?.toLowerCase().includes('final') ||
+                  (!isGstPayment && client?.finalPaid)
+                );
+                const isMid = Boolean(
+                  stageName.toLowerCase().includes('mid') ||
+                  params.milestone?.toLowerCase().includes('mid')
+                );
+                const isInitial = Boolean(
+                  stageName.toLowerCase().includes('initial') ||
+                  stageName.toLowerCase().includes('advance') ||
+                  params.milestone?.toLowerCase().includes('initial')
+                );
+
+                const updatePayload = {
+                  isVerified: true,
+                  verificationStatus: 'approved',
+                };
+                if (isGstPayment) {
+                  updatePayload.hasGst = true;
+                  updatePayload.gstPaid = true;
+                  updatePayload.gstVerificationStatus = 'verified';
+                  updatePayload.gstPaidDetails = {
+                    amount: paymentAmt,
+                    paymentMethod: paymentMethod || 'CASH',
+                    transactionId: voucherCode || 'GST-REC',
+                    verificationStatus: 'verified',
                     isVerified: true,
-                    verificationStatus: 'approved',
-                    hasGst: isGstPayment ? true : undefined,
-                    gstPaid: isGstPayment ? true : undefined,
-                    gstVerificationStatus: isGstPayment ? 'verified' : undefined,
-                    gstPaidDetails: isGstPayment
-                      ? {
-                          amount: paymentAmt,
-                          paymentMethod: paymentMethod || 'CASH',
-                          transactionId: voucherCode || 'GST-REC',
-                          verificationStatus: 'verified',
-                          isVerified: true,
-                          paymentDate: formatDateDDMMYY(new Date()),
-                        }
-                      : undefined,
-                  })
+                    paymentDate: formatDateDDMMYY(new Date()),
+                  };
+                } else if (isFinal) {
+                  updatePayload.finalPaid = true;
+                  updatePayload.fullPaid = true;
+                } else if (isMid) {
+                  updatePayload.midTermPaid = true;
+                } else if (isInitial) {
+                  updatePayload.initialPaid = true;
+                }
+
+                await appointmentRepository
+                  .updateAppointment(appId, updatePayload)
                   .catch(() => {});
               }
 
@@ -369,6 +720,135 @@ export default function PaymentVerificationScreen() {
     );
   };
 
+  const handleDeleteClick = () => {
+    setDeleteModalVisible(true);
+  };
+
+  const confirmDeletePayment = async () => {
+    const appId = client?.id || params.id;
+    const quoteId =
+      params.quotationId ||
+      verifyData?.quotation?.quotationId ||
+      payView?.id ||
+      payView?.quotationId ||
+      client?.confirmedQuoteId ||
+      client?.activeQuotationId;
+    const payId = paymentId || matchedFromPayView?.payment?.id || params.paymentId || params.milestone;
+
+    // Rule 14 & 16: Receipt Lock Protection - Payments cannot be deleted if final receipt is locked
+    if (payView?.isReceiptLocked || client?.isReceiptLocked) {
+      setDeleteModalVisible(false);
+      Alert.alert(
+        'Quotation Locked',
+        'Payments cannot be deleted because an official final receipt has already been generated and locked for this quotation.'
+      );
+      return;
+    }
+
+    setIsDeletingPayment(true);
+    try {
+      const isGstPayment = Boolean(
+        params.isGst === 'true' ||
+        params.stage === 'GST Tax Clearance' ||
+        params.serviceTitle === 'GST Tax Clearance' ||
+        serviceContext?.serviceTitle === 'GST Tax Clearance' ||
+        stageName === 'GST Tax Clearance' ||
+        String(payId).startsWith('gst_') ||
+        matchedFromPayView?.type === 'gst'
+      );
+
+      const isFinal = Boolean(
+        stageName.toLowerCase().includes('final') ||
+        params.milestone?.toLowerCase().includes('final') ||
+        (!isGstPayment && client?.finalPaid)
+      );
+
+      const isMid = Boolean(
+        stageName.toLowerCase().includes('mid') ||
+        params.milestone?.toLowerCase().includes('mid')
+      );
+
+      const isInitial = Boolean(
+        stageName.toLowerCase().includes('initial') ||
+        stageName.toLowerCase().includes('advance') ||
+        params.milestone?.toLowerCase().includes('initial')
+      );
+
+      // 1. Attempt deleting from backend API if payId exists (Rule 14 & 18)
+      if (payId) {
+        const delRes = await paymentRepository.deletePayment(payId, quoteId ? String(quoteId) : null);
+        if (!delRes?.success) {
+          setIsDeletingPayment(false);
+          setDeleteModalVisible(false);
+          Alert.alert('Cannot Delete Payment', delRes?.message || 'Failed to delete payment from server.');
+          return;
+        }
+      }
+
+      // 2. Revert/reset corresponding payment fields on appointment
+      if (appId) {
+        const resetFields = {};
+        if (isGstPayment) {
+          resetFields.hasGst = false;
+          resetFields.gstPaid = false;
+          resetFields.gstPaidDetails = null;
+          resetFields.gstVerificationStatus = null;
+        } else if (isFinal) {
+          resetFields.finalPaid = false;
+          resetFields.fullPaid = false;
+          resetFields.finalPaidAmount = 0;
+          resetFields.finalPaidDetails = null;
+          resetFields.isVerified = false;
+          resetFields.verificationStatus = null;
+        } else if (isMid) {
+          resetFields.midTermPaid = false;
+          resetFields.midTermPaidAmount = 0;
+          resetFields.midTermPaidDetails = null;
+        } else if (isInitial) {
+          resetFields.initialPaid = false;
+          resetFields.initialPaidAmount = 0;
+          resetFields.initialPaidDetails = null;
+        } else {
+          // Fallback reset for milestone
+          resetFields.finalPaid = false;
+          resetFields.fullPaid = false;
+          resetFields.finalPaidAmount = 0;
+          resetFields.finalPaidDetails = null;
+          resetFields.isVerified = false;
+          resetFields.verificationStatus = null;
+        }
+
+        await appointmentRepository.updateAppointment(appId, resetFields).catch(() => {});
+      }
+
+      setDeleteModalVisible(false);
+
+      Alert.alert(
+        'Payment Deleted',
+        `The payment record #${voucherCode || payId || 'N/A'} of ₹${paymentAmt.toLocaleString()} has been removed.`,
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              if (appId) {
+                router.replace({
+                  pathname: '/customer-detail',
+                  params: { id: appId, initialTab: 'payments' },
+                });
+              } else {
+                router.back();
+              }
+            },
+          },
+        ]
+      );
+    } catch (err) {
+      Alert.alert('Error', err?.message || 'Failed to delete payment');
+    } finally {
+      setIsDeletingPayment(false);
+    }
+  };
+
 
   return (
     <View style={[styles.container, isDark && styles.containerDark]}>
@@ -384,11 +864,21 @@ export default function PaymentVerificationScreen() {
           <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Payment Verification</Text>
-        {Boolean(voucherCode) && (
-          <View style={styles.headerRightBadge}>
-            <Text style={styles.headerRightBadgeText}>{voucherCode}</Text>
-          </View>
-        )}
+        <View style={styles.headerRightContainer}>
+          {Boolean(voucherCode) && (
+            <View style={styles.headerRightBadge}>
+              <Text style={styles.headerRightBadgeText}>{voucherCode}</Text>
+            </View>
+          )}
+          <TouchableOpacity
+            onPress={handleDeleteClick}
+            style={styles.headerDeleteButton}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="trash-outline" size={19} color="#FECACA" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
@@ -688,11 +1178,11 @@ export default function PaymentVerificationScreen() {
               </Text>
             </View>
 
-            {serviceContext.sqft != null && (
+            {serviceContext.sqft != null && Number(serviceContext.sqft) > 0 && (
               <View style={styles.specRow}>
                 <Text style={styles.specLabel}>Area / Rate</Text>
                 <Text style={[styles.specValue, isDark && styles.textDark]}>
-                  {serviceContext.sqft} sq.ft @ ₹{serviceContext.rate}/sq.ft
+                  {serviceContext.sqft} sq.ft @ ₹{serviceContext.rate || 0}/sq.ft
                 </Text>
               </View>
             )}
@@ -852,6 +1342,22 @@ export default function PaymentVerificationScreen() {
 
       {/* Fixed Bottom Action Bar */}
       <View style={[styles.bottomBar, isDark && styles.bottomBarDark, { paddingBottom: Math.max(insets.bottom + 8, 16) }]}>
+        <TouchableOpacity
+          style={[styles.deleteBtn, isDark && styles.deleteBtnDark]}
+          onPress={handleDeleteClick}
+          disabled={isDeletingPayment || isSubmittingApprove}
+          activeOpacity={0.8}
+        >
+          {isDeletingPayment ? (
+            <ActivityIndicator size="small" color="#DC2626" />
+          ) : (
+            <>
+              <Ionicons name="trash-outline" size={18} color="#DC2626" style={{ marginRight: 6 }} />
+              <Text style={styles.deleteBtnText}>Delete</Text>
+            </>
+          )}
+        </TouchableOpacity>
+
         {isVerified ? (
           <TouchableOpacity
             style={[styles.approveBtn, { backgroundColor: '#1E488F' }]}
@@ -871,9 +1377,9 @@ export default function PaymentVerificationScreen() {
           <TouchableOpacity
             style={[
               styles.approveBtn,
-              (!canVerify || isSubmittingApprove) && { opacity: 0.6, backgroundColor: '#94A3B8' },
+              (!canVerify || isSubmittingApprove || isDeletingPayment) && { opacity: 0.6, backgroundColor: '#94A3B8' },
             ]}
-            disabled={isSubmittingApprove}
+            disabled={isSubmittingApprove || isDeletingPayment}
             onPress={handleApprove}
             activeOpacity={0.85}
           >
@@ -893,6 +1399,18 @@ export default function PaymentVerificationScreen() {
           </TouchableOpacity>
         )}
       </View>
+
+      {/* Material Delete Confirmation Modal */}
+      <MaterialDeleteModal
+        visible={deleteModalVisible}
+        title="Delete Payment Record?"
+        message={`Are you sure you want to delete this payment of ₹${paymentAmt.toLocaleString()} (${voucherCode || displayPaymentId || 'Payment'})? This action cannot be undone and will remove the transaction record.`}
+        confirmText="Delete Payment"
+        cancelText="Cancel"
+        isDeleting={isDeletingPayment}
+        onConfirm={confirmDeletePayment}
+        onCancel={() => setDeleteModalVisible(false)}
+      />
 
       {/* Full-Screen Reference Image Viewer Modal */}
       <Modal
@@ -970,6 +1488,21 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
+  headerRightContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  headerDeleteButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: 'rgba(239, 68, 68, 0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.45)',
   },
   scrollContent: {
     padding: 16,
@@ -1313,6 +1846,26 @@ const styles = StyleSheet.create({
   },
   approveBtnText: {
     color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  deleteBtn: {
+    paddingHorizontal: 16,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1.5,
+    borderColor: '#FCA5A5',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteBtnDark: {
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    borderColor: '#EF4444',
+  },
+  deleteBtnText: {
+    color: '#DC2626',
     fontSize: 13,
     fontWeight: '700',
   },

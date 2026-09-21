@@ -40,29 +40,20 @@ function preparePaymentPayload(payload) {
   }
 
   const formData = new FormData();
-  if (payload.amount !== undefined && payload.amount !== null) {
-    formData.append('amount', String(payload.amount));
-  }
-  if (payload.paymentMethod) {
-    formData.append('paymentMethod', String(payload.paymentMethod));
-  }
-  if (payload.voucher) {
-    formData.append('voucher', String(payload.voucher));
-  }
-  if (payload.accountId !== undefined && payload.accountId !== null) {
-    formData.append('accountId', String(payload.accountId));
-  }
-  if (payload.upiId) {
-    formData.append('upiId', String(payload.upiId));
-  }
-  if (payload.notes) {
-    formData.append('notes', String(payload.notes));
-  }
-  if (payload.withGst !== undefined && payload.withGst !== null) {
-    formData.append('withGst', String(payload.withGst));
-  }
-  if (payload.customerGstNumber) {
-    formData.append('customerGstNumber', String(payload.customerGstNumber));
+  const skipKeys = new Set([
+    'proofImage',
+    'proof',
+    'image',
+    'file',
+    'receipt',
+    'referenceImage',
+    'attachedDoc',
+  ]);
+
+  for (const [key, val] of Object.entries(payload)) {
+    if (val !== undefined && val !== null && !skipKeys.has(key)) {
+      formData.append(key, typeof val === 'object' ? JSON.stringify(val) : String(val));
+    }
   }
 
   // Normalize file object for React Native FormData upload
@@ -301,13 +292,16 @@ export const paymentRepository = {
 
   /**
    * Create an on-site variation work order (additional service).
-   * servicePayload: { title, sqft, rate, totalPrice, warranty, notes? }
+   * Supports optional inline payment fields (amount, paymentMethod, voucher/accountId/upiId, notes, proofImage)
+   * which are recorded atomically alongside service creation (API v2 Section 3).
+   * If inline payment recording fails, the service is rolled back and not saved (Rule 17).
    */
   createAdditionalService: async (quotationId, servicePayload) => {
     try {
+      const dataToSend = preparePaymentPayload(servicePayload);
       const response = await apiClient.post(
         API_ENDPOINTS.QUOTATION_ADDITIONAL_SERVICES(quotationId),
-        servicePayload
+        dataToSend
       );
       const resData = response?.data;
       return {
@@ -428,58 +422,78 @@ export const paymentRepository = {
    * payload: { isVerified: true, notes?: string }
    */
   verifyPayment: async (quotationId, paymentId, notes = '') => {
-    const payload = {
-      isVerified: true,
-      notes: notes || 'Verified by Admin',
-    };
-
-    const UUID_OR_INT_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$|^\d+$/i;
     let targetPayId = paymentId ? String(paymentId).trim() : '';
+    const cleanQuoteId = quotationId
+      ? String(quotationId).replace(/\D/g, '') || String(quotationId).trim()
+      : null;
 
-    // Guard against synthetic or invalid payment ID formats (e.g. 'gst_rec_1')
-    if (targetPayId && !UUID_OR_INT_REGEX.test(targetPayId)) {
-      // If a quotationId exists, try to find the real backend payment UUID from payView
+    // If targetPayId is synthetic (e.g. 'pay_220_0' or 'gst_rec_...'), try to find the real backend payment ID from payView
+    if (
+      targetPayId &&
+      (targetPayId.startsWith('pay_') || targetPayId.startsWith('gst_rec_') || targetPayId.startsWith('temp_'))
+    ) {
       if (quotationId) {
         try {
           const pvRes = await paymentRepository.getPayView(quotationId);
-          const backendGstPay =
-            pvRes?.data?.gstPayment?.payments?.[0] ||
-            pvRes?.data?.gstPayments?.[0];
-          if (backendGstPay?.id && UUID_OR_INT_REGEX.test(String(backendGstPay.id).trim())) {
-            targetPayId = String(backendGstPay.id).trim();
-          } else {
-            // No real payment UUID on backend; return success for local/synthetic verification
-            return {
-              success: true,
-              data: { isVerified: true, paymentId: targetPayId, notes },
-              message: 'Payment verified successfully by Admin',
-            };
+          if (pvRes?.success && pvRes.data) {
+            const payViewData = pvRes.data;
+            if (Array.isArray(payViewData.services)) {
+              for (const svc of payViewData.services) {
+                if (Array.isArray(svc.payments) && svc.payments.length > 0) {
+                  const p =
+                    svc.payments.find((item) => String(item.id).trim() === targetPayId) ||
+                    svc.payments[0];
+                  if (p?.id && !String(p.id).startsWith('pay_')) {
+                    targetPayId = String(p.id).trim();
+                    break;
+                  }
+                }
+              }
+            }
+            if (targetPayId.startsWith('gst_rec_')) {
+              const backendGstPay =
+                payViewData?.gstPayment?.payments?.[0] ||
+                payViewData?.gstPayments?.[0];
+              if (backendGstPay?.id) {
+                targetPayId = String(backendGstPay.id).trim();
+              }
+            }
           }
-        } catch (_pvErr) {
-          return {
-            success: true,
-            data: { isVerified: true, paymentId: targetPayId, notes },
-            message: 'Payment verified successfully by Admin',
-          };
-        }
-      } else {
-        return {
-          success: true,
-          data: { isVerified: true, paymentId: targetPayId, notes },
-          message: 'Payment verified successfully by Admin',
-        };
+        } catch (_pvErr) {}
       }
     }
 
-    const endpoints = [];
-    if (quotationId && targetPayId && API_ENDPOINTS.QUOTATION_VERIFY_PAYMENT) {
-      endpoints.push(API_ENDPOINTS.QUOTATION_VERIFY_PAYMENT(quotationId, targetPayId));
+    if (!targetPayId) {
+      return {
+        success: false,
+        message: 'Payment ID is required to verify payment',
+      };
     }
-    if (targetPayId && API_ENDPOINTS.PAYMENT_VERIFY) {
-      endpoints.push(API_ENDPOINTS.PAYMENT_VERIFY(targetPayId));
+
+    const payload = {
+      isVerified: true,
+      verified: true,
+      status: 'approved',
+      notes: notes || 'Verified by Admin',
+    };
+
+    const endpoints = [];
+    if (cleanQuoteId && targetPayId) {
+      endpoints.push(
+        API_ENDPOINTS.QUOTATION_VERIFY_PAYMENT
+          ? API_ENDPOINTS.QUOTATION_VERIFY_PAYMENT(cleanQuoteId, targetPayId)
+          : `/quotations/${cleanQuoteId}/payments/${targetPayId}/verify`
+      );
+    }
+    if (quotationId && String(quotationId).trim() !== cleanQuoteId && targetPayId) {
+      endpoints.push(`/quotations/${String(quotationId).trim()}/payments/${targetPayId}/verify`);
     }
     if (targetPayId) {
-      endpoints.push(`/payments/${targetPayId}/verify`);
+      endpoints.push(
+        API_ENDPOINTS.PAYMENT_VERIFY
+          ? API_ENDPOINTS.PAYMENT_VERIFY(targetPayId)
+          : `/payments/${targetPayId}/verify`
+      );
     }
 
     let lastError = null;
@@ -495,6 +509,7 @@ export const paymentRepository = {
           };
         }
       } catch (err) {
+        lastError = err;
         // Also attempt PATCH as specified in API v2 documentation
         try {
           const patchRes = await apiClient.patch(endpoint, payload);
@@ -507,7 +522,7 @@ export const paymentRepository = {
             };
           }
         } catch (_patchErr) {
-          lastError = err;
+          // continue to next endpoint
         }
       }
     }
@@ -535,47 +550,82 @@ export const paymentRepository = {
       };
     }
 
-    const UUID_OR_INT_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$|^\d+$/i;
     let targetPayId = String(paymentId).trim();
+    let payViewData = null;
 
-    if (!UUID_OR_INT_REGEX.test(targetPayId)) {
-      if (quotationId) {
-        try {
-          const pvRes = await paymentRepository.getPayView(quotationId);
-          const backendGstPay =
-            pvRes?.data?.gstPayment?.payments?.[0] ||
-            pvRes?.data?.gstPayments?.[0];
-          if (backendGstPay?.id && UUID_OR_INT_REGEX.test(String(backendGstPay.id).trim())) {
-            targetPayId = String(backendGstPay.id).trim();
-          } else {
-            return {
-              success: true,
-              data: {
-                paymentId: targetPayId,
-                isVerified: false,
-                service: { serviceTitle: 'GST Tax Clearance' },
-              },
-            };
-          }
-        } catch (_pvErr) {
-          return {
-            success: true,
-            data: {
-              paymentId: targetPayId,
-              isVerified: false,
-              service: { serviceTitle: 'GST Tax Clearance' },
-            },
-          };
+    if (quotationId) {
+      try {
+        const pvRes = await paymentRepository.getPayView(quotationId);
+        if (pvRes?.success && pvRes.data) {
+          payViewData = pvRes.data;
         }
-      } else {
-        return {
-          success: true,
-          data: {
-            paymentId: targetPayId,
-            isVerified: false,
-            service: { serviceTitle: 'GST Tax Clearance' },
-          },
-        };
+      } catch (_pvErr) {}
+    }
+
+    // Match payment in payViewData across services, additionalPayment, and gstPayment
+    let matchedService = null;
+    let matchedPayment = null;
+    let isGst = false;
+
+    if (payViewData) {
+      // 1. Search in services
+      if (Array.isArray(payViewData.services)) {
+        for (const svc of payViewData.services) {
+          if (Array.isArray(svc.payments)) {
+            const p = svc.payments.find(
+              (item) =>
+                String(item.id).trim() === targetPayId ||
+                (item.voucher && String(item.voucher).trim() === targetPayId) ||
+                (item.upiId && String(item.upiId).trim() === targetPayId)
+            );
+            if (p) {
+              matchedService = svc;
+              matchedPayment = p;
+              break;
+            }
+          }
+        }
+      }
+
+      // 2. Search in additionalPayment
+      if (!matchedPayment && Array.isArray(payViewData.additionalPayment)) {
+        for (const addSvc of payViewData.additionalPayment) {
+          if (Array.isArray(addSvc.payments)) {
+            const p = addSvc.payments.find(
+              (item) =>
+                String(item.id).trim() === targetPayId ||
+                (item.voucher && String(item.voucher).trim() === targetPayId) ||
+                (item.upiId && String(item.upiId).trim() === targetPayId)
+            );
+            if (p) {
+              matchedService = addSvc;
+              matchedPayment = p;
+              break;
+            }
+          }
+        }
+      }
+
+      // 3. Search in gstPayment
+      if (!matchedPayment) {
+        const gstPayments = [
+          ...(Array.isArray(payViewData.gstPayment?.payments) ? payViewData.gstPayment.payments : []),
+          ...(Array.isArray(payViewData.gstPayments) ? payViewData.gstPayments : []),
+        ];
+        const p = gstPayments.find(
+          (item) =>
+            String(item.id).trim() === targetPayId ||
+            (item.voucher && String(item.voucher).trim() === targetPayId)
+        );
+        if (p || targetPayId.toLowerCase().startsWith('gst')) {
+          matchedService = payViewData.gstPayment || { title: 'GST Tax Clearance', totalPrice: payViewData.gstAmount || 0 };
+          matchedPayment = p || gstPayments[0] || null;
+          isGst = true;
+        }
+      }
+
+      if (matchedPayment?.id) {
+        targetPayId = String(matchedPayment.id).trim();
       }
     }
 
@@ -599,6 +649,33 @@ export const paymentRepository = {
         const resData = response?.data;
         const data = resData?.data || resData?.payment || resData;
         if (data && (data.paymentId || data.id || data.amount !== undefined || data.proofImage || data.proofImageUrl)) {
+          if (matchedService && (!data.service || !data.service.totalPrice || (!isGst && data.service.serviceTitle === 'GST Tax Clearance'))) {
+            data.service = {
+              serviceId: matchedService.id,
+              serviceTitle: matchedService.title || matchedService.serviceTitle || matchedService.name || 'Service Payment',
+              sqft: matchedService.sqft ?? null,
+              rate: matchedService.rate ?? null,
+              totalPrice: Number(matchedService.totalPrice !== undefined ? matchedService.totalPrice : matchedService.originalPrice || 0),
+              paidAmount: Number(matchedService.paidAmount !== undefined ? matchedService.paidAmount : 0),
+              balanceAmount: Number(
+                matchedService.balanceAmount !== undefined
+                  ? matchedService.balanceAmount
+                  : Math.max(0, Number(matchedService.totalPrice || 0) - Number(matchedService.paidAmount || 0))
+              ),
+              status: matchedService.status,
+            };
+          }
+          if (payViewData && !data.quotation) {
+            data.quotation = {
+              quotationId: payViewData.id || payViewData.quotationId || quotationId,
+              quotationTitle: payViewData.title || `Quotation #${payViewData.id || quotationId}`,
+              siteAddress: payViewData.propertyAddress || payViewData.siteAddress || (payViewData.customer?.address || payViewData.customer?.area || ''),
+              clientName: payViewData.customer?.name || payViewData.clientName || '',
+              totalAmount: payViewData.totalPrice || payViewData.totalWithGst || 0,
+              totalPaid: payViewData.totalPaid || 0,
+              balanceAmount: payViewData.balanceAmount || 0,
+            };
+          }
           return {
             success: true,
             data,
@@ -608,6 +685,68 @@ export const paymentRepository = {
       } catch (err) {
         lastError = err;
       }
+    }
+
+    if (matchedService || matchedPayment) {
+      const synthService = matchedService
+        ? {
+            serviceId: matchedService.id,
+            serviceTitle: matchedService.title || matchedService.serviceTitle || matchedService.name || (isGst ? 'GST Tax Clearance' : 'Service Payment'),
+            sqft: matchedService.sqft ?? null,
+            rate: matchedService.rate ?? null,
+            totalPrice: Number(matchedService.totalPrice !== undefined ? matchedService.totalPrice : matchedService.originalPrice || 0),
+            paidAmount: Number(matchedService.paidAmount !== undefined ? matchedService.paidAmount : 0),
+            balanceAmount: Number(
+              matchedService.balanceAmount !== undefined
+                ? matchedService.balanceAmount
+                : Math.max(0, Number(matchedService.totalPrice || 0) - Number(matchedService.paidAmount || 0))
+            ),
+            status: matchedService.status,
+          }
+        : null;
+
+      const synthQuotation = payViewData
+        ? {
+            quotationId: payViewData.id || payViewData.quotationId || quotationId,
+            quotationTitle: payViewData.title || `Quotation #${payViewData.id || quotationId}`,
+            siteAddress: payViewData.propertyAddress || payViewData.siteAddress || (payViewData.customer?.address || payViewData.customer?.area || ''),
+            clientName: payViewData.customer?.name || payViewData.clientName || '',
+            totalAmount: payViewData.totalPrice || payViewData.totalWithGst || 0,
+            totalPaid: payViewData.totalPaid || 0,
+            balanceAmount: payViewData.balanceAmount || 0,
+          }
+        : null;
+
+      return {
+        success: true,
+        data: {
+          id: matchedPayment?.id || targetPayId,
+          paymentId: matchedPayment?.id || targetPayId,
+          amount: matchedPayment?.amount ?? (isGst ? payViewData?.gstAmount || 0 : 0),
+          voucher: matchedPayment?.voucher || matchedPayment?.upiId || '',
+          upiId: matchedPayment?.upiId || '',
+          paymentMethod: matchedPayment?.paymentMethod || 'CASH',
+          paymentDate: matchedPayment?.createdAt || matchedPayment?.date || new Date().toISOString(),
+          receivedBy: matchedPayment?.receivedBy || 'Field Executive',
+          notes: matchedPayment?.notes || '',
+          proofImage: matchedPayment?.proofImage || null,
+          proofImageUrl: matchedPayment?.proofImageUrl || matchedPayment?.proofImage || null,
+          isVerified: Boolean(matchedPayment?.isVerified),
+          verifiedBy: matchedPayment?.verifiedBy || null,
+          verifiedAt: matchedPayment?.verifiedAt || null,
+          verification: {
+            isVerified: Boolean(matchedPayment?.isVerified),
+            verifiedBy: matchedPayment?.verifiedBy || null,
+            verifiedAt: matchedPayment?.verifiedAt || null,
+            canVerify: true,
+          },
+          service: synthService,
+          quotation: synthQuotation,
+          accounts: payViewData?.accounts || [],
+          primaryAccount: payViewData?.primaryAccount || null,
+        },
+        message: 'Payment verification view retrieved from quotation view',
+      };
     }
 
     return {
@@ -756,6 +895,102 @@ export const paymentRepository = {
       return {
         success: false,
         message: extractApiErrorMessage(err, 'Failed to update receipt lock'),
+        error: err,
+      };
+    }
+  },
+
+  /**
+   * Delete a payment record (API v2).
+   * Attempts DELETE /api/v2/quotations/:quotationId/payments/:paymentId
+   * and fallback DELETE /api/v2/payments/:paymentId
+   */
+  deletePayment: async (paymentId, quotationId = null) => {
+    if (!paymentId) {
+      return { success: false, message: 'Payment ID is required to delete payment' };
+    }
+
+    const cleanPaymentId = String(paymentId).trim();
+    const cleanQuoteId = quotationId ? String(quotationId).replace(/\D/g, '') || String(quotationId).trim() : null;
+
+    const endpoints = [];
+    if (cleanQuoteId && cleanPaymentId) {
+      endpoints.push(
+        API_ENDPOINTS.QUOTATION_PAYMENT_DELETE
+          ? API_ENDPOINTS.QUOTATION_PAYMENT_DELETE(cleanQuoteId, cleanPaymentId)
+          : `/quotations/${cleanQuoteId}/payments/${cleanPaymentId}`
+      );
+    }
+    endpoints.push(
+      API_ENDPOINTS.PAYMENT_DELETE
+        ? API_ENDPOINTS.PAYMENT_DELETE(cleanPaymentId)
+        : `/payments/${cleanPaymentId}`
+    );
+
+    let lastError = null;
+    for (const endpoint of endpoints) {
+      try {
+        const response = await apiClient.delete(endpoint);
+        const resData = response?.data;
+        if (resData?.success !== false) {
+          return {
+            success: true,
+            data: resData?.data || resData,
+            message: resData?.message || 'Payment deleted successfully',
+          };
+        }
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    return {
+      success: false,
+      message: extractApiErrorMessage(lastError, 'Failed to delete payment from server'),
+      error: lastError,
+    };
+  },
+
+  /**
+   * Fetch official receipt numbering configuration (API v2 Section 13).
+   * GET /api/v2/receipt-settings
+   */
+  getReceiptSettings: async () => {
+    try {
+      const endpoint = API_ENDPOINTS.RECEIPT_SETTINGS || '/receipt-settings';
+      const response = await apiClient.get(endpoint);
+      const resData = response?.data;
+      return {
+        success: resData?.success !== false,
+        data: resData?.data || resData,
+      };
+    } catch (err) {
+      return {
+        success: false,
+        message: extractApiErrorMessage(err, 'Failed to fetch receipt settings'),
+        error: err,
+      };
+    }
+  },
+
+  /**
+   * Update official receipt numbering configuration (Admin only - API v2 Section 13).
+   * PUT /api/v2/receipt-settings
+   */
+  updateReceiptSettings: async (settingsPayload) => {
+    try {
+      const endpoint = API_ENDPOINTS.RECEIPT_SETTINGS || '/receipt-settings';
+      const response = await apiClient.put(endpoint, settingsPayload);
+      const resData = response?.data;
+      return {
+        success: resData?.success !== false,
+        data: resData?.data || resData,
+        message: resData?.message || 'Receipt settings updated successfully',
+      };
+    } catch (err) {
+      return {
+        success: false,
+        message: extractApiErrorMessage(err, 'Failed to update receipt settings'),
         error: err,
       };
     }
