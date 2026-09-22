@@ -140,11 +140,11 @@ export default function SendQuoteScreen() {
         }
       }
     } else if (typeof month === 'string') {
-      const mIndex = MONTH_NAMES.indexOf(month.toUpperCase().substring(0,3));
+      const mIndex = MONTH_NAMES.indexOf(month.toUpperCase().substring(0, 3));
       if (mIndex !== -1) month = mIndex;
       else month = new Date().getMonth();
     }
-    
+
     if (isNaN(year)) year = new Date().getFullYear();
     if (isNaN(month)) month = new Date().getMonth();
     if (isNaN(day)) day = new Date().getDate();
@@ -171,7 +171,7 @@ export default function SendQuoteScreen() {
   const searchResults = useMemo(() => {
     if (!searchQuery.trim()) return [];
     const query = searchQuery.trim().toLowerCase();
-    
+
     return roleFilteredAppointments.filter(a => {
       const fullLoc = `${a.city || ''} ${a.area || ''} ${a.location || ''} ${a.address || ''}`.toLowerCase();
       const nameMatch = (a.clientName || a.name || '').toLowerCase().includes(query);
@@ -226,7 +226,7 @@ export default function SendQuoteScreen() {
             {isSearchActive ? `Search Results (${displayList.length})` : `Recent Appointments (${displayList.length})`}
           </Text>
         </View>
-        
+
         {displayList.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Ionicons name="alert-circle-outline" size={56} color={isDark ? '#475569' : '#CBD5E1'} style={{ marginBottom: 12 }} />
@@ -246,22 +246,22 @@ export default function SendQuoteScreen() {
             const locationText = getAreaAndCity(app);
 
             return (
-              <TouchableOpacity 
-                key={`app-${app.id}`} 
+              <TouchableOpacity
+                key={`app-${app.id}`}
                 onPress={() => router.push({ pathname: '/customer-detail', params: { id: app.id } })}
                 activeOpacity={0.9}
                 style={[
-                  styles.appointmentCard, 
+                  styles.appointmentCard,
                   isDark && styles.appointmentCardDark
                 ]}
               >
                 {/* Top Segment: Date Badge, Details, and Status Pill */}
                 <View style={styles.cardTopRow}>
-                  
+
                   {/* Modern Solid Date Block */}
-                  <View 
+                  <View
                     style={[
-                      styles.dateBlock, 
+                      styles.dateBlock,
                       { backgroundColor: isCompleted ? '#065F46' : '#1E3A8A' }
                     ]}
                   >
@@ -271,23 +271,23 @@ export default function SendQuoteScreen() {
 
                   {/* Middle Details Text Column */}
                   <View style={styles.detailsCol}>
-                    <Text 
+                    <Text
                       style={[
-                        styles.clientName, 
+                        styles.clientName,
                         isDark && styles.textDark
-                      ]} 
+                      ]}
                       numberOfLines={1}
                     >
                       {displayName}
                     </Text>
-                    
+
                     {/* Location Row */}
                     <View style={styles.detailIconRow}>
-                      <Ionicons 
-                        name="location-outline" 
-                        size={12} 
-                        color={isDark ? '#94A3B8' : '#475569'} 
-                        style={styles.detailIcon} 
+                      <Ionicons
+                        name="location-outline"
+                        size={12}
+                        color={isDark ? '#94A3B8' : '#475569'}
+                        style={styles.detailIcon}
                       />
                       <Text style={[styles.infoText, isDark && styles.subtextDark]} numberOfLines={1}>
                         {locationText}
@@ -296,11 +296,11 @@ export default function SendQuoteScreen() {
 
                     {/* Time Row */}
                     <View style={styles.detailIconRow}>
-                      <Ionicons 
-                        name="time-outline" 
-                        size={12} 
-                        color={isDark ? '#94A3B8' : '#475569'} 
-                        style={styles.detailIcon} 
+                      <Ionicons
+                        name="time-outline"
+                        size={12}
+                        color={isDark ? '#94A3B8' : '#475569'}
+                        style={styles.detailIcon}
                       />
                       <Text style={[styles.infoText, isDark && styles.subtextDark]}>
                         {timeText}
@@ -310,15 +310,15 @@ export default function SendQuoteScreen() {
 
                   {/* Right Status Badge */}
                   <View style={styles.statusCol}>
-                    <View 
+                    <View
                       style={[
-                        styles.statusBadge, 
+                        styles.statusBadge,
                         isCompleted ? styles.statusBadgeGreen : styles.statusBadgeBlue,
                         isCompleted && isDark && styles.statusBadgeGreenDark,
                         !isCompleted && isDark && styles.statusBadgeBlueDark
                       ]}
                     >
-                      <Text 
+                      <Text
                         style={[
                           isCompleted ? styles.statusTextGreen : styles.statusTextBlue,
                           isCompleted && isDark && styles.statusTextGreenDark,
@@ -335,12 +335,12 @@ export default function SendQuoteScreen() {
 
                 {/* Bottom Segment: Interactive Action Buttons Row */}
                 <View style={styles.cardBottomRow}>
-                  
-                  {/* Call and Maps pill buttons */}
+
+                  {/* Call, WhatsApp and Maps pill buttons */}
                   <View style={styles.bottomIconsContainer}>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       style={[
-                        styles.pillIconButton, 
+                        styles.pillIconButton,
                         isDark ? styles.pillIconButtonCallDark : styles.pillIconButtonCallLight
                       ]}
                       activeOpacity={0.75}
@@ -360,9 +360,32 @@ export default function SendQuoteScreen() {
                       <Text style={styles.buttonTextGreen}>Call</Text>
                     </TouchableOpacity>
 
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       style={[
-                        styles.pillIconButton, 
+                        styles.pillIconButton,
+                        isDark ? styles.pillIconButtonWaDark : styles.pillIconButtonWaLight
+                      ]}
+                      activeOpacity={0.75}
+                      onPress={() => {
+                        const phone = app.mobileNumber || app.phone || app.clientPhone || app.mobile;
+                        if (phone) {
+                          const cleaned = String(phone).replace(/[^0-9]/g, '');
+                          const waNumber = cleaned.startsWith('91') ? cleaned : `91${cleaned}`;
+                          Linking.openURL(`https://wa.me/${waNumber}`).catch(() =>
+                            Alert.alert('Error', 'Unable to open WhatsApp.')
+                          );
+                        } else {
+                          Alert.alert('No Phone', 'No phone number available for this client.');
+                        }
+                      }}
+                    >
+                      <Ionicons name="logo-whatsapp" size={13} color="#25D366" />
+                      <Text style={styles.buttonTextWa}>WhatsApp</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.pillIconButton,
                         isDark ? styles.pillIconButtonMapsDark : styles.pillIconButtonMapsLight
                       ]}
                       activeOpacity={0.75}
@@ -381,15 +404,6 @@ export default function SendQuoteScreen() {
                       <Text style={styles.buttonTextBlue}>Maps</Text>
                     </TouchableOpacity>
                   </View>
-
-                  {/* Send Quote Button */}
-                  <TouchableOpacity 
-                    style={styles.reassignButton} 
-                    onPress={() => router.push({ pathname: '/customer-detail', params: { id: app.id } })}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={styles.reassignButtonText}>Send Quote</Text>
-                  </TouchableOpacity>
                 </View>
               </TouchableOpacity>
             );
@@ -427,7 +441,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8FAFC',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#CBD5E1', 
+    borderColor: '#CBD5E1',
     height: 52,
     paddingHorizontal: 14,
   },
@@ -483,7 +497,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderWidth: 1,
     borderColor: '#F1F5F9',
-    },
+  },
   appointmentCardDark: {
     backgroundColor: '#1E293B',
     borderColor: '#334155',
@@ -625,6 +639,20 @@ const styles = StyleSheet.create({
     marginLeft: 4,
     fontWeight: '600',
   },
+  pillIconButtonWaLight: {
+    backgroundColor: 'rgba(37, 211, 102, 0.06)',
+    borderColor: 'rgba(37, 211, 102, 0.30)',
+  },
+  pillIconButtonWaDark: {
+    backgroundColor: 'rgba(37, 211, 102, 0.08)',
+    borderColor: 'rgba(37, 211, 102, 0.40)',
+  },
+  buttonTextWa: {
+    fontSize: 11,
+    color: '#25D366',
+    marginLeft: 4,
+    fontWeight: '600',
+  },
   reassignButton: {
     backgroundColor: '#FF7E36',
     paddingHorizontal: 12,
@@ -632,7 +660,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     justifyContent: 'center',
     alignItems: 'center',
-    },
+  },
   reassignButtonText: {
     color: '#FFFFFF',
     fontSize: 12,

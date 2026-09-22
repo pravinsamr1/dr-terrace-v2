@@ -1,23 +1,40 @@
 import React from 'react';
 import { Ionicons } from '@expo/vector-icons';
+import {
+  cacheDirectory,
+  copyAsync,
+  deleteAsync,
+  getInfoAsync,
+  writeAsStringAsync,
+} from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import {
+  Alert,
   Image,
+  Platform,
   ScrollView,
   StatusBar,
   StyleSheet,
-  Text,
+  Text as RNText,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { logoBase64 } from '../../../shared/constants/LogoBase64';
 import { appointmentRepository } from '../../appointments/api/appointmentRepository';
 import { clientRepository } from '../../clients/api/clientRepository';
+import { warrantyRepository } from '../api/warrantyRepository';
 import { useColorScheme } from '../../../core/hooks/useColorScheme';
 import InnerHeader from '../../../shared/components/InnerHeader';
 import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
+import { transformStyleForJakarta } from '../../../core/theme/initFonts';
+
+const Text = React.forwardRef((props, ref) => (
+  <RNText ref={ref} {...props} style={transformStyleForJakarta(props.style, true)} />
+));
+Text.displayName = 'Text';
 
 export default function WarrantyLetterScreen() {
   const router = useRouter();
@@ -25,30 +42,44 @@ export default function WarrantyLetterScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
 
-  const { id } = useLocalSearchParams();
+  const { id, quotationId } = useLocalSearchParams();
   const [appointment, setAppointment] = React.useState(null);
+  const [officialWarranty, setOfficialWarranty] = React.useState(null);
   const [isLoading, setIsLoading] = React.useState(true);
 
   React.useEffect(() => {
-    if (!id) {
-      setIsLoading(false);
-      return;
-    }
-    const cleanId = String(id).replace(/^DR/i, '').trim();
-    appointmentRepository.getAppointmentById(cleanId).then((res) => {
-      if (res?.success && res.appointment) {
-        setAppointment(res.appointment);
-      } else {
-        clientRepository.getClientById(cleanId).then((cRes) => {
+    async function loadData() {
+      setIsLoading(true);
+      const cleanId = id ? String(id).replace(/^DR/i, '').trim() : null;
+      let appData = null;
+      if (cleanId) {
+        const aRes = await appointmentRepository.getAppointmentById(cleanId);
+        if (aRes?.success && aRes.appointment) {
+          appData = aRes.appointment;
+        } else {
+          const cRes = await clientRepository.getClientById(cleanId);
           if (cRes?.success && (cRes.client || cRes.data)) {
-            setAppointment(cRes.client || cRes.data);
+            appData = cRes.client || cRes.data;
           }
-        });
+        }
       }
-    }).finally(() => {
+      setAppointment(appData);
+
+      const targetQuoteId =
+        quotationId ||
+        appData?.confirmedQuoteId ||
+        appData?.activeQuotationId ||
+        appData?.quotations?.find?.((q) => q.isConfirmed)?.id;
+      if (targetQuoteId) {
+        const wRes = await warrantyRepository.getWarranty(targetQuoteId);
+        if (wRes?.success && wRes.warranty) {
+          setOfficialWarranty(wRes.warranty);
+        }
+      }
       setIsLoading(false);
-    });
-  }, [id]);
+    }
+    loadData();
+  }, [id, quotationId]);
 
   if (isLoading) {
     return (
@@ -58,7 +89,7 @@ export default function WarrantyLetterScreen() {
     );
   }
 
-  if (!appointment) {
+  if (!appointment && !officialWarranty) {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
         <Text style={{ color: isDark ? '#fff' : '#000' }}>Warranty not found.</Text>
@@ -69,101 +100,150 @@ export default function WarrantyLetterScreen() {
     );
   }
 
+  // Derived data
   const currentDate = formatDateDDMMYY(new Date());
+  const refNo = officialWarranty?.receiptNumber || ('Dr.217' + (appointment?.id || ''));
+  const siteEngineerCode = officialWarranty?.siteEngineerCode || appointment?.siteEngineerCode || '';
+  const serviceType = appointment?.serviceType || 'Waterproofing System';
 
-  const refNo = `Dr.217${appointment.id}`;
-  const serviceType = appointment.serviceType || 'Terrace Waterproofing';
-  const prefix = appointment.clientName.trim().toLowerCase().startsWith('mr.') ? '' : 'Mr.';
-  const clientName = `${prefix}${appointment.clientName}`;
-  const address = appointment.address || appointment.location || "Chennai";
+  const nameLower = appointment?.clientName?.trim?.().toLowerCase() || '';
+  const hasPrefix =
+    nameLower.startsWith('mr.') ||
+    nameLower.startsWith('mrs.') ||
+    nameLower.startsWith('ms.');
+  const clientName = appointment?.clientName
+    ? ((hasPrefix ? '' : 'MR.') + appointment.clientName.toUpperCase())
+    : 'VALUED CLIENT';
+  const address = (appointment?.address || appointment?.location || 'Chennai').toUpperCase();
+  const mobile = appointment?.mobile || appointment?.phone || appointment?.mobileNumber || '';
+  const clientLine = [clientName, address, mobile ? ('MOBILE NO. ' + mobile) : '']
+    .filter(Boolean)
+    .join(', ');
 
-  const completedDate = appointment.warranty?.completedDate ? formatDateDDMMYY(appointment.warranty.completedDate) : 'N/A';
-  const validYears = appointment.warranty?.validYears || '10 Years';
-  const serviceWarranties = appointment.warranty?.serviceWarranties || [];
+  const completedDate = officialWarranty?.warrantyStartDate
+    ? formatDateDDMMYY(officialWarranty.warrantyStartDate)
+    : appointment?.warranty?.completedDate
+      ? formatDateDDMMYY(appointment.warranty.completedDate)
+      : 'N/A';
+
+  const validYears = appointment?.warranty?.validYears || '10 Years';
+  const serviceWarranties = appointment?.warranty?.serviceWarranties || [];
+
+  // PDF
+  const warrantyItemsHtml =
+    officialWarranty?.items?.length > 0
+      ? officialWarranty.items
+          .map(
+            (it) =>
+              '<p><span class="lbl">Warranty Valid :</span>&nbsp;&nbsp;<span class="red">' +
+              it.years + ' ' + (it.years === 1 ? 'YEAR' : 'YEARS') +
+              ' FOR ' + it.serviceTitle.toUpperCase() +
+              ' FROM THE DATE OF WORK COMPLETION.</span></p>'
+          )
+          .join('')
+      : serviceWarranties.length > 0
+        ? serviceWarranties
+            .map(
+              (sw) =>
+                '<p><span class="lbl">Warranty Valid :</span>&nbsp;&nbsp;<span class="red">' +
+                sw.duration.toUpperCase() + ' FOR ' + sw.serviceName.toUpperCase() +
+                ' FROM THE DATE OF WORK COMPLETION.</span></p>'
+            )
+            .join('')
+        : '<p><span class="lbl">Warranty Valid :</span>&nbsp;&nbsp;<span class="red">' +
+          String(validYears).toUpperCase() + ' FOR ' + serviceType.toUpperCase() +
+          ' FROM THE DATE OF WORK COMPLETION.</span></p>';
 
   const generateAndSharePDF = async () => {
-    const warrantyItemsHtml = serviceWarranties.length > 0
-      ? serviceWarranties.map(sw => `<p><span class="bold">Warranty Valid:</span> <span class="bold underline">${sw.duration}</span> for <span class="bold underline">${sw.serviceName}</span> from the Date of Work Completion.</p>`).join('')
-      : `<p><span class="bold">Warranty Valid:</span> <span class="bold underline">${validYears}</span> for <span class="bold underline">${serviceType}</span> from the Date of Work Completion.</p>`;
-
-    const htmlContent = `
-      <html>
-        <head>
-          <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-          <style>
-            @page { margin: 40px; }
-            body { font-family: 'Plus Jakarta Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 14px; color: #1e293b; line-height: 1.6; }
-            .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #0052CC; padding-bottom: 15px; }
-            .header h1 { color: #0052CC; margin: 0; font-size: 28px; }
-            .header h2 { color: #475569; margin: 5px 0 0 0; font-size: 18px; }
-            .meta { display: flex; justify-content: space-between; margin-bottom: 30px; font-weight: bold; }
-            .content p { margin-bottom: 16px; text-align: justify; }
-            .bold { font-weight: bold; }
-            .underline { text-decoration: underline; }
-            .note { border-left: 4px solid #0052CC; background-color: #f8fafc; padding: 15px; margin: 25px 0; font-size: 13px; font-weight: bold; }
-            .footer { margin-top: 60px; }
-            .signature { margin-top: 40px; display: inline-block; text-align: center; }
-            .signature .name { border-top: 1px solid #000; padding-top: 5px; font-weight: bold; margin-top: 10px; }
-            .footer-info { margin-top: 40px; border-top: 1px dashed #94a3b8; padding-top: 15px; font-size: 12px; color: #475569; text-align: left; }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h1>Dr. Terrace Waterproofing</h1>
-            <h2>Warranty Certificate</h2>
-          </div>
-          <div class="meta">
-            <div>Date : ${currentDate}</div>
-            <div>Warranty Reference No : ${refNo}</div>
-          </div>
-          <div class="content">
-            <p>This is to certify that we have done a <span class="bold underline">${serviceType}</span> in the below mentioned building if require in future in order to claim the warranty please submit this along with your building leaking pictures.</p>
-            
-            <p><span class="bold">Warranty For:</span> <span class="underline">${clientName} ,</span> ${address}.</p>
-            
-            <p><span class="bold">Work Completed:</span> ${serviceType} Completed on <span class="bold underline">${completedDate}</span></p>
-            
-            ${warrantyItemsHtml}
-            
-            <p><span class="bold">Warranty Including:</span> We will give free service to fix the leak which including Labour wages, Transportation, Consultation, Site Engineer allowance and salary.</p>
-            
-            <p><span class="bold">Warranty Exclusion for:</span> Customer who has due, Leakages through untreated places, Plumbing, electrical pipes related problems, physically damaged area and for the work which was done as a complementary.</p>
-            
-            <p>Kindly mail to service team our service team would give free visit/ service within 30 working days from the date of mail received from the client, required material has to be supplied by the client as a applicator the service which we give would be absolutely with free of cost.</p>
-            
-            <p>Requested you to raise a complaint only through mail with photos with scanned copy of bills and warranty letter in future for fast action on the same. Kindly don't give oral complaint to our Supervisor and Sales Managers; Service Team is responsible only for mail complaint which they directly received from client to admin@drterrace.com this will have records for both the ends.</p>
-            
-            <p>Rs 500/Day Per visit would be charged for analysing the site against complaint</p>
-          </div>
-          
-          <div class="note">
-            Note: We have done open Terrace Waterproofing, warranty not applicable when there is any floor mat or flower pot on the Coating.<br/><br/>
-            We don't provide duplicate copies, so kindly ensure you keep this invoice safe and secure.
-          </div>
-          
-          <div class="footer">
-            <div class="signature">
-              <div style="font-family: cursive; font-size: 24px; color: #475569; font-style: italic;">Dr. Terrace</div>
-              <div class="name">Dr.Terrace Waterproofing</div>
-            </div>
-            
-            <div class="footer-info">
-              <span class="bold" style="color:#0f172a;">Dr.Terrace Waterproofing</span><br/>
-              Parsn commercial complex, #C13, B13, 2nd floor, Kodambakkam High Road, Nungambakkam, Chennai-600006, admin@drterrace.com
-            </div>
-          </div>
-        </body>
-      </html>
-    `;
-
+    const htmlContent =
+      '<html><head>' +
+      '<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">' +
+      '<style>' +
+      '@page{margin:44px 52px;}' +
+      'body{font-family:"Plus Jakarta Sans",Helvetica,Arial,sans-serif;font-size:13.5px;color:#1e293b;line-height:1.65;}' +
+      '.logo{width:84px;height:auto;margin-bottom:8px;object-fit:contain;display:block;}' +
+      '.meta-row{display:flex;justify-content:space-between;margin-bottom:2px;}' +
+      '.meta-r{color:#CC0000;font-weight:700;font-size:13px;}' +
+      '.italic{font-style:italic;}' +
+      'hr.thin{border:none;border-top:1px solid #CBD5E1;margin:10px 0 14px 0;}' +
+      'p{margin-bottom:13px;text-align:justify;}' +
+      '.lbl{font-weight:700;text-decoration:underline;color:#1e293b;}' +
+      '.red{color:#CC0000;font-weight:700;}' +
+      '.indent{text-indent:40px;}' +
+      'hr.dash{border:none;border-top:1px dashed #94a3b8;margin:22px 0 14px 0;}' +
+      '.fb{font-weight:800;color:#0f172a;font-size:12px;}' +
+      '.fa{font-size:11.5px;color:#374151;line-height:17px;}' +
+      '</style></head><body>' +
+      '<div><img src="data:image/png;base64,' + logoBase64 + '" class="logo" /></div>' +
+      '<div class="meta-row"><span>' + currentDate + '</span><span class="meta-r">Warranty reference no-' + refNo + '</span></div>' +
+      '<div class="meta-row"><span class="italic">Warranty Letter</span>' +
+      (siteEngineerCode ? '<span class="meta-r">Site Engineer coad -' + siteEngineerCode + '</span>' : '') +
+      '</div><hr class="thin"/>' +
+      '<p>This is to certify that we have done a <b>' + serviceType + '</b> in the below mentioned building if require in future in order to claim the warranty please submit this along with your building leaking pictures.</p>' +
+      '<p><span class="lbl">Warranty For:</span>&nbsp;&nbsp;<span class="red">' + clientLine + '</span></p>' +
+      '<p><span class="lbl">Work Completed:</span> <span class="red">' + serviceType.toUpperCase() + ' COMPLETED ON ' + completedDate + '.</span></p>' +
+      warrantyItemsHtml +
+      '<p><span class="lbl">Warranty Including :</span> We will give free service to fix the leak which including Labour wages, Transportation, Consultation, Site Engineer allowance and salary.</p>' +
+      '<p><span class="lbl">Warranty Exclusion For :</span> Customer who has due, Leakages through untreated places, Plumbing, electrical pipes related problems, physically damaged area and for the work which was done as a complementary.</p>' +
+      '<p>Kindly mail to service team our service team would give free visit/ service within 30 working days from the date of mail received from the client, required material has to be supplied by the client as a applicator the service which we give would be absolutely with free of cost.</p>' +
+      '<p class="indent">Requested you to raise a complaint only through mail with photos with scanned copy of bills and warranty letter in future for fast action on the same. Kindly don\'t give oral complaint to our Supervisor and Sales Managers; Service Team is responsible only for mail complaint which they directly received from client to <a href="mailto:admin@drterrace.com">admin@drterrace.com</a> this will have records for both the ends.</p>' +
+      '<p>Rs 500/Day Per visit would be charged for analysing the site against complaint</p>' +
+      '<p><b>Dr.Terrace water Proofing</b></p>' +
+      '<p>(Computer Generated hence signature not required)</p>' +
+      '<hr class="dash"/>' +
+      '<div class="fb">Dr.Terrace Water Proofing</div>' +
+      '<div class="fa">Parsn Commercial Complex, #C13, B13, 2nd floor, Kodambakkam High Road, Nungambakkam, Chennai-600006, admin@drterrace.com</div>' +
+      '</body></html>';
     try {
-      const { uri } = await Print.printToFileAsync({
-        html: htmlContent,
-        base64: false
-      });
-      await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (!isAvailable) {
+        Alert.alert('Sharing Unavailable', 'Sharing is not supported on this device.');
+        return;
+      }
+
+      const { uri, base64 } = await Print.printToFileAsync({ html: htmlContent, base64: true });
+      const cleanClientName = (clientLine || 'Customer').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const targetName = `warranty_letter_${cleanClientName}.pdf`;
+      const targetUri = cacheDirectory ? `${cacheDirectory}${targetName}` : null;
+
+      let shareUri = uri;
+
+      if (targetUri && base64) {
+        try {
+          await writeAsStringAsync(targetUri, base64, { encoding: 'base64' });
+          shareUri = targetUri;
+        } catch (writeErr) {
+          console.warn('writeAsStringAsync failed, attempting copyAsync fallback:', writeErr?.message);
+        }
+      }
+
+      if (shareUri === uri && targetUri && uri) {
+        try {
+          const fileInfo = await getInfoAsync(targetUri);
+          if (fileInfo.exists) {
+            await deleteAsync(targetUri, { idempotent: true });
+          }
+          await copyAsync({
+            from: uri,
+            to: targetUri,
+          });
+          shareUri = targetUri;
+        } catch (copyErr) {
+          console.warn('copyAsync failed, using direct print URI:', copyErr?.message);
+        }
+      }
+
+      const shareOptions = {
+        mimeType: 'application/pdf',
+        dialogTitle: `Share Warranty Letter - ${clientLine || 'Customer'}`,
+      };
+      if (Platform.OS === 'ios') {
+        shareOptions.UTI = 'com.adobe.pdf';
+      }
+      await Sharing.shareAsync(shareUri, shareOptions);
     } catch (error) {
-      console.error("Error generating PDF", error);
+      console.error('Error generating PDF', error);
+      Alert.alert('Error', 'Failed to generate and share PDF: ' + (error?.message || error));
     }
   };
 
@@ -186,84 +266,126 @@ export default function WarrantyLetterScreen() {
         contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(insets.bottom + 80, 100) }]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={[styles.certificatePage, isDark && styles.certificatePageDark]}>
+        <View style={[styles.letterPage, isDark && styles.letterPageDark]}>
 
-          {/* Top Row: Date & Ref */}
-          <View style={styles.metaRow}>
-            <Text style={styles.metaText}><Text style={styles.boldText}>Date :</Text> {currentDate}</Text>
-            <Text style={styles.metaText}><Text style={styles.boldText}>Warranty Reference No :</Text> {refNo}</Text>
+          {/* Logo */}
+          <View style={styles.logoRow}>
+            <Image
+              source={{ uri: `data:image/png;base64,${logoBase64}` }}
+              style={styles.logoImage}
+              resizeMode="contain"
+            />
           </View>
 
-          <Text style={styles.paragraphText}>
-            This is to certify that we have done a <Text style={styles.boldUnderlineText}>{serviceType}</Text> in the below mentioned building if require in future in order to claim the warranty please submit this along with your building leaking pictures.
+          {/* Meta Row 1: date | ref no */}
+          <View style={styles.metaRow}>
+            <Text style={styles.metaLeft}>{currentDate}</Text>
+            <Text style={styles.metaRight}>{'Warranty reference no-' + refNo}</Text>
+          </View>
+
+          {/* Meta Row 2: Warranty Letter | site engineer */}
+          <View style={styles.metaRow}>
+            <Text style={styles.warrantyLabel}>Warranty Letter</Text>
+            {Boolean(siteEngineerCode) && (
+              <Text style={styles.metaRight}>{'Site Engineer coad -' + siteEngineerCode}</Text>
+            )}
+          </View>
+
+          {/* Thin line */}
+          <View style={styles.thinLine} />
+
+          {/* Intro */}
+          <Text style={styles.body}>
+            {'This is to certify that we have done a '}
+            <Text style={styles.bold}>{serviceType}</Text>
+            {' in the below mentioned building if require in future in order to claim the warranty please submit this along with your building leaking pictures.'}
           </Text>
 
-          <Text style={styles.paragraphText}>
-            <Text style={styles.boldText}>Warranty For:</Text> <Text style={styles.underlineText}>{clientName} ,</Text> {address}.
+          {/* Warranty For */}
+          <Text style={styles.body}>
+            <Text style={styles.lbl}>{'Warranty For:  '}</Text>
+            <Text style={styles.redBold}>{clientLine}</Text>
           </Text>
 
-          <Text style={styles.paragraphText}>
-            <Text style={styles.boldText}>Work Completed:</Text> {serviceType} Completed on <Text style={styles.boldUnderlineText}>{completedDate}</Text>
+          {/* Work Completed */}
+          <Text style={styles.body}>
+            <Text style={styles.lbl}>{'Work Completed: '}</Text>
+            <Text style={styles.redBold}>{serviceType.toUpperCase() + ' COMPLETED ON ' + completedDate + '.'}</Text>
           </Text>
 
-          {serviceWarranties.length > 0 ? (
+          {/* Warranty Valid per service */}
+          {officialWarranty?.items?.length > 0 ? (
+            officialWarranty.items.map((it, idx) => (
+              <Text key={it.id || idx} style={styles.body}>
+                <Text style={styles.lbl}>{'Warranty Valid : '}</Text>
+                <Text style={styles.redBold}>
+                  {it.years + ' ' + (it.years === 1 ? 'YEAR' : 'YEARS') + ' FOR ' + it.serviceTitle.toUpperCase() + ' FROM THE DATE OF WORK COMPLETION.'}
+                </Text>
+              </Text>
+            ))
+          ) : serviceWarranties.length > 0 ? (
             serviceWarranties.map((sw, idx) => (
-              <Text key={idx} style={styles.paragraphText}>
-                <Text style={styles.boldText}>Warranty Valid:</Text> <Text style={styles.boldUnderlineText}>{sw.duration}</Text> for <Text style={styles.boldUnderlineText}>{sw.serviceName}</Text> from the Date of Work Completion.
+              <Text key={idx} style={styles.body}>
+                <Text style={styles.lbl}>{'Warranty Valid : '}</Text>
+                <Text style={styles.redBold}>
+                  {sw.duration.toUpperCase() + ' FOR ' + sw.serviceName.toUpperCase() + ' FROM THE DATE OF WORK COMPLETION.'}
+                </Text>
               </Text>
             ))
           ) : (
-            <Text style={styles.paragraphText}>
-              <Text style={styles.boldText}>Warranty Valid:</Text> <Text style={styles.boldUnderlineText}>{validYears}</Text> for <Text style={styles.boldUnderlineText}>{serviceType}</Text> from the Date of Work Completion.
+            <Text style={styles.body}>
+              <Text style={styles.lbl}>{'Warranty Valid : '}</Text>
+              <Text style={styles.redBold}>
+                {String(validYears).toUpperCase() + ' FOR ' + serviceType.toUpperCase() + ' FROM THE DATE OF WORK COMPLETION.'}
+              </Text>
             </Text>
           )}
 
-          <Text style={styles.paragraphText}>
-            <Text style={styles.boldText}>Warranty Including:</Text> We will give free service to fix the leak which including Labour wages, Transportation, Consultation, Site Engineer allowance and salary.
+          {/* Warranty Including */}
+          <Text style={styles.body}>
+            <Text style={styles.lbl}>{'Warranty Including : '}</Text>
+            {'We will give free service to fix the leak which including Labour wages, Transportation, Consultation, Site Engineer allowance and salary.'}
           </Text>
 
-          <Text style={styles.paragraphText}>
-            <Text style={styles.boldText}>Warranty Exclusion for:</Text> Customer who has due, Leakages through untreated places, Plumbing, electrical pipes related problems, physically damaged area and for the work which was done as a complementary.
+          {/* Warranty Exclusion */}
+          <Text style={styles.body}>
+            <Text style={styles.lbl}>{'Warranty Exclusion For : '}</Text>
+            {'Customer who has due, Leakages through untreated places, Plumbing, electrical pipes related problems, physically damaged area and for the work which was done as a complementary.'}
           </Text>
 
-          <Text style={styles.paragraphText}>
-            Kindly mail to service team our service team would give free visit/ service within 30 working days from the date of mail received from the client, required material has to be supplied by the client as a applicator the service which we give would be absolutely with free of cost.
+          {/* Service mail */}
+          <Text style={styles.body}>
+            {'Kindly mail to service team our service team would give free visit/ service within 30 working days from the date of mail received from the client, required material has to be supplied by the client as a applicator the service which we give would be absolutely with free of cost.'}
           </Text>
 
-          <Text style={styles.paragraphText}>
-            Requested you to raise a complaint only through mail with photos with scanned copy of bills and warranty letter in future for fast action on the same. Kindly don&apos;t give oral complaint to our Supervisor and Sales Managers; Service Team is responsible only for mail complaint which they directly received from client to admin@drterrace.com this will have records for both the ends.
+          {/* Complaint (indented) */}
+          <Text style={styles.body}>
+            {'        Requested you to raise a complaint only through mail with photos with scanned copy of bills and warranty letter in future for fast action on the same. Kindly don\u2019t give oral complaint to our Supervisor and Sales Managers; Service Team is responsible only for mail complaint which they directly received from client to '}
+            <Text style={styles.link}>{'admin@drterrace.com'}</Text>
+            {' this will have records for both the ends.'}
           </Text>
 
-          <Text style={styles.paragraphText}>
-            Rs 500/Day Per visit would be charged for analysing the site against complaint
+          {/* Visit charge */}
+          <Text style={styles.body}>
+            {'Rs 500/Day Per visit would be charged for analysing the site against complaint'}
           </Text>
 
-          <View style={styles.noteBox}>
-            <Text style={styles.noteText}>
-              <Text style={styles.boldText}>Note: </Text>
-              We have done open Terrace Waterproofing, warranty not applicable when there is any floor mat or flower pot on the Coating.
-            </Text>
-            <Text style={[styles.noteText, { marginTop: 12 }]}>
-              We don&apos;t provide duplicate copies, so kindly ensure you keep this invoice safe and secure.
-            </Text>
-          </View>
+          {/* Sign-off */}
+          <Text style={[styles.body, { fontWeight: '700', color: '#0F172A', marginTop: 4, marginBottom: 2 }]}>
+            {'Dr.Terrace water Proofing'}
+          </Text>
+          <Text style={styles.body}>
+            {'(Computer Generated hence signature not required)'}
+          </Text>
 
-          {/* Signature Area */}
-          <View style={styles.signatureSection}>
-            {/* Signature Placeholder - using text as mockup */}
-            <Text style={styles.signatureScript}>Dr.Terrace</Text>
-            <Text style={styles.signatureLabel}>Dr.Terrace Waterproofing</Text>
-          </View>
-
-          <View style={styles.dashedDivider} />
+          {/* Dashed divider */}
+          <View style={styles.dashedLine} />
 
           {/* Footer */}
-          <View style={styles.footerInfo}>
-            <Text style={styles.footerBold}>Dr.Terrace Waterproofing</Text>
-            <Text style={styles.footerText}>
-              Parsn commercial complex, #C13, B13, 2nd floor, Kodambakkam High Road, Nungambakkam, Chennai-600006, admin@drterrace.com
-            </Text>
-          </View>
+          <Text style={styles.footerBold}>Dr.Terrace Water Proofing</Text>
+          <Text style={styles.footerText}>
+            {'Parsn Commercial Complex, #C13, B13, 2nd floor, Kodambakkam High Road, Nungambakkam,\nChennai-600006, admin@drterrace.com'}
+          </Text>
 
         </View>
       </ScrollView>
@@ -272,96 +394,37 @@ export default function WarrantyLetterScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#EDF5FD',
-  },
-  containerDark: {
-    backgroundColor: '#080808',
-  },
+  container: { flex: 1, backgroundColor: '#9CA3AF' },
+  containerDark: { backgroundColor: '#111827' },
+  scrollContent: { padding: 14 },
 
-  scrollContent: {
-    padding: 16,
-  },
-  certificatePage: {
+  letterPage: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    padding: 24,
+    borderRadius: 4,
+    paddingHorizontal: 22,
+    paddingVertical: 26,
+    borderWidth: 2,
+    borderColor: '#374151',
   },
-  certificatePageDark: {
-    backgroundColor: '#1E293B',
-  },
-  metaRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 24,
-  },
-  metaText: {
-    fontSize: 12,
-    color: '#0F172A',
-  },
-  paragraphText: {
-    fontSize: 12,
-    color: '#1E293B',
-    lineHeight: 18,
-    marginBottom: 16,
-    textAlign: 'justify',
-  },
-  boldText: {
-    fontWeight: '800',
-    color: '#0F172A',
-  },
-  underlineText: {
-    textDecorationLine: 'underline',
-  },
-  boldUnderlineText: {
-    fontWeight: '800',
-    textDecorationLine: 'underline',
-    color: '#0F172A',
-  },
-  noteBox: {
-    marginVertical: 12,
-  },
-  noteText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#0F172A',
-    lineHeight: 16,
-  },
-  signatureSection: {
-    marginTop: 24,
-    alignItems: 'flex-start',
-  },
-  signatureScript: {
-    fontFamily: 'Cursive', // Note: Cursive may not render on all devices exactly as desired, but serves as placeholder
-    fontSize: 24,
-    color: '#475569',
-    marginBottom: 4,
-    fontStyle: 'italic',
-  },
-  signatureLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  dashedDivider: {
-    borderWidth: 1,
-    borderColor: '#94A3B8',
-    borderStyle: 'dashed',
-    marginVertical: 24,
-  },
-  footerInfo: {
-    marginTop: 8,
-  },
-  footerBold: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: '#0F172A',
-    marginBottom: 4,
-  },
-  footerText: {
-    fontSize: 11,
-    color: '#475569',
-    lineHeight: 16,
-  },
+  letterPageDark: { backgroundColor: '#1E293B', borderColor: '#475569' },
+
+  logoRow: { marginBottom: 12 },
+  logoImage: { width: 84, height: 74 },
+
+  metaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 3 },
+  metaLeft: { fontSize: 13, color: '#1E293B', fontWeight: '500' },
+  metaRight: { fontSize: 12, color: '#CC0000', fontWeight: '700', textAlign: 'right', flex: 1, marginLeft: 8 },
+  warrantyLabel: { fontSize: 13, fontStyle: 'italic', color: '#1E293B', fontWeight: '500' },
+
+  thinLine: { height: 1, backgroundColor: '#CBD5E1', marginVertical: 10 },
+  dashedLine: { borderBottomWidth: 1, borderColor: '#94A3B8', borderStyle: 'dashed', marginVertical: 18 },
+
+  body: { fontSize: 12.5, color: '#1E293B', lineHeight: 19, marginBottom: 12, textAlign: 'justify' },
+  bold: { fontWeight: '700', color: '#0F172A' },
+  lbl: { fontWeight: '700', color: '#0F172A', textDecorationLine: 'underline' },
+  redBold: { color: '#CC0000', fontWeight: '700' },
+  link: { color: '#1D4ED8', textDecorationLine: 'underline' },
+
+  footerBold: { fontSize: 12, fontWeight: '800', color: '#0F172A', marginBottom: 3 },
+  footerText: { fontSize: 11.5, color: '#374151', lineHeight: 17 },
 });

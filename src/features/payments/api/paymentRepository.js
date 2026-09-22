@@ -97,11 +97,14 @@ function preparePaymentPayload(payload) {
   }
 
   if (fileObj) {
+    // Attach the file once, under the field the backend documents
+    // (proofImage). Previously this appended the SAME file under five
+    // different keys (proofImage/proof/image/file/receipt), quintupling
+    // the upload size on every image-attached payment — worse the larger
+    // the photo, and worse still alongside a large payment amount, which
+    // made these requests prone to timing out with a raw server/gateway
+    // error instead of a clean response.
     formData.append('proofImage', fileObj);
-    formData.append('proof', fileObj);
-    formData.append('image', fileObj);
-    formData.append('file', fileObj);
-    formData.append('receipt', fileObj);
   }
 
   return formData;

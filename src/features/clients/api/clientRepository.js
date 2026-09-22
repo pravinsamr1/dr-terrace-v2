@@ -39,6 +39,39 @@ export const clientRepository = {
     const googleLocation = raw.googleLocation ? String(raw.googleLocation).trim() : (raw.mapLocation ? String(raw.mapLocation).trim() : '');
     const serviceType = raw.serviceType ? String(raw.serviceType).trim() : (raw.services ? String(raw.services).trim() : '');
 
+    const { packages: normalizedPackages, quotations: normalizedQuotations } =
+      clientRepository.normalizePackagesAndQuotations(raw);
+
+    const confirmedQuote = normalizedQuotations.find(
+      (q) => q.isConfirmed || q.status === 'CONFIRMED' || q.confirmed
+    );
+    // Only trust an explicit backend confirmation flag, or a quotation that is
+    // actually marked isConfirmed. Never infer confirmation from the mere presence
+    // of a payView / quotationId — a payView can exist for an unconfirmed draft too.
+    const rawConfirmedId = raw.confirmedQuoteId ?? raw.activeQuotationId;
+    const confirmedQuoteId = rawConfirmedId != null
+      ? String(rawConfirmedId)
+      : (confirmedQuote ? String(confirmedQuote.id) : null);
+    const activeQuotationId = raw.activeQuotationId != null
+      ? String(raw.activeQuotationId)
+      : confirmedQuoteId;
+
+    const isReceiptGenerated = Boolean(
+      raw.isReceiptGenerated ||
+      raw.fullReceiptGenerated ||
+      raw.receiptNumber ||
+      raw.payView?.isReceiptGenerated ||
+      raw.payView?.fullReceiptGenerated ||
+      raw.payView?.receiptNumber ||
+      raw.payView?.receiptStatus === 'GENERATED'
+    );
+    const isReceiptLocked = Boolean(raw.isReceiptLocked || raw.payView?.isReceiptLocked);
+    const receiptNumber = raw.receiptNumber ?? raw.payView?.receiptNumber ?? null;
+
+    const totalPayment = raw.totalPayment ?? raw.totalAmount ?? raw.grandTotal ?? raw.total ??
+      confirmedQuote?.total ?? confirmedQuote?.amount ??
+      raw.payView?.totalWithGst ?? raw.payView?.totalPrice ?? 0;
+
     return {
       id,
       _id: raw._id ?? id,
@@ -94,21 +127,100 @@ export const clientRepository = {
       attendedTime: raw.appointmentAttend?.time ? String(raw.appointmentAttend.time).trim() : (raw.attendedTime ? String(raw.attendedTime).trim() : ''),
       employeeId: raw.employeeId ?? raw.assignedEmployeeId ?? raw.appointmentAttend?.employeeId ?? null,
       assignedEmployeeId: raw.assignedEmployeeId ?? raw.employeeId ?? raw.appointmentAttend?.employeeId ?? null,
-      quotations: Array.isArray(raw.quotations) ? raw.quotations : [],
+      packages: normalizedPackages.length > 0 ? normalizedPackages : (Array.isArray(raw.packages) ? raw.packages : []),
+      quotations: normalizedQuotations.length > 0 ? normalizedQuotations : (Array.isArray(raw.quotations) ? raw.quotations : []),
+      payView: confirmedQuote ? (raw.payView ?? confirmedQuote?.payView ?? null) : null,
       sitePhotos: Array.isArray(raw.sitePhotos) ? raw.sitePhotos : [],
       inspections: Array.isArray(raw.inspections) ? raw.inspections : [],
       extraCharges: Array.isArray(raw.extraCharges) ? raw.extraCharges : [],
-      confirmedQuoteId: raw.confirmedQuoteId ?? raw.activeQuotationId ?? raw.quotationId ?? null,
-      activeQuotationId: raw.activeQuotationId ?? raw.confirmedQuoteId ?? raw.quotationId ?? null,
-      quotationId: raw.quotationId ?? raw.confirmedQuoteId ?? null,
-      totalPayment: raw.totalPayment ?? raw.totalAmount ?? raw.grandTotal ?? raw.total ?? 0,
+      confirmedQuoteId,
+      activeQuotationId,
+      quotationId: confirmedQuoteId,
+      totalPayment,
       warranty: raw.warranty ?? null,
       warrantyClaims: Array.isArray(raw.warrantyClaims) ? raw.warrantyClaims : [],
-      isReceiptGenerated: Boolean(raw.isReceiptGenerated || raw.fullReceiptGenerated),
-      fullReceiptGenerated: Boolean(raw.fullReceiptGenerated || raw.isReceiptGenerated),
-      isReceiptLocked: Boolean(raw.isReceiptLocked),
-      receiptNumber: raw.receiptNumber ?? null,
+      isReceiptGenerated,
+      fullReceiptGenerated: isReceiptGenerated,
+      isReceiptLocked,
+      receiptNumber,
       siteVisited: Boolean(raw.siteVisited ?? raw.isSiteVisited),
+    };
+  },
+
+  /**
+   * Helper to normalize packages and quotations arrays
+   */
+  normalizePackagesAndQuotations: (data) => {
+    if (!data) return { packages: [], quotations: [] };
+
+    const packagesArray = Array.isArray(data?.packages)
+      ? data.packages
+      : (Array.isArray(data?.data?.packages) ? data.data.packages : null);
+
+    let normalizedPackages = [];
+    let allNormalizedQuotations = [];
+
+    if (packagesArray && packagesArray.length > 0) {
+      normalizedPackages = packagesArray.map((pkg) => {
+        const rawPackageName = pkg.packages || pkg.packageName || pkg.name || pkg.tier || '';
+        const packageName = String(rawPackageName).trim();
+        const pkgId = pkg.packageId != null ? Number(pkg.packageId) : (pkg.id != null ? Number(pkg.id) : null);
+        const tier = pkg.tier ? String(pkg.tier).trim() : (
+          pkgId === 3 || packageName.toLowerCase().includes('elite') ? 'Elite' :
+          pkgId === 2 || packageName.toLowerCase().includes('premium') ? 'Premium' :
+          pkgId === 1 || packageName.toLowerCase().includes('economic') ? 'Economic' :
+          (pkgId === null || packageName.toLowerCase() === 'none' ? 'None' : packageName)
+        );
+        const warranty = pkg.warranty ? String(pkg.warranty).trim() : '';
+        const pkgQuots = Array.isArray(pkg.quotations)
+          ? pkg.quotations
+          : (Array.isArray(pkg.data) ? pkg.data : []);
+
+        const normalizedPkgQuots = pkgQuots.map((q, qIdx) => {
+          return clientRepository.normalizeQuotation(q, qIdx, {
+            packageId: pkgId,
+            packages: tier || packageName || pkg.packages,
+            packageName: q.packageName || packageName,
+            tier: q.tier || tier,
+            warranty: q.warranty || warranty,
+          });
+        }).filter(Boolean);
+
+        allNormalizedQuotations.push(...normalizedPkgQuots);
+
+        return {
+          packageId: pkgId,
+          packages: tier || packageName || pkg.packages,
+          packageName: packageName || tier,
+          tier,
+          warranty,
+          quotations: normalizedPkgQuots,
+        };
+      });
+    }
+
+    // Also include any top-level raw quotations that were not in packagesArray
+    const topQuots = Array.isArray(data?.quotations)
+      ? data.quotations
+      : (Array.isArray(data?.data?.quotations) ? data.data.quotations : []);
+
+    topQuots.forEach((q, idx) => {
+      const qId = String(q?.quotationId ?? q?.id ?? '');
+      if (qId && !allNormalizedQuotations.some((existing) => String(existing.id) === qId || String(existing.quotationId) === qId)) {
+        const norm = clientRepository.normalizeQuotation(q, allNormalizedQuotations.length + idx);
+        if (norm) {
+          allNormalizedQuotations.push(norm);
+          const targetPkg = normalizedPackages.find((p) => p.packageId === norm.packageId || (norm.tier && p.tier?.toLowerCase() === norm.tier.toLowerCase()));
+          if (targetPkg) {
+            targetPkg.quotations.push(norm);
+          }
+        }
+      }
+    });
+
+    return {
+      packages: normalizedPackages,
+      quotations: allNormalizedQuotations,
     };
   },
 
@@ -207,17 +319,19 @@ export const clientRepository = {
     ));
     const rawPackageName = q.packageName ? String(q.packageName).trim() : (q.packages ? String(q.packages).trim() : (packageContext.packageName ? String(packageContext.packageName).trim() : (packageContext.packages ? String(packageContext.packages).trim() : rawTier)));
 
-    // Normalize services
-    const rawServices = Array.isArray(q.services)
+    // Normalize services - support services, quotationServices, and payView.services
+    const rawServices = (Array.isArray(q.services) && q.services.length > 0)
       ? q.services
-      : (Array.isArray(q.quotationServices) ? q.quotationServices : []);
+      : ((Array.isArray(q.quotationServices) && q.quotationServices.length > 0)
+          ? q.quotationServices
+          : (Array.isArray(q.payView?.services) ? q.payView.services : []));
 
     const servicesList = rawServices.map((s, si) => {
-      const sArea = s.area != null ? String(s.area) : '';
+      const sArea = s.area != null ? String(s.area) : (s.sqft != null ? String(s.sqft) : '');
       const sRate = s.rate != null ? String(s.rate) : '';
-      const sSubtotal = s.subtotal != null ? Number(s.subtotal) : (s.totalPrice != null ? Number(s.totalPrice) : 0);
-      const sDesc = s.description ? String(s.description).trim() : (s.spec ? String(s.spec).trim() : '');
-      const sName = s.serviceName ? String(s.serviceName).trim() : (s.name ? String(s.name).trim() : '');
+      const sSubtotal = s.subtotal != null ? Number(s.subtotal) : (s.totalPrice != null ? Number(s.totalPrice) : (s.originalPrice != null ? Number(s.originalPrice) : 0));
+      const sDesc = s.description ? String(s.description).trim() : (s.spec ? String(s.spec).trim() : (s.title ? String(s.title).trim() : ''));
+      const sName = s.serviceName ? String(s.serviceName).trim() : (s.name ? String(s.name).trim() : (s.title ? String(s.title).trim() : ''));
 
       return {
         id: s.serviceId ?? s.id ?? si + 1,
@@ -231,26 +345,32 @@ export const clientRepository = {
         rate: sRate,
         subtotal: sSubtotal,
         total: s.total != null ? Number(s.total) : sSubtotal,
+        paidAmount: s.paidAmount != null ? Number(s.paidAmount) : 0,
+        balanceAmount: s.balanceAmount != null ? Number(s.balanceAmount) : 0,
+        status: s.status || '',
+        payments: Array.isArray(s.payments) ? s.payments : [],
       };
     });
 
-    const subtotal = q.subTotal != null ? Number(q.subTotal) : (q.subtotal != null ? Number(q.subtotal) : (q.amount != null ? Number(q.amount) : 0));
-    const total = q.grandTotal != null ? Number(q.grandTotal) : (q.total != null ? Number(q.total) : subtotal);
-    const discount = q.discount != null ? Number(q.discount) : 0;
-    const gstRate = q.gstPercentage != null ? Number(q.gstPercentage) : (q.gstRate != null ? Number(q.gstRate) : 0);
-    const gstAdded = q.gstAdded != null ? Boolean(q.gstAdded) : gstRate > 0;
-    const gstAmount = q.gstAmount != null ? Number(q.gstAmount) : 0;
+    const subtotal = q.subTotal != null ? Number(q.subTotal) : (q.subtotal != null ? Number(q.subtotal) : (q.amount != null ? Number(q.amount) : (q.payView?.totalPrice != null ? Number(q.payView.totalPrice) : 0)));
+    const total = q.grandTotal != null ? Number(q.grandTotal) : (q.total != null ? Number(q.total) : (q.amount != null ? Number(q.amount) : (q.payView?.totalWithGst != null ? Number(q.payView.totalWithGst) : subtotal)));
+    const discount = q.discount != null ? Number(q.discount) : (q.payView?.discountAmount != null ? Number(q.payView.discountAmount) : 0);
+    const gstRate = q.gstPercentage != null ? Number(q.gstPercentage) : (q.gstRate != null ? Number(q.gstRate) : (q.payView?.gstPercentage != null ? Number(q.payView.gstPercentage) : 0));
+    const gstAdded = q.gstAdded != null ? Boolean(q.gstAdded) : (q.payView?.withGst !== undefined ? Boolean(q.payView.withGst) : gstRate > 0);
+    const gstAmount = q.gstAmount != null ? Number(q.gstAmount) : (q.payView?.gstAmount != null ? Number(q.payView.gstAmount) : 0);
 
-    const finalId = q.quotationId ?? q.id ?? (index + 1);
+    const finalId = q.quotationId != null ? String(q.quotationId).trim() : (q.id != null ? String(q.id).trim() : String(index + 1));
     const packageName = rawPackageName;
     const revNum = q.revisionNo != null ? Number(q.revisionNo) : (q.revision != null ? Number(q.revision) : (index + 1));
     const qDate = q.quotationDate ? String(q.quotationDate).trim() : (q.date ? String(q.date).trim() : '');
     const warranty = q.warranty ? String(q.warranty).trim() : (packageContext.warranty ? String(packageContext.warranty).trim() : '');
+    const isConfirmed = Boolean(q.isConfirmed === true || q.isConfirmed === 1 || q.isConfirmed === 'true' || q.status === 'CONFIRMED' || q.confirmed === true || q.payView?.isConfirmed);
 
     return {
       ...q,
       id: finalId,
       quotationId: finalId,
+      _id: finalId,
       packageId,
       packageName,
       packages: q.packages || packageContext.packages || rawTier || packageName,
@@ -270,8 +390,12 @@ export const clientRepository = {
       subtotal,
       total,
       amount: total,
+      grandTotal: total,
+      totalPrice: total,
       discount,
-      isConfirmed: q.isConfirmed === true,
+      isConfirmed,
+      confirmed: isConfirmed,
+      payView: q.payView || packageContext.payView || null,
       gst: gstAdded ? `${gstRate}%` : '0%',
       gstRate,
       gstPercentage: gstRate,
@@ -345,58 +469,8 @@ export const clientRepository = {
       }
 
       const data = response?.data;
-
-      const packagesArray = Array.isArray(data?.packages)
-        ? data.packages
-        : (Array.isArray(data?.data?.packages) ? data.data.packages : null);
-
-      let normalizedPackages = [];
-      let allNormalizedQuotations = [];
-
-      if (packagesArray && packagesArray.length > 0) {
-        normalizedPackages = packagesArray.map((pkg) => {
-          const rawPackageName = pkg.packages || pkg.packageName || pkg.name || pkg.tier || '';
-          const packageName = String(rawPackageName).trim();
-          const pkgId = pkg.packageId != null ? Number(pkg.packageId) : (pkg.id != null ? Number(pkg.id) : null);
-          const tier = pkg.tier ? String(pkg.tier).trim() : (
-            pkgId === 3 || packageName.toLowerCase().includes('elite') ? 'Elite' :
-            pkgId === 2 || packageName.toLowerCase().includes('premium') ? 'Premium' :
-            pkgId === 1 || packageName.toLowerCase().includes('economic') ? 'Economic' :
-            (pkgId === null || packageName.toLowerCase() === 'none' ? 'None' : packageName)
-          );
-          const warranty = pkg.warranty ? String(pkg.warranty).trim() : '';
-          const pkgQuots = Array.isArray(pkg.quotations)
-            ? pkg.quotations
-            : (Array.isArray(pkg.data) ? pkg.data : []);
-
-          const normalizedPkgQuots = pkgQuots.map((q, qIdx) => {
-            return clientRepository.normalizeQuotation(q, qIdx, {
-              packageId: pkgId,
-              packages: tier || packageName || pkg.packages,
-              packageName: q.packageName || packageName,
-              tier: q.tier || tier,
-              warranty: q.warranty || warranty,
-            });
-          }).filter(Boolean);
-
-          allNormalizedQuotations.push(...normalizedPkgQuots);
-
-          return {
-            packageId: pkgId,
-            packages: tier || packageName || pkg.packages,
-            packageName: packageName || tier,
-            tier,
-            warranty,
-            quotations: normalizedPkgQuots,
-          };
-        });
-      } else {
-        const rawList = Array.isArray(data?.quotations)
-          ? data.quotations
-          : (Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []));
-
-        allNormalizedQuotations = rawList.map((q, idx) => clientRepository.normalizeQuotation(q, idx)).filter(Boolean);
-      }
+      const { packages: normalizedPackages, quotations: allNormalizedQuotations } =
+        clientRepository.normalizePackagesAndQuotations(data);
 
       return {
         success: true,
@@ -416,6 +490,14 @@ export const clientRepository = {
         data: [],
       };
     }
+  },
+
+  /**
+   * Alias matching API v2 specification
+   * GET /clients/{id}/quotations
+   */
+  getClientQuotations: async (id) => {
+    return clientRepository.getCustomerQuotations(id);
   },
 };
 

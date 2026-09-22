@@ -864,21 +864,8 @@ export default function PaymentVerificationScreen() {
           <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Payment Verification</Text>
-        <View style={styles.headerRightContainer}>
-          {Boolean(voucherCode) && (
-            <View style={styles.headerRightBadge}>
-              <Text style={styles.headerRightBadgeText}>{voucherCode}</Text>
-            </View>
-          )}
-          <TouchableOpacity
-            onPress={handleDeleteClick}
-            style={styles.headerDeleteButton}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="trash-outline" size={19} color="#FECACA" />
-          </TouchableOpacity>
-        </View>
+        <View style={styles.headerRightContainer} />
+
       </View>
 
       <ScrollView
@@ -928,11 +915,6 @@ export default function PaymentVerificationScreen() {
                 ₹{paymentAmt.toLocaleString()}
               </Text>
             </View>
-            {hasGst && (
-              <View style={[styles.gstBadge, isVerified && { backgroundColor: '#D1FAE5', borderColor: '#A7F3D0' }]}>
-                <Text style={[styles.gstBadgeText, isVerified && { color: '#065F46' }]}>With GST (18%)</Text>
-              </View>
-            )}
           </View>
 
           {/* Key Details Section */}
@@ -1208,12 +1190,6 @@ export default function PaymentVerificationScreen() {
           <View style={[styles.specCard, isDark && styles.specCardDark]}>
             <Text style={styles.specSectionTitle}>QUOTATION DETAILS</Text>
 
-            <View style={styles.specRow}>
-              <Text style={styles.specLabel}>Quotation</Text>
-              <Text style={[styles.specValue, isDark && styles.textDark]}>
-                #{quotationContext.quotationId} • {quotationContext.quotationTitle || 'Quotation'}
-              </Text>
-            </View>
 
             {Boolean(quotationContext.siteAddress) && (
               <View style={styles.specRow}>
@@ -1330,14 +1306,6 @@ export default function PaymentVerificationScreen() {
             </View>
           )}
         </View>
-
-        {/* Verification Notice */}
-        <View style={styles.noticeBox}>
-          <Ionicons name="information-circle" size={20} color="#1E488F" style={{ marginRight: 10, marginTop: 1 }} />
-          <Text style={styles.noticeText}>
-            Admin verification records this payment in the cryptographic audit ledger and unlocks the official receipt and warranty activation.
-          </Text>
-        </View>
       </ScrollView>
 
       {/* Fixed Bottom Action Bar */}
@@ -1405,7 +1373,7 @@ export default function PaymentVerificationScreen() {
         visible={deleteModalVisible}
         title="Delete Payment Record?"
         message={`Are you sure you want to delete this payment of ₹${paymentAmt.toLocaleString()} (${voucherCode || displayPaymentId || 'Payment'})? This action cannot be undone and will remove the transaction record.`}
-        confirmText="Delete Payment"
+        confirmText="Delete"
         cancelText="Cancel"
         isDeleting={isDeletingPayment}
         onConfirm={confirmDeletePayment}
@@ -1436,9 +1404,6 @@ export default function PaymentVerificationScreen() {
           )}
           <View style={styles.previewCaptionBox}>
             <Text style={styles.previewCaptionText}>{docName}</Text>
-            <Text style={styles.previewSubCaptionText}>
-              Proof Document • {voucherCode ? `#${voucherCode}` : 'Payment Proof'}
-            </Text>
           </View>
         </View>
       </Modal>

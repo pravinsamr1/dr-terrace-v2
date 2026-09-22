@@ -286,6 +286,7 @@ export const ApiV2 = {
 
   clients: {
     list: (params) => apiClient.get('/clients', { params }),
+    // Unified Single-Request: returns profile, packages, quotations (with payView), and active payView
     getById: (id) => apiClient.get(`/clients/${id}`),
     getQuotations: (id) => apiClient.get(`/clients/${id}/quotations`),
   },
@@ -434,6 +435,23 @@ export const ApiV2 = {
       quotationId
         ? apiClient.delete(`/quotations/${quotationId}/payments/${paymentId}`)
         : apiClient.delete(`/payments/${paymentId}`),
+  },
+
+  warranty: {
+    checkEligibility: (quotationId) =>
+      apiClient.get(`/quotations/${quotationId}/warranty-eligibility`),
+    getConfig: (quotationId) =>
+      apiClient.get(`/quotations/${quotationId}/warranty-config`),
+    createConfig: (quotationId, data) =>
+      apiClient.post(`/quotations/${quotationId}/warranty-config`, data),
+    updateConfig: (quotationId, data) =>
+      apiClient.patch(`/quotations/${quotationId}/warranty-config`, data),
+    generateWarranty: (quotationId) =>
+      apiClient.post(`/quotations/${quotationId}/warranty`),
+    getWarranty: (quotationId) =>
+      apiClient.get(`/quotations/${quotationId}/warranty`),
+    deleteWarranty: (quotationId) =>
+      apiClient.delete(`/quotations/${quotationId}/warranty`),
   },
 
   health: {

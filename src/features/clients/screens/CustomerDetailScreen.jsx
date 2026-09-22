@@ -31,6 +31,7 @@ import { clientRepository as clientService } from '../../clients/api/clientRepos
 import { quotationRepository } from '../../quotations/api/quotationRepository';
 import { paymentRepository } from '../../payments/api/paymentRepository';
 import SelectQuotationTiersModal from '../../quotations/components/SelectQuotationTiersModal';
+import WarrantyTab from '../../warranty/components/WarrantyTab';
 import { transformStyleForJakarta } from '../../../core/theme/initFonts';
 import { isPastDate } from '../../../core/utils/validation';
 import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
@@ -521,13 +522,17 @@ export default function CustomerDetailScreen() {
       currentApp?.confirmedQuoteId ||
       currentApp?.activeQuotationId ||
       currentApp?.quotationId ||
+      currentApp?.payView?.id ||
+      payViewRef.current?.id ||
       (Array.isArray(currentApp?.quotations) && (
         currentApp.quotations.find((q) => q.isConfirmed || q.status === 'CONFIRMED' || q.status === 'confirmed' || q.confirmed)?.id ||
-        (currentApp.quotations.length === 1 ? currentApp.quotations[0].id : null)
+        currentApp.quotations.find((q) => q.isConfirmed || q.status === 'CONFIRMED' || q.status === 'confirmed' || q.confirmed)?.quotationId ||
+        (currentApp.quotations.length === 1 ? (currentApp.quotations[0].id || currentApp.quotations[0].quotationId) : null)
       )) ||
       (Array.isArray(currentApiQuots) && (
         currentApiQuots.find((q) => q.isConfirmed || q.status === 'CONFIRMED' || q.status === 'confirmed' || q.confirmed)?.id ||
-        (currentApiQuots.length === 1 ? currentApiQuots[0].id : null)
+        currentApiQuots.find((q) => q.isConfirmed || q.status === 'CONFIRMED' || q.status === 'confirmed' || q.confirmed)?.quotationId ||
+        (currentApiQuots.length === 1 ? (currentApiQuots[0].id || currentApiQuots[0].quotationId) : null)
       )) ||
       payViewIdRef.current ||
       (cleanParamId && !isNaN(Number(cleanParamId)) ? cleanParamId : null);
@@ -535,7 +540,7 @@ export default function CustomerDetailScreen() {
     if (!confirmedQuoteId) return null;
 
     // Return existing payView if already loaded and not forced
-    if (!force && payViewRef.current && String(payViewRef.current.id) === String(confirmedQuoteId)) {
+    if (!force && payViewRef.current && (!confirmedQuoteId || String(payViewRef.current.id) === String(confirmedQuoteId))) {
       return payViewRef.current;
     }
 
@@ -574,7 +579,23 @@ export default function CustomerDetailScreen() {
     try {
       const clientRes = await clientService.getClientById(cleanId);
       if (clientRes && clientRes.success && clientRes.data) {
-        setClientData(clientRes.data);
+        const client = clientRes.data;
+        setClientData(client);
+
+        if (Array.isArray(client.packages) && client.packages.length > 0) {
+          setApiPackages(client.packages);
+        }
+        if (Array.isArray(client.quotations) && client.quotations.length > 0) {
+          setApiQuotations(client.quotations);
+          hasLoadedQuotationsRef.current = true;
+        }
+        const activePv = client.payView || clientRes.payView || (Array.isArray(client.quotations) ? client.quotations.find(q => q.isConfirmed)?.payView : null);
+        if (activePv && (activePv.id || activePv.quotationId)) {
+          const pvWithId = activePv.id ? activePv : { ...activePv, id: activePv.quotationId };
+          setPayView(pvWithId);
+          payViewRef.current = pvWithId;
+          payViewIdRef.current = String(pvWithId.id);
+        }
       } else {
         const appRes = await appointmentService.getAppointmentById(cleanId);
         if (appRes && appRes.success && appRes.appointment) {
@@ -853,9 +874,9 @@ export default function CustomerDetailScreen() {
   const getInitialTab = useCallback((tabParam) => {
     if (tabParam === 'quotation' || tabParam === 'quotations') return isAttendedLocked ? 'quotation' : 'profile';
     if (tabParam === 'payment' || tabParam === 'payments') return isQuotationConfirmed ? 'payment' : 'profile';
-    if (tabParam === 'warranty' || tabParam === 'warranties') return isReceiptGenerated ? 'warranty' : 'profile';
+    if (tabParam === 'warranty' || tabParam === 'warranties') return isQuotationConfirmed ? 'warranty' : 'profile';
     return 'profile';
-  }, [isAttendedLocked, isQuotationConfirmed, isReceiptGenerated]);
+  }, [isAttendedLocked, isQuotationConfirmed]);
 
   const [activeTabSection, setActiveTabSection] = useState(getInitialTab(params.initialTab || params.tab));
   const hasAppliedInitialTabRef = React.useRef(false);
@@ -877,10 +898,10 @@ export default function CustomerDetailScreen() {
       setActiveTabSection('profile');
     } else if (activeTabSection === 'payment' && !isQuotationConfirmed) {
       setActiveTabSection(isAttendedLocked ? 'quotation' : 'profile');
-    } else if (activeTabSection === 'warranty' && !isReceiptGenerated) {
-      setActiveTabSection(isQuotationConfirmed ? 'payment' : (isAttendedLocked ? 'quotation' : 'profile'));
+    } else if (activeTabSection === 'warranty' && !isQuotationConfirmed) {
+      setActiveTabSection(isAttendedLocked ? 'quotation' : 'profile');
     }
-  }, [activeTabSection, isAttendedLocked, isQuotationConfirmed, isReceiptGenerated]);
+  }, [activeTabSection, isAttendedLocked, isQuotationConfirmed]);
   // On tab switch: keep ref in sync and lazy-load tab-specific data strictly once when active tab changes
   useEffect(() => {
     activeTabSectionRef.current = activeTabSection;
@@ -1415,7 +1436,11 @@ export default function CustomerDetailScreen() {
   }, [apiPackages, quotationsList]);
 
   const activeQuotationId = app?.activeQuotationId;
-  const activeQuote = quotationsList.find(q => q.id === chosenCategory) || (quotationsList.length > 0 ? quotationsList[quotationsList.length - 1] : null);
+  const activeQuote =
+    (app?.confirmedQuoteId && quotationsList.find(q => String(q.id || q.quotationId) === String(app.confirmedQuoteId))) ||
+    quotationsList.find(q => q.isConfirmed || q.status === 'CONFIRMED' || q.confirmed) ||
+    quotationsList.find(q => String(q.id || q.quotationId) === String(chosenCategory)) ||
+    (quotationsList.length > 0 ? quotationsList[quotationsList.length - 1] : null);
 
   // Resolve service items array
   const currentServicesList = React.useMemo(() => {
@@ -2040,7 +2065,7 @@ export default function CustomerDetailScreen() {
             const isTabLocked =
               (tab.id === 'quotation' && !isAttendedLocked) ||
               (tab.id === 'payment' && !isQuotationConfirmed) ||
-              (tab.id === 'warranty' && !isReceiptGenerated);
+              (tab.id === 'warranty' && (!isQuotationConfirmed || !isReceiptGenerated));
             const isActive = activeTabSection === tab.id;
             return (
               <TouchableOpacity
@@ -2078,10 +2103,10 @@ export default function CustomerDetailScreen() {
                     );
                     return;
                   }
-                  if (tab.id === 'warranty' && !isReceiptGenerated) {
+                  if (tab.id === 'warranty' && !isQuotationConfirmed) {
                     showAlert(
-                      'Full Receipt Required',
-                      'Warranty will be available once the full payment receipt is generated.',
+                      'Quotation Required',
+                      'Warranty will be available once a quotation is confirmed and settled.',
                       'lock',
                       'Got It'
                     );
@@ -3160,68 +3185,8 @@ export default function CustomerDetailScreen() {
                 )}
 
 
-                {/* Bottom Action: Initial Payment Received Button / Locked Status Banner */}
-                <View style={{ marginTop: 10, marginBottom: 16 }}>
-                  {!isInitialPaymentReceived ? (
-                    <TouchableOpacity
-                      style={{
-                        backgroundColor: '#10B981',
-                        borderRadius: 14,
-                        paddingVertical: 14,
-                        paddingHorizontal: 16,
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        shadowColor: '#10B981',
-                        shadowOffset: { width: 0, height: 3 },
-                        shadowOpacity: 0.25,
-                        shadowRadius: 6,
-                        elevation: 3,
-                      }}
-                      onPress={handleConfirmInitialPayment}
-                      activeOpacity={0.85}
-                    >
-                      <Ionicons name="shield-checkmark" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
-                      <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '800' }}>
-                        Initial Payment Received
-                      </Text>
-                    </TouchableOpacity>
-                  ) : (
-                    <View
-                      style={{
-                        backgroundColor: isDark ? '#064E3B' : '#ECFDF5',
-                        borderRadius: 14,
-                        padding: 14,
-                        borderWidth: 1.5,
-                        borderColor: isDark ? '#059669' : '#10B981',
-                      }}
-                    >
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <View
-                          style={{
-                            width: 36,
-                            height: 36,
-                            borderRadius: 18,
-                            backgroundColor: '#10B981',
-                            justifyContent: 'center',
-                            alignItems: 'center',
-                            marginRight: 12,
-                          }}
-                        >
-                          <Ionicons name="lock-closed" size={18} color="#FFFFFF" />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ fontSize: 14, fontWeight: '800', color: isDark ? '#A7F3D0' : '#065F46' }}>
-                            Initial Payment Received (Locked)
-                          </Text>
-                          <Text style={{ fontSize: 12, color: isDark ? '#6EE7B7' : '#047857', marginTop: 2 }}>
-                            Quotation & customer details locked. Only PDF viewing is allowed.
-                          </Text>
-                        </View>
-                      </View>
-                    </View>
-                  )}
-                </View>
+
+
 
               </>
             )}
@@ -3448,11 +3413,12 @@ export default function CustomerDetailScreen() {
                   const paidGstAmount = Number(
                     payView?.gstPayment?.paidAmount ?? gstPaidAmount
                   );
-                  const balanceGstAmount = Number(
+                  // Only the amount actually requested for payment is rounded to a whole rupee.
+                  const balanceGstAmount = Math.max(0, Math.round(Number(
                     payView?.gstPayment?.balanceAmount !== undefined
                       ? payView.gstPayment.balanceAmount
-                      : Math.max(0, totalGstAmount - paidGstAmount)
-                  );
+                      : totalGstAmount - paidGstAmount
+                  )));
                   const isGstFullyPaid = balanceGstAmount <= 0 && (paidGstAmount > 0 || isGstPaid);
 
                   return (
@@ -4240,8 +4206,18 @@ export default function CustomerDetailScreen() {
                         )}
                       </View>
 
-                      {/* Action button: Additional Payment (below the payment Breakdown card, hidden once Full Receipt is created) */}
-                      {!isReceiptGenerated && (
+                      {/* Action button: Additional Payment (below the payment Breakdown card, hidden once Full Receipt is created, or once one additional payment already exists — only 1 allowed) */}
+                      {(() => {
+                        const addPayList = Array.isArray(payView?.additionalPayment)
+                          ? payView.additionalPayment
+                          : (payView?.additionalPayment && typeof payView.additionalPayment === 'object' ? [payView.additionalPayment] : []);
+                        const hasAdditionalPayment = Boolean(
+                          addPayList.length > 0 ||
+                          (payView?.additionalAmount != null && Number(payView.additionalAmount) > 0) ||
+                          (Array.isArray(app?.additionalPayments) && app.additionalPayments.length > 0)
+                        );
+                        return !isReceiptGenerated && !hasAdditionalPayment;
+                      })() && (
                         <TouchableOpacity
                           style={{
                             height: 46,
@@ -5371,164 +5347,24 @@ export default function CustomerDetailScreen() {
           </View>
         )}
 
-        {/* TAB 4: WARRANTY TRACKER & CLAIMS (MAX 2 LIMIT) */}
-        {activeTabSection === 'warranty' && (() => {
-          const certNo = app.warranty?.certificateNo || `DTW-${new Date().getFullYear()}-${String(app.id || '1001').slice(-4).padStart(4, '0')}`;
-          const validDuration = app.warranty?.validYears || '10 Years';
-          const issuedOn = formatDateDDMMYY(app.warranty?.completedDate || app.attendedDate || new Date());
-          const isGen = Boolean(app.warranty?.generated);
-
-          return (
-            <View style={[{ borderRadius: 20, padding: 18, marginBottom: 20, backgroundColor: isDark ? '#1C1C1C' : '#FFFFFF', borderWidth: 1, borderColor: isDark ? '#334155' : '#E2E8F0' }]}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                <View>
-                  <Text style={{ fontSize: 17, fontWeight: '600', color: isDark ? '#FFFFFF' : '#0F172A' }}>
-                    Warranty & Claims Tracker
-                  </Text>
-                  <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B' }}>
-                    Maximum 2 Warranty Claims Allowed Per Period
-                  </Text>
-                </View>
-                <Ionicons name="shield-checkmark" size={26} color="#4F46E5" />
-              </View>
-
-              {/* Certificate Banner Card - Always Visible */}
-              <View style={{ backgroundColor: isDark ? '#080808' : '#EEF2FF', borderRadius: 14, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#C7D2FE' }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: '#3730A3' }}>
-                    {certNo}
-                  </Text>
-                  <View style={{ backgroundColor: isGen ? '#10B981' : '#4F46E5', borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
-                    <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '700' }}>
-                      {validDuration} {isGen ? 'Active' : 'Standard'}
-                    </Text>
-                  </View>
-                </View>
-                <Text style={{ fontSize: 11, color: isDark ? '#CBD5E1' : '#4338CA' }}>
-                  Issued on {issuedOn}. Covers all selected services under warranty terms.
-                </Text>
-              </View>
-
-              {/* Claims Counter Progress Bar */}
-              <View style={{ marginBottom: 16 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: isDark ? '#FFFFFF' : '#1E293B' }}>
-                    Warranty Claims Capacity:
-                  </Text>
-                  <Text style={{ fontSize: 14, fontWeight: '800', color: (app.warrantyClaims || []).length >= 2 ? '#EF4444' : '#4F46E5' }}>
-                    {(app.warrantyClaims || []).length} / 2 Claims Used
-                  </Text>
-                </View>
-
-                <View style={{ height: 10, width: '100%', backgroundColor: isDark ? '#334155' : '#E2E8F0', borderRadius: 5, overflow: 'hidden' }}>
-                  <View
-                    style={{
-                      height: '100%',
-                      width: `${((app.warrantyClaims || []).length / 2) * 100}%`,
-                      backgroundColor: (app.warrantyClaims || []).length >= 2 ? '#EF4444' : ((app.warrantyClaims || []).length === 1 ? '#F59E0B' : '#10B981')
-                    }}
-                  />
-                </View>
-              </View>
-
-              {/* Claims History */}
-              {(!app.warrantyClaims || app.warrantyClaims.length === 0) ? (
-                <View style={{ paddingVertical: 10, alignItems: 'center' }}>
-                  <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B' }}>No claims logged yet.</Text>
-                </View>
-              ) : (
-                <>
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: isDark ? '#FFFFFF' : '#1E293B', marginBottom: 10 }}>
-                    Warranty Claim Tickets Log
-                  </Text>
-                  {app.warrantyClaims.map((claim, idx) => (
-                    <View key={claim.id || idx} style={{ backgroundColor: isDark ? '#080808' : '#F8FAFC', borderRadius: 12, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: isDark ? '#334155' : '#E2E8F0' }}>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                        <Text style={{ fontSize: 13, fontWeight: '700', color: isDark ? '#FFFFFF' : '#0F172A' }}>
-                          Claim Ticket #{idx + 1} ({claim.claimDate})
-                        </Text>
-                        <View style={{ backgroundColor: '#DCFCE7', borderRadius: 6, paddingVertical: 2, paddingHorizontal: 6 }}>
-                          <Text style={{ color: '#16A34A', fontSize: 10, fontWeight: '700' }}>{claim.status || 'Resolved'}</Text>
-                        </View>
-                      </View>
-                      <Text style={{ fontSize: 12, color: isDark ? '#CBD5E1' : '#475569' }}>
-                        Issue: {claim.issue}
-                      </Text>
-                    </View>
-                  ))}
-                </>
-              )}
-
-              {/* Activate Warranty Primary CTA Banner (If not yet active) */}
-              {!isGen && (
-                <TouchableOpacity
-                  style={{
-                    backgroundColor: '#4F46E5',
-                    borderRadius: 14,
-                    padding: 14,
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    marginBottom: 12,
-                    shadowColor: '#4F46E5',
-                    shadowOpacity: 0.3,
-                    shadowOffset: { width: 0, height: 3 },
-                    shadowRadius: 6,
-                    elevation: 3,
-                  }}
-                  onPress={() => setShowStitchWarrantyModal(true)}
-                  activeOpacity={0.85}
-                >
-                  <Ionicons name="flash" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
-                  <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>
-                    Activate Warranty Coverage
-                  </Text>
-                </TouchableOpacity>
-              )}
-
-              {/* Action Buttons */}
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8, marginTop: 4 }}>
-                <TouchableOpacity
-                  style={[styles.saveBtn, { backgroundColor: '#4F46E5', flex: 1 }]}
-                  onPress={() => router.push({ pathname: '/warranty-letter', params: { id: app.id } })}
-                  activeOpacity={0.85}
-                >
-                  <Ionicons name="document-text-outline" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-                  <Text style={styles.btnText}>View Certificate</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.saveBtn,
-                    { backgroundColor: (app.warrantyClaims || []).length >= 2 ? '#94A3B8' : '#2563EB', flex: 1 }
-                  ]}
-                  onPress={() => {
-                    if ((app.warrantyClaims || []).length >= 2) {
-                      showAlert('Claim Limit Reached', 'Maximum 2 warranty claims allowed for this warranty period.', 'warning');
-                    } else {
-                      setShowClaimModal(true);
-                    }
-                  }}
-                  activeOpacity={0.85}
-                >
-                  <Ionicons name="add-circle-outline" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-                  <Text style={styles.btnText}>
-                    {(app.warrantyClaims || []).length >= 2 ? 'Max Claims (2/2)' : 'Log Claim'}
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.saveBtn, { backgroundColor: '#059669', flex: 1 }]}
-                  onPress={() => setShowDurationModal(true)}
-                  activeOpacity={0.85}
-                >
-                  <Ionicons name="options-outline" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-                  <Text style={styles.btnText}>Configure</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          );
-        })()}
+        {/* TAB 4: POST-SALE WARRANTY (API v2 UNIFIED) */}
+        {activeTabSection === 'warranty' && (
+          <View style={{ marginHorizontal: -12, paddingHorizontal: 15 }}>
+            <WarrantyTab
+              quotationId={
+                payView?.id ||
+                app?.confirmedQuoteId ||
+                app?.activeQuotationId ||
+                (Array.isArray(app?.quotations) && app.quotations.find((q) => q.isConfirmed)?.id) ||
+                null
+              }
+              app={app}
+              payView={payView}
+              isAdmin={isAdminOrMaster}
+              onNavigatePaymentTab={() => setActiveTabSection('payment')}
+            />
+          </View>
+        )}
 
 
 

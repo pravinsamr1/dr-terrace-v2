@@ -39,6 +39,17 @@ const formatSqft = (val) => {
   return `${str} sq.ft`;
 };
 
+// payView.additionalPayment comes back from the API as a single object
+// (e.g. { id, title, payments: [...] }), not an array — unlike payView.services.
+// Normalize it to a list so every consumer below can treat it uniformly,
+// whether the backend ever sends one object or an array of them.
+const getAdditionalPaymentList = (payView) => {
+  const ap = payView?.additionalPayment;
+  if (Array.isArray(ap)) return ap;
+  if (ap && typeof ap === 'object') return [ap];
+  return [];
+};
+
 // Helper function to extract unified receipt data model for Dr. Terrace receipts
 const getReceiptData = (app, customerGst, finalReceiptData = null, params = {}, payView = null) => {
   const isFullReceipt = params?.isFullServiceReceipt === 'true';
@@ -55,7 +66,7 @@ const getReceiptData = (app, customerGst, finalReceiptData = null, params = {}, 
 
   const docTitle = isGst ? 'TAX INVOICE' : 'PAYMENT RECEIPT';
 
-  const invoiceNo =
+  let invoiceNo =
     params?.receiptNumber ||
     params?.voucher ||
     finalReceiptData?.receiptNumber ||
@@ -140,8 +151,9 @@ const getReceiptData = (app, customerGst, finalReceiptData = null, params = {}, 
         rate: s.rate ? Number(s.rate).toLocaleString('en-IN') : (s.totalPrice && s.sqft ? Math.round(Number(s.totalPrice) / Number(s.sqft)).toLocaleString('en-IN') : Number(s.totalPrice || 0).toLocaleString('en-IN')),
         total: Number(s.totalPrice || s.paidAmount || 0),
       }));
-      if (Array.isArray(payView?.additionalPayment) && payView.additionalPayment.length > 0) {
-        payView.additionalPayment.forEach((s) => {
+      const additionalPaymentList = getAdditionalPaymentList(payView);
+      if (additionalPaymentList.length > 0) {
+        additionalPaymentList.forEach((s) => {
           servicesList.push({
             sNo: servicesList.length + 1,
             name: (s.title || 'ADDITIONAL WORK').toUpperCase(),
@@ -180,10 +192,31 @@ const getReceiptData = (app, customerGst, finalReceiptData = null, params = {}, 
   } else {
     // Individual service payment / milestone receipt
     let matchedService = null;
+    // Locate the specific payment record (across services, additional work, and
+    // GST) that this receipt is for, so a Payment Receipt (non-GST) can show
+    // that payment's own id as its invoice number, prefixed with "DRT" — e.g.
+    // payment id "28b61bb6" -> "DRT28b61bb6". Tax Invoice keeps its existing
+    // invoiceNo (set above) untouched.
+    let matchedPaymentId = null;
+    if (payView && (params?.milestone || params?.voucher)) {
+      const allPaymentsFlat = [
+        ...(Array.isArray(payView.services) ? payView.services : []),
+        ...getAdditionalPaymentList(payView),
+        ...(payView.gstPayment ? [payView.gstPayment] : []),
+      ].flatMap((s) => (Array.isArray(s.payments) ? s.payments : []));
+      const foundPayment = allPaymentsFlat.find((p) =>
+        (params.milestone && String(p.id) === String(params.milestone)) ||
+        (params.voucher && String(p.voucher || '').toLowerCase() === String(params.voucher).toLowerCase())
+      );
+      if (foundPayment?.id) matchedPaymentId = foundPayment.id;
+    }
+    if (!isGst && matchedPaymentId) {
+      invoiceNo = `DRT${matchedPaymentId}`;
+    }
     if (payView) {
       const allServices = [
         ...(Array.isArray(payView.services) ? payView.services : []),
-        ...(Array.isArray(payView.additionalPayment) ? payView.additionalPayment : []),
+        ...getAdditionalPaymentList(payView),
       ];
       if (params?.serviceId) {
         matchedService = allServices.find((s) => String(s.id) === String(params.serviceId));
@@ -1171,11 +1204,6 @@ export default function ReceiptScreen() {
           <TouchableOpacity style={[styles.actionBtn, styles.shareBtn]} onPress={handleShare} activeOpacity={0.85}>
             <Ionicons name="share-social-outline" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
             <Text style={styles.actionBtnText}>Share</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={[styles.actionBtn, styles.printBtn]} onPress={handlePrint} activeOpacity={0.85}>
-            <Ionicons name="print-outline" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
-            <Text style={styles.actionBtnText}>Print</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={[styles.actionBtn, styles.whatsappBtn]} onPress={handleWhatsApp} activeOpacity={0.85}>

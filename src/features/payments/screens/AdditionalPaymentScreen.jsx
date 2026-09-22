@@ -205,8 +205,9 @@ export default function AdditionalPaymentScreen() {
         const asset = result.assets[0];
         setAttachedDoc({
           uri: asset.uri,
-          name: asset.name || 'attachment_proof.pdf',
-          type: asset.mimeType?.includes('pdf') ? 'pdf' : 'file',
+          name: asset.name || 'attachment_proof',
+          mimeType: asset.mimeType || 'image/jpeg',
+          type: asset.mimeType?.includes('pdf') ? 'pdf' : 'image',
         });
       }
     } catch (err) {
@@ -234,8 +235,30 @@ export default function AdditionalPaymentScreen() {
       Alert.alert('Missing Field', 'Please enter UPI transaction ID or UTR number.');
       return;
     }
+    if (paymentMethod === 'accounts' && !(bankAccounts.find((b) => b.id === selectedBankId) || bankAccounts[0])) {
+      Alert.alert('Missing Field', 'Please select a bank account.');
+      return;
+    }
+    if (!attachedDoc) {
+      Alert.alert('Missing Field', 'Please attach a payment proof image or document.');
+      return;
+    }
 
     const appId = client?.id || params.id;
+
+    // The backend's additional-services endpoint returns a generic "Resource
+    // not found" (404) — not a validation error — when the quotation it's
+    // asked to attach to isn't a confirmed one; unconfirmed quotations don't
+    // resolve on that route at all. Catch that here with a clear message
+    // instead of letting the confusing 404 through.
+    if (quotationId && payView && payView.isConfirmed === false) {
+      Alert.alert(
+        'Quotation Not Confirmed',
+        'Additional services can only be added once this customer\'s quotation has been confirmed. Please confirm the quotation first.'
+      );
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -387,9 +410,6 @@ export default function AdditionalPaymentScreen() {
             </Text>
           </View>
         </View>
-        <View style={styles.totalBadge}>
-          <Text style={styles.totalBadgeText}>₹{totalProjectCost.toLocaleString()} Total</Text>
-        </View>
       </View>
 
       <ScrollView
@@ -490,26 +510,12 @@ export default function AdditionalPaymentScreen() {
               placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
               value={warranty}
               onChangeText={setWarranty}
+              keyboardType="number-pad"
+  maxLength={2}
             />
           </View>
         </View>
 
-        {/* 3c. Notes */}
-        <View style={styles.formGroup}>
-          <Text style={[styles.label, isDark && styles.textDark]}>
-            Notes
-          </Text>
-          <View style={[styles.inputContainer, isDark && styles.inputContainerDark, { alignItems: 'flex-start', paddingVertical: 10 }]}>
-            <TextInput
-              style={[styles.textInput, isDark && styles.textDark, { minHeight: 52 }]}
-              placeholder="Optional notes about this work order"
-              placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
-              value={notes}
-              onChangeText={setNotes}
-              multiline
-            />
-          </View>
-        </View>
 
         {/* 4. Payment Amount Input */}
         <View style={styles.formGroup}>
@@ -795,7 +801,7 @@ export default function AdditionalPaymentScreen() {
               <Ionicons name="checkmark-sharp" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
             )}
             <Text style={styles.submitBtnText}>
-              {isSubmitting ? 'Submitting...' : 'Submit Additional Payment'}
+              {isSubmitting ? 'Submitting...' : 'Submit Payment'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -1039,7 +1045,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     color: '#0F172A',
-    padding: 0,
   },
   rowTwoCol: {
     flexDirection: 'row',
@@ -1063,7 +1068,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     color: '#0F172A',
-    padding: 0,
+    padding: 7,
   },
   unitBadge: {
     backgroundColor: '#F1F5F9',

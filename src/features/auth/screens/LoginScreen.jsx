@@ -154,7 +154,7 @@ export default function LoginScreen() {
               ]}
             >
               <Text style={styles.helloText}>Hello !</Text>
-              <Text style={styles.welcomeText}>Welcome To NEXA CRM</Text>
+              <Text style={styles.welcomeText}>Admin to NEXA Login</Text>
             </View>
           </TouchableWithoutFeedback>
 

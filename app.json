@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Dr.Terrace Admin",
+    "name": "Nexa CRM",
     "slug": "frontend",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -10,10 +10,10 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.drterrace.admin"
+      "bundleIdentifier": "nexacrm.in.drterrace"
     },
     "android": {
-      "package": "com.drterrace.admin",
+      "package": "nexacrm.in.drterrace",
       "jsEngine": "hermes",
       "adaptiveIcon": {
         "backgroundColor": "#000000",

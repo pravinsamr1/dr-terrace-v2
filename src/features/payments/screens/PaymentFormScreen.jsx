@@ -348,16 +348,20 @@ export default function PaymentFormScreen() {
   }, [payView?.totalPrice, params.baseServiceCost, params.baseCost, params.totalCost, app, additionalPaymentsTotal]);
 
   const baseTotal = React.useMemo(() => {
-    // For GST or Final settlement, base must include additional variation payments
+    // For GST or Final settlement, base must be the actual Grand Total for the
+    // project (totalWithGst — the authoritative field from the API pay-view),
+    // NOT grossSubtotal (a pre-discount figure that drifts once discounts,
+    // additional services, or other adjustments are applied).
     if (hasGst || stageId === 'final' || isGstPayment) {
-      // Prefer API-computed totals that already include additional payments
-      const apiGrossTotal = Number(
+      const apiGrandTotal = Number(
+        payView?.totalWithGst ||
+        payView?.totalPrice ||
         payView?.grossSubtotal ||
         payView?.subtotalAfterDiscount ||
         payView?.totalPaid ||
         0
       );
-      if (apiGrossTotal > 0) return apiGrossTotal;
+      if (apiGrandTotal > 0) return apiGrandTotal;
 
       // Fall back to params.baseCost explicitly passed by the caller (already includes additional)
       const paramCost = Number(params.baseCost);
@@ -378,37 +382,76 @@ export default function PaymentFormScreen() {
     if (paramCost > 0) return paramCost;
     const appCost = Number(app?.cost || app?.totalPayment || app?.totalCost || app?.totalAmount || 0);
     return appCost;
-  }, [payView?.totalPrice, payView?.grossSubtotal, payView?.subtotalAfterDiscount, payView?.totalPaid, params.baseCost, params.totalCost, app, hasGst, stageId, isGstPayment, additionalPaymentsTotal, primaryServicesCost]);
+  }, [payView?.totalPrice, payView?.totalWithGst, payView?.grossSubtotal, payView?.subtotalAfterDiscount, payView?.totalPaid, params.baseCost, params.totalCost, app, hasGst, stageId, isGstPayment, additionalPaymentsTotal, primaryServicesCost]);
 
-  const totalProjectCost = Math.max(
-    Number(params.totalCost) || 0,
-    Number(app?.totalPayment) || 0,
-    Number(app?.totalCost) || 0,
-    Number(app?.cost) || 0,
-    Number(app?.totalAmount) || 0,
-    baseTotal
-  );
+  // The GST tax rate/base is decided and stored server-side on the quotation
+  // (payView.gstPercentage over the pre-GST subtotal), even before the GST
+  // decision is formally "confirmed" (isGstConfirmed). The backend enforces
+  // a remaining-balance cap computed from THAT stored rate, regardless of
+  // what percentage preset is highlighted in this form. Previously, when
+  // payView.gstAmount happened to be 0 (first-time GST recording), the app
+  // had no cap at all client-side and would let the user compute an amount
+  // off an arbitrary preset (e.g. 28%) against the grand total, which the
+  // backend then rejected because its own cap is based on the confirmed
+  // rate (e.g. 18%) applied to the pre-GST subtotal. gstBalanceCap mirrors
+  // the backend's calculation so the UI never lets the amount drift past
+  // what will actually be accepted.
+  const gstBalanceCap = React.useMemo(() => {
+    if (!payView) return null;
+    if (payView.gstPayment?.balanceAmount != null) {
+      const v = Number(payView.gstPayment.balanceAmount);
+      return v >= 0 ? v : null;
+    }
+    if (payView.gstAmount != null && Number(payView.gstAmount) > 0) {
+      return Number(payView.gstAmount);
+    }
+    if (payView.isGst && Number(payView.gstPercentage) > 0) {
+      const preGstBase = Number(
+        payView.grossSubtotal ||
+        payView.subtotalAfterDiscount ||
+        payView.totalPrice ||
+        payView.totalWithGst ||
+        0
+      );
+      if (preGstBase > 0) {
+        return Math.round(preGstBase * (Number(payView.gstPercentage) / 100) * 100) / 100;
+      }
+    }
+    return null;
+  }, [payView]);
+
+  // Once the quotation's actual GST rate is known, default the percentage
+  // field to it instead of the hardcoded '18' guess, so the presets shown
+  // start in sync with what the backend will actually accept.
+  useEffect(() => {
+    if (params.gstPercent == null && payView?.gstPercentage != null && Number(payView.gstPercentage) > 0) {
+      setGstPercent(String(payView.gstPercentage));
+    }
+  }, [payView?.gstPercentage, params.gstPercent]);
 
   // Auto-sync calculated GST amount when baseTotal or gstPercent updates
   useEffect(() => {
     if ((stageId === 'final' && hasGst || isGstPayment) && baseTotal > 0) {
       const pct = parseFloat(gstPercent) || 18;
-      const calculatedGst = Math.round(baseTotal * (pct / 100));
+      let calculatedGst = Math.round(baseTotal * (pct / 100));
+      if (gstBalanceCap != null) calculatedGst = Math.min(calculatedGst, gstBalanceCap);
       setPaymentAmount(String(calculatedGst));
     }
-  }, [baseTotal, stageId, hasGst, isGstPayment, gstPercent]);
+  }, [baseTotal, stageId, hasGst, isGstPayment, gstPercent, gstBalanceCap]);
 
   const handleGstPercentChange = (val) => {
     const cleaned = val.replace(/[^0-9.]/g, '');
     setGstPercent(cleaned);
     const pct = parseFloat(cleaned) || 0;
-    const calculatedGst = Math.round(baseTotal * (pct / 100));
+    let calculatedGst = Math.round(baseTotal * (pct / 100));
+    if (gstBalanceCap != null) calculatedGst = Math.min(calculatedGst, gstBalanceCap);
     setPaymentAmount(String(calculatedGst));
   };
 
   const handleSelectGstPreset = (presetPct) => {
     setGstPercent(String(presetPct));
-    const calculatedGst = Math.round(baseTotal * (presetPct / 100));
+    let calculatedGst = Math.round(baseTotal * (presetPct / 100));
+    if (gstBalanceCap != null) calculatedGst = Math.min(calculatedGst, gstBalanceCap);
     setPaymentAmount(String(calculatedGst));
   };
 
@@ -591,31 +634,18 @@ export default function PaymentFormScreen() {
     }
 
     if (isGstPayment) {
-      // Only enforce a GST balance cap when there is an existing GST service with a known balance.
-      // When gstPayment is null (first-time GST recording) and gstAmount is 0, there is no cap yet.
-      const hasExistingGstService = payView?.gstPayment != null && payView.gstPayment.balanceAmount != null;
-      const hasKnownGstAmount = payView?.gstAmount != null && Number(payView.gstAmount) > 0;
-
-      if (hasExistingGstService) {
-        const maxGstBalance = Number(payView.gstPayment.balanceAmount);
-        if (maxGstBalance >= 0 && numericAmt > (maxGstBalance + 0.01)) {
-          Alert.alert(
-            'Amount Exceeds GST Balance',
-            `Payment amount (₹${numericAmt.toLocaleString()}) exceeds remaining GST tax clearance balance (₹${maxGstBalance.toLocaleString()}).`
-          );
-          return;
-        }
-      } else if (hasKnownGstAmount) {
-        const maxGstBalance = Number(payView.gstAmount);
-        if (numericAmt > (maxGstBalance + 0.01)) {
-          Alert.alert(
-            'Amount Exceeds GST Balance',
-            `Payment amount (₹${numericAmt.toLocaleString()}) exceeds remaining GST tax clearance balance (₹${maxGstBalance.toLocaleString()}).`
-          );
-          return;
-        }
+      // gstBalanceCap mirrors the backend's own remaining-GST-balance
+      // calculation (see its definition above), so this catches any
+      // mismatch — including a manually-typed amount — before it ever
+      // reaches the server.
+      if (gstBalanceCap != null && numericAmt > (gstBalanceCap + 0.01)) {
+        Alert.alert(
+          'Amount Exceeds GST Balance',
+          `Payment amount (₹${numericAmt.toLocaleString()}) exceeds remaining GST tax clearance balance (₹${gstBalanceCap.toLocaleString()}).`
+        );
+        return;
       }
-      // If neither exists, this is a new GST payment — no cap applied.
+      // If no cap could be determined, this is a first-time GST payment with no known rate yet — no cap applied.
     }
 
     const allKnownServices = [
@@ -946,11 +976,6 @@ export default function PaymentFormScreen() {
             </Text>
           </View>
         </View>
-        {totalProjectCost > 0 && (
-          <View style={styles.totalBadge}>
-            <Text style={styles.totalBadgeText}>₹{totalProjectCost.toLocaleString()} Total</Text>
-          </View>
-        )}
       </View>
 
       <ScrollView
@@ -1043,16 +1068,9 @@ export default function PaymentFormScreen() {
               </View>
               <View style={styles.serviceBalanceDivider} />
               <View style={styles.serviceBalanceItem}>
-                <Text style={styles.serviceBalanceLabel}>Variation</Text>
+                <Text style={styles.serviceBalanceLabel}>Additional Payment</Text>
                 <Text style={[styles.serviceBalanceValue, { color: '#D97706' }]}>
                   ₹{additionalPaymentsTotal.toLocaleString()}
-                </Text>
-              </View>
-              <View style={styles.serviceBalanceDivider} />
-              <View style={styles.serviceBalanceItem}>
-                <Text style={styles.serviceBalanceLabel}>Taxable Base</Text>
-                <Text style={[styles.serviceBalanceValue, { color: '#2557C7', fontWeight: '800' }]}>
-                  ₹{baseTotal.toLocaleString()}
                 </Text>
               </View>
             </View>
@@ -1235,12 +1253,7 @@ export default function PaymentFormScreen() {
               </Text>
             </View>
 
-            {/* Dynamic Calculated Amount Helper */}
-            {Boolean(baseTotal > 0 && gstPercent && parseFloat(gstPercent) > 0) && (
-              <Text style={{ fontSize: 11, color: isDark ? '#38BDF8' : '#0284C7', marginTop: 6, fontWeight: '500' }}>
-                Calculated GST: ₹{Math.round(baseTotal * ((parseFloat(gstPercent) || 0) / 100)).toLocaleString()} ({gstPercent}% on ₹{baseTotal.toLocaleString()})
-              </Text>
-            )}
+
           </View>
         )}
 
@@ -1494,10 +1507,7 @@ export default function PaymentFormScreen() {
             <Text style={[styles.label, isDark && styles.textDark, { marginBottom: 0 }]}>
               Reference Image / Payment Proof
             </Text>
-            <View style={styles.adminVerifyBadge}>
-              <Ionicons name="shield-checkmark" size={12} color="#1E488F" style={{ marginRight: 4 }} />
-              <Text style={styles.adminVerifyBadgeText}>Verified by Admin</Text>
-            </View>
+           
           </View>
           <Text style={[styles.helperSubtext, isDark && styles.subtextDark]}>
             Add a payment receipt photo, UPI screenshot, cheque, or cash voucher to be verified by admin.

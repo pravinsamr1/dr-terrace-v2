@@ -16,11 +16,28 @@ expo-env.d.ts
 # @end expo-cli
 
 # Native platforms (Managed Workflow / Continuous Native Generation)
-/ios/
+android/
+ios/
 /android/
+/ios/
 .kotlin/
+.gradle/
+build/
+*/build/
+Pods/
+/ios/Pods/
+
+# Native builds & binaries
+*.apk
+*.aab
+*.ipa
+*.app
+*.dSYM.zip
+*.dSYM
+*.bundle
 
 # Native certificates, keys, & provisioning profiles
+credentials.json
 *.orig.*
 *.jks
 *.p8
@@ -32,6 +49,7 @@ expo-env.d.ts
 
 # Metro & Bundler
 .metro-health-check*
+.eslintcache
 
 # Environment variables & secrets
 .env
