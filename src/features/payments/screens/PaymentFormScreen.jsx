@@ -27,6 +27,7 @@ import { clientRepository } from '../../clients/api/clientRepository';
 import { paymentRepository } from '../api/paymentRepository';
 import { extractApiErrorMessage } from '../../../core/api/apiClient';
 import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
+import { compressImage, formatFileSize } from '../../../core/utils/imageUtils';
 
 const PAYMENT_STAGES = [
   { id: 'advance', label: 'Booking Advance' },
@@ -550,10 +551,13 @@ export default function PaymentFormScreen() {
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
         const filename = asset.fileName || `ref_photo_${Date.now()}.jpg`;
+        const compressedUri = await compressImage(asset.uri);
+        const fileSize = asset.fileSize || asset.filesize || 0;
         setAttachedDoc({
-          uri: asset.uri,
+          uri: compressedUri,
           name: filename,
           type: 'image',
+          size: fileSize,
         });
       }
     } catch (err) {
@@ -577,10 +581,13 @@ export default function PaymentFormScreen() {
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
         const filename = asset.fileName || `ref_image_${Date.now()}.jpg`;
+        const compressedUri = await compressImage(asset.uri);
+        const fileSize = asset.fileSize || asset.filesize || 0;
         setAttachedDoc({
-          uri: asset.uri,
+          uri: compressedUri,
           name: filename,
           type: 'image',
+          size: fileSize,
         });
       }
     } catch (err) {
@@ -598,10 +605,14 @@ export default function PaymentFormScreen() {
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
         const filename = asset.name || `ref_doc_${Date.now()}`;
+        const isPdf = asset.mimeType?.includes('pdf');
+        const finalUri = isPdf ? asset.uri : await compressImage(asset.uri);
+        const fileSize = asset.size || 0;
         setAttachedDoc({
-          uri: asset.uri,
+          uri: finalUri,
           name: filename,
-          type: asset.mimeType?.includes('pdf') ? 'pdf' : 'image',
+          type: isPdf ? 'pdf' : 'image',
+          size: fileSize,
         });
       }
     } catch (err) {
@@ -1557,9 +1568,16 @@ export default function PaymentFormScreen() {
                   <Text style={[styles.attachedDocName, isDark && styles.textDark]} numberOfLines={1}>
                     {attachedDoc.name}
                   </Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
-                    <View style={styles.pendingVerifyDot} />
-                    <Text style={styles.attachedDocStatus}>Pending Admin Verification</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2, flexWrap: 'wrap', gap: 6 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <View style={styles.pendingVerifyDot} />
+                      <Text style={styles.attachedDocStatus}>Pending Admin Verification</Text>
+                    </View>
+                    {attachedDoc.size > 0 && (
+                      <Text style={[styles.attachedDocSize, isDark && styles.subtextDark]}>
+                        • {formatFileSize(attachedDoc.size)}
+                      </Text>
+                    )}
                   </View>
                 </View>
               </TouchableOpacity>
@@ -2099,7 +2117,11 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#1E488F',
     fontWeight: '500',
-    marginTop: 2,
+  },
+  attachedDocSize: {
+    fontSize: 11,
+    color: '#64748B',
+    fontWeight: '500',
   },
   removeDocBtn: {
     padding: 4,

@@ -26,6 +26,7 @@ import { clientRepository } from '../../clients/api/clientRepository';
 import { paymentRepository } from '../api/paymentRepository';
 import { extractApiErrorMessage } from '../../../core/api/apiClient';
 import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
+import { compressImage, formatFileSize } from '../../../core/utils/imageUtils';
 
 export default function AdditionalPaymentScreen() {
   const router = useRouter();
@@ -183,10 +184,13 @@ export default function AdditionalPaymentScreen() {
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
         const filename = asset.fileName || `proof_photo_${Date.now()}.jpg`;
+        const compressedUri = await compressImage(asset.uri);
+        const fileSize = asset.fileSize || asset.filesize || 0;
         setAttachedDoc({
-          uri: asset.uri,
+          uri: compressedUri,
           name: filename,
           type: 'image',
+          size: fileSize,
         });
       }
     } catch (err) {
@@ -203,11 +207,15 @@ export default function AdditionalPaymentScreen() {
       });
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
+        const isPdf = asset.mimeType?.includes('pdf');
+        const finalUri = isPdf ? asset.uri : await compressImage(asset.uri);
+        const fileSize = asset.size || 0;
         setAttachedDoc({
-          uri: asset.uri,
+          uri: finalUri,
           name: asset.name || 'attachment_proof',
           mimeType: asset.mimeType || 'image/jpeg',
-          type: asset.mimeType?.includes('pdf') ? 'pdf' : 'image',
+          type: isPdf ? 'pdf' : 'image',
+          size: fileSize,
         });
       }
     } catch (err) {
@@ -765,7 +773,14 @@ export default function AdditionalPaymentScreen() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.attachedDocName} numberOfLines={1}>{attachedDoc.name}</Text>
-                  <Text style={styles.attachedDocStatus}>Ready for settlement</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2, flexWrap: 'wrap', gap: 6 }}>
+                    <Text style={styles.attachedDocStatus}>Ready for settlement</Text>
+                    {attachedDoc.size > 0 && (
+                      <Text style={[styles.attachedDocSize, isDark && styles.subtextDark]}>
+                        • {formatFileSize(attachedDoc.size)}
+                      </Text>
+                    )}
+                  </View>
                 </View>
               </View>
               <TouchableOpacity
@@ -1298,7 +1313,11 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#1E488F',
     fontWeight: '500',
-    marginTop: 2,
+  },
+  attachedDocSize: {
+    fontSize: 11,
+    color: '#64748B',
+    fontWeight: '500',
   },
   removeDocBtn: {
     padding: 4,

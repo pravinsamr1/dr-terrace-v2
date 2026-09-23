@@ -554,7 +554,7 @@ export default function WarrantyTab({
           >
             <Ionicons name="document-text-outline" size={18} color="#FFFFFF" />
             <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '700' }}>
-              View & Print Warranty Letter
+              View Warranty Letter
             </Text>
           </TouchableOpacity>
 

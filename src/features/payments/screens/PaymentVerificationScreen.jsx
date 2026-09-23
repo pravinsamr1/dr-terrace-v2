@@ -23,7 +23,12 @@ import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
 import { resolveProofImageUrl, getProofFilename } from '../../../core/utils/imageUtils';
-import { MaterialDeleteModal } from '../../../shared/components/material';
+import VerifyPaymentModal from '../components/VerifyPaymentModal';
+import {
+  MaterialAlertModal,
+  MaterialDeleteModal,
+  MaterialSuccessModal,
+} from '../../../shared/components/material';
 
 export default function PaymentVerificationScreen() {
   const router = useRouter();
@@ -42,6 +47,12 @@ export default function PaymentVerificationScreen() {
   const [showImageModal, setShowImageModal] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [isDeletingPayment, setIsDeletingPayment] = useState(false);
+
+  // Custom modal states
+  const [verifyModalVisible, setVerifyModalVisible] = useState(false);
+  const [successModalVisible, setSuccessModalVisible] = useState(false);
+  const [successData, setSuccessData] = useState({ title: '', message: '', badge: '', appId: '' });
+  const [alertModal, setAlertModal] = useState({ visible: false, title: '', message: '', type: 'info' });
 
   // Load appointment / client details
   useEffect(() => {
@@ -491,10 +502,7 @@ export default function PaymentVerificationScreen() {
       bankDetails = rawAccount;
     }
   }
-  const hasGst =
-    params.hasGst === 'true' ||
-    params.hasGst === true ||
-    Boolean(client?.finalPaidDetails?.hasGst || client?.hasGst || verifyData?.quotation?.totalWithGst || payView?.withGst);
+
   const collectorName =
     verifyData?.receivedBy ||
     matchedPay?.receivedBy ||
@@ -576,148 +584,148 @@ export default function PaymentVerificationScreen() {
 
   const handleApprove = () => {
     if (!canVerify) {
-      Alert.alert(
-        'Sequential Verification Required',
-        `An earlier payment (#${blockingPaymentId}) is unverified.\n\nAccording to API v2 verification rules, all prior payments on the quotation must be verified by Admin in sequential order.`,
-        [{ text: 'OK' }]
-      );
+      setAlertModal({
+        visible: true,
+        type: 'lock',
+        title: 'Sequential Verification Required',
+        message: `An earlier payment (#${blockingPaymentId}) is unverified.\n\nAccording to API v2 verification rules, all prior payments on the quotation must be verified by Admin in sequential order.`,
+      });
       return;
     }
 
-    Alert.alert(
-      'Verify & Approve Payment',
-      `Are you sure you want to approve the payment of ₹${paymentAmt.toLocaleString()} for ${displayName || 'this customer'}?\n\nThis will record Admin verification in the ledger and unlock receipt sharing.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Approve & Verify',
-          style: 'default',
-          onPress: async () => {
-            const appId = client?.id || params.id;
-            const quoteId =
-              params.quotationId ||
-              verifyData?.quotation?.quotationId ||
-              payView?.id ||
-              payView?.quotationId ||
-              client?.confirmedQuoteId ||
-              client?.activeQuotationId;
-            const payId = paymentId || matchedFromPayView?.payment?.id || params.paymentId || params.milestone;
+    setVerifyModalVisible(true);
+  };
 
-            setIsSubmittingApprove(true);
-            try {
-              let targetPayId = payId || matchedFromPayView?.payment?.id;
-              const isGstPayment = Boolean(
-                params.isGst === 'true' ||
-                params.stage === 'GST Tax Clearance' ||
-                params.serviceTitle === 'GST Tax Clearance' ||
-                serviceContext?.serviceTitle === 'GST Tax Clearance' ||
-                stageName === 'GST Tax Clearance' ||
-                String(targetPayId).startsWith('gst_') ||
-                matchedFromPayView?.type === 'gst'
-              );
+  const confirmApprovePayment = async () => {
+    const appId = client?.id || params.id;
+    const quoteId =
+      params.quotationId ||
+      verifyData?.quotation?.quotationId ||
+      payView?.id ||
+      payView?.quotationId ||
+      client?.confirmedQuoteId ||
+      client?.activeQuotationId;
+    const payId = paymentId || matchedFromPayView?.payment?.id || params.paymentId || params.milestone;
 
-              // API v2 verification: If it's a GST clearance, ensure backend has it recorded and verified
-              if (isGstPayment && quoteId) {
-                try {
-                  const recRes = await paymentRepository.recordGstPayment(quoteId, {
-                    amount: paymentAmt,
-                    paymentMethod: paymentMethod || 'CASH',
-                    voucher: voucherCode || 'GST-REC',
-                    notes: 'GST clearance payment verified by Admin',
-                  });
-                  const newPayId =
-                    recRes?.data?.payment?.id ||
-                    recRes?.data?.gstPayment?.payments?.[0]?.id ||
-                    recRes?.data?.gstPayments?.[0]?.id;
-                  if (newPayId) {
-                    targetPayId = newPayId;
-                  }
-                } catch (_e) {}
-              }
+    setIsSubmittingApprove(true);
+    try {
+      let targetPayId = payId || matchedFromPayView?.payment?.id;
+      const isGstPayment = Boolean(
+        params.isGst === 'true' ||
+        params.stage === 'GST Tax Clearance' ||
+        params.serviceTitle === 'GST Tax Clearance' ||
+        serviceContext?.serviceTitle === 'GST Tax Clearance' ||
+        stageName === 'GST Tax Clearance' ||
+        String(targetPayId).startsWith('gst_') ||
+        matchedFromPayView?.type === 'gst'
+      );
 
-              if (targetPayId) {
-                const res = await paymentRepository.verifyPayment(
-                  quoteId ? String(quoteId) : null,
-                  targetPayId,
-                  'Approved in verification screen'
-                );
-                if (!res?.success && !isGstPayment) {
-                  Alert.alert('Verification Failed', res?.message || 'Could not verify payment. Please try again.');
-                  setIsSubmittingApprove(false);
-                  return;
-                }
-              }
+      // API v2 verification: If it's a GST clearance, ensure backend has it recorded and verified
+      if (isGstPayment && quoteId) {
+        try {
+          const recRes = await paymentRepository.recordGstPayment(quoteId, {
+            amount: paymentAmt,
+            paymentMethod: paymentMethod || 'CASH',
+            voucher: voucherCode || 'GST-REC',
+            notes: 'GST clearance payment verified by Admin',
+          });
+          const newPayId =
+            recRes?.data?.payment?.id ||
+            recRes?.data?.gstPayment?.payments?.[0]?.id ||
+            recRes?.data?.gstPayments?.[0]?.id;
+          if (newPayId) {
+            targetPayId = newPayId;
+          }
+        } catch (_e) {}
+      }
 
-              if (appId) {
-                const isFinal = Boolean(
-                  stageName.toLowerCase().includes('final') ||
-                  params.milestone?.toLowerCase().includes('final') ||
-                  (!isGstPayment && client?.finalPaid)
-                );
-                const isMid = Boolean(
-                  stageName.toLowerCase().includes('mid') ||
-                  params.milestone?.toLowerCase().includes('mid')
-                );
-                const isInitial = Boolean(
-                  stageName.toLowerCase().includes('initial') ||
-                  stageName.toLowerCase().includes('advance') ||
-                  params.milestone?.toLowerCase().includes('initial')
-                );
+      if (targetPayId) {
+        const res = await paymentRepository.verifyPayment(
+          quoteId ? String(quoteId) : null,
+          targetPayId,
+          'Approved in verification screen'
+        );
+        if (!res?.success && !isGstPayment) {
+          setIsSubmittingApprove(false);
+          setVerifyModalVisible(false);
+          setAlertModal({
+            visible: true,
+            type: 'error',
+            title: 'Verification Failed',
+            message: res?.message || 'Could not verify payment. Please try again.',
+          });
+          return;
+        }
+      }
 
-                const updatePayload = {
-                  isVerified: true,
-                  verificationStatus: 'approved',
-                };
-                if (isGstPayment) {
-                  updatePayload.hasGst = true;
-                  updatePayload.gstPaid = true;
-                  updatePayload.gstVerificationStatus = 'verified';
-                  updatePayload.gstPaidDetails = {
-                    amount: paymentAmt,
-                    paymentMethod: paymentMethod || 'CASH',
-                    transactionId: voucherCode || 'GST-REC',
-                    verificationStatus: 'verified',
-                    isVerified: true,
-                    paymentDate: formatDateDDMMYY(new Date()),
-                  };
-                } else if (isFinal) {
-                  updatePayload.finalPaid = true;
-                  updatePayload.fullPaid = true;
-                } else if (isMid) {
-                  updatePayload.midTermPaid = true;
-                } else if (isInitial) {
-                  updatePayload.initialPaid = true;
-                }
+      if (appId) {
+        const isFinal = Boolean(
+          stageName.toLowerCase().includes('final') ||
+          params.milestone?.toLowerCase().includes('final') ||
+          (!isGstPayment && client?.finalPaid)
+        );
+        const isMid = Boolean(
+          stageName.toLowerCase().includes('mid') ||
+          params.milestone?.toLowerCase().includes('mid')
+        );
+        const isInitial = Boolean(
+          stageName.toLowerCase().includes('initial') ||
+          stageName.toLowerCase().includes('advance') ||
+          params.milestone?.toLowerCase().includes('initial')
+        );
 
-                await appointmentRepository
-                  .updateAppointment(appId, updatePayload)
-                  .catch(() => {});
-              }
+        const updatePayload = {
+          isVerified: true,
+          verificationStatus: 'approved',
+        };
+        if (isGstPayment) {
+          updatePayload.hasGst = true;
+          updatePayload.gstPaid = true;
+          updatePayload.gstVerificationStatus = 'verified';
+          updatePayload.gstPaidDetails = {
+            amount: paymentAmt,
+            paymentMethod: paymentMethod || 'CASH',
+            transactionId: voucherCode || 'GST-REC',
+            verificationStatus: 'verified',
+            isVerified: true,
+            paymentDate: formatDateDDMMYY(new Date()),
+          };
+        } else if (isFinal) {
+          updatePayload.finalPaid = true;
+          updatePayload.fullPaid = true;
+        } else if (isMid) {
+          updatePayload.midTermPaid = true;
+        } else if (isInitial) {
+          updatePayload.initialPaid = true;
+        }
 
-              Alert.alert(
-                'Payment Verified Successfully! 🎉',
-                `The transaction #${voucherCode || targetPayId || 'GST-REC'} of ₹${paymentAmt.toLocaleString()} has been verified and recorded by Admin.`,
-                [
-                  {
-                    text: 'View Customer Detail',
-                    onPress: () => {
-                      router.replace({
-                        pathname: '/customer-detail',
-                        params: { id: appId, initialTab: 'payments' },
-                      });
-                    },
-                  },
-                ]
-              );
-            } catch (err) {
-              Alert.alert('Error', err?.message || 'Failed to verify payment');
-            } finally {
-              setIsSubmittingApprove(false);
-            }
-          },
-        },
-      ]
-    );
+        await appointmentRepository
+          .updateAppointment(appId, updatePayload)
+          .catch(() => {});
+      }
+
+      setVerifyModalVisible(false);
+      setIsSubmittingApprove(false);
+
+      setSuccessData({
+        title: 'Payment Verified!',
+        message: `The transaction of ₹${paymentAmt.toLocaleString()} has been verified and recorded by Admin.`,
+        badge: voucherCode || targetPayId || 'VERIFIED',
+        appId: appId,
+      });
+      setSuccessModalVisible(true);
+    } catch (err) {
+      setIsSubmittingApprove(false);
+      setVerifyModalVisible(false);
+      setAlertModal({
+        visible: true,
+        type: 'error',
+        title: 'Error',
+        message: err?.message || 'Failed to verify payment',
+      });
+    } finally {
+      setIsSubmittingApprove(false);
+    }
   };
 
   const handleDeleteClick = () => {
@@ -1361,18 +1369,57 @@ export default function PaymentVerificationScreen() {
                   color={canVerify ? '#34D399' : '#FFFFFF'}
                   style={{ marginRight: 6 }}
                 />
-                <Text style={styles.approveBtnText}>Verify & Approve Payment</Text>
+                <Text style={styles.approveBtnText}>Verify Payment</Text>
               </>
             )}
           </TouchableOpacity>
         )}
       </View>
 
+      {/* Custom Designed Verify Payment Confirmation Modal */}
+      <VerifyPaymentModal
+        visible={verifyModalVisible}
+        amount={paymentAmt}
+        clientName={displayName}
+        stage={stageName || serviceContext?.serviceTitle}
+        paymentMethod={paymentMethod}
+        voucher={voucherCode || displayPaymentId}
+        isSubmitting={isSubmittingApprove}
+        onConfirm={confirmApprovePayment}
+        onCancel={() => setVerifyModalVisible(false)}
+      />
+
+      {/* Custom Success Alert Modal */}
+      <MaterialSuccessModal
+        visible={successModalVisible}
+        title={successData.title}
+        message={successData.message}
+        badgeText={successData.badge}
+        buttonText="View Customer Detail"
+        onClose={() => {
+          setSuccessModalVisible(false);
+          router.replace({
+            pathname: '/customer-detail',
+            params: { id: successData.appId, initialTab: 'payments' },
+          });
+        }}
+      />
+
+      {/* Custom Notice / Error Alert Modal */}
+      <MaterialAlertModal
+        visible={alertModal.visible}
+        type={alertModal.type}
+        title={alertModal.title}
+        message={alertModal.message}
+        buttonText="Got It"
+        onClose={() => setAlertModal((prev) => ({ ...prev, visible: false }))}
+      />
+
       {/* Material Delete Confirmation Modal */}
       <MaterialDeleteModal
         visible={deleteModalVisible}
         title="Delete Payment Record?"
-        message={`Are you sure you want to delete this payment of ₹${paymentAmt.toLocaleString()} (${voucherCode || displayPaymentId || 'Payment'})? This action cannot be undone and will remove the transaction record.`}
+        message={`Are you sure you want to delete this payment of ₹${paymentAmt.toLocaleString()} \n This action cannot be undone and will remove the transaction record.`}
         confirmText="Delete"
         cancelText="Cancel"
         isDeleting={isDeletingPayment}

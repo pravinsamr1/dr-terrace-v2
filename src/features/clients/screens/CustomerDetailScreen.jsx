@@ -4077,22 +4077,6 @@ export default function CustomerDetailScreen() {
                               </Text>
                             )}
                           </View>
-
-                          {paidPercentage === 100 ? (
-                            <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                              <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 9999, borderWidth: 1, borderColor: '#86EFAC' }}>
-                                <Text style={{ color: '#166534', fontSize: 12, fontWeight: '700' }}>✓ 100% Paid</Text>
-                              </View>
-                            </View>
-                          ) : paidPercentage > 0 ? (
-                            <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                              <View style={{ backgroundColor: '#EFF6FF', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 9999, borderWidth: 1, borderColor: '#BFDBFE' }}>
-                                <Text style={{ color: '#1E488F', fontSize: 12, fontWeight: '700' }}>{paidPercentage}% Paid</Text>
-                              </View>
-                            </View>
-                          ) : (
-                            <Text style={{ fontSize: 13, fontWeight: '700', color: '#1E488F' }}>0% Paid</Text>
-                          )}
                         </View>
 
                         {/* Progress Bar Track */}

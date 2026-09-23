@@ -797,6 +797,13 @@ export default function SendQuotationScreen() {
   }, [id, quoteId]);
 
   const clientFirstName = (app.clientName || app.customerName || 'Customer').split(' ')[0];
+  const clientFullName = (app.clientName || app.customerName || 'Customer').trim();
+  const quotationTier = (() => {
+    const raw = (quote.packageName || quote.quoteFor || '').toUpperCase();
+    if (raw.includes('PREMIUM') || raw.includes('MID')) return 'Premium';
+    if (raw.includes('ELITE') || raw.includes('LUXURY')) return 'Elite';
+    return 'Economy';
+  })();
   // Only generate HTML once real API data is loaded — never from empty/default state
   const isDataReady = !isLoading && !loadError && !!(quote.id || quote.quotationId || quoteId);
   const previewHtml = isDataReady ? generateHTML(app, quote, false, quoteId) : null;
@@ -804,8 +811,9 @@ export default function SendQuotationScreen() {
   const getPdfUri = async () => {
     const exportHtml = generateHTML(app, quote, true, quoteId);
     const { uri, base64 } = await Print.printToFileAsync({ html: exportHtml, base64: true });
-    const cleanClientName = (clientFirstName || 'Customer').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const targetName = `${cleanClientName}_quotation.pdf`;
+    const cleanClientName = (clientFullName || 'Customer').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const cleanTier = quotationTier.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const targetName = `${cleanClientName}_${cleanTier}_quotation.pdf`;
     const targetUri = cacheDirectory ? `${cacheDirectory}${targetName}` : null;
 
     if (targetUri && base64) {
@@ -841,7 +849,7 @@ export default function SendQuotationScreen() {
       const namedUri = await getPdfUri();
       await Sharing.shareAsync(namedUri, {
         mimeType: 'application/pdf',
-        dialogTitle: `Share ${clientFirstName}_quotation.pdf`,
+        dialogTitle: `Share ${clientFullName}_${quotationTier}_quotation.pdf`,
         UTI: 'com.adobe.pdf',
       });
     } catch (error) {
@@ -862,7 +870,7 @@ export default function SendQuotationScreen() {
 
       await Sharing.shareAsync(namedUri, {
         mimeType: 'application/pdf',
-        dialogTitle: `Send ${clientFirstName}_quotation.pdf to ${customerName} via WhatsApp`,
+        dialogTitle: `Send ${clientFullName}_${quotationTier}_quotation.pdf to ${customerName} via WhatsApp`,
         UTI: 'com.adobe.pdf',
       });
     } catch (error) {

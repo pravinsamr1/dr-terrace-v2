@@ -66,6 +66,11 @@ const getReceiptData = (app, customerGst, finalReceiptData = null, params = {}, 
 
   const docTitle = isGst ? 'TAX INVOICE' : 'PAYMENT RECEIPT';
 
+  // Compute current Indian financial year dynamically (Apr–Mar cycle)
+  const now = new Date();
+  const fyStartYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+  const fyLabel = `${String(fyStartYear).slice(-2)}-${String(fyStartYear + 1).slice(-2)}`;
+
   let invoiceNo =
     params?.receiptNumber ||
     params?.voucher ||
@@ -73,7 +78,7 @@ const getReceiptData = (app, customerGst, finalReceiptData = null, params = {}, 
     payView?.receiptNumber ||
     app?.receiptNumber ||
     app?.invoiceNumber ||
-    (app?.id ? `DRT ATEG ${String(app.id).padStart(3, '0')}/26-27` : 'DRT ATEG 013/26-27');
+    (app?.id ? `DRT ATEG ${String(app.id).padStart(3, '0')}/${fyLabel}` : '');
 
   const dateVal = formatDateDDMMYY(
     params?.date
