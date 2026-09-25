@@ -1088,68 +1088,7 @@ export default function PaymentFormScreen() {
           </View>
         ) : (
           <>
-            {/* Service Selector: Allows paying for ANY service regardless of order */}
-            {stageId !== 'final' && !isGstPayment && Array.isArray(payView?.services) && payView.services.length > 1 && (
-              <View style={{ marginBottom: 12 }}>
-                <Text style={[styles.label, isDark && styles.textDark, { marginBottom: 8, fontSize: 13, fontWeight: '700' }]}>
-                  Select Service to Pay <Text style={styles.requiredStar}>*</Text>
-                </Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 2 }}>
-                  {payView.services.map((svc) => {
-                    const isSelected = String(svc.id) === String(selectedServiceId || activeService?.id);
-                    const isCompleted = svc.status === 'COMPLETED' || (Number(svc.balanceAmount) === 0 && Number(svc.totalPrice) > 0);
-                    return (
-                      <TouchableOpacity
-                        key={svc.id}
-                        onPress={() => {
-                          setActiveService(svc);
-                          setSelectedServiceId(String(svc.id));
-                          setSelectedServiceName(svc.title || svc.name || '');
-                          if (svc.balanceAmount != null && Number(svc.balanceAmount) > 0) {
-                            setPaymentAmount(String(svc.balanceAmount));
-                          }
-                        }}
-                        style={{
-                          paddingHorizontal: 14,
-                          paddingVertical: 10,
-                          borderRadius: 12,
-                          borderWidth: 1.5,
-                          borderColor: isSelected ? '#2557C7' : (isDark ? '#334155' : '#E2E8F0'),
-                          backgroundColor: isSelected
-                            ? (isDark ? 'rgba(37, 87, 199, 0.25)' : '#EFF6FF')
-                            : (isDark ? '#1E293B' : '#FFFFFF'),
-                          flexDirection: 'row',
-                          alignItems: 'center',
-                          gap: 8,
-                        }}
-                        activeOpacity={0.7}
-                      >
-                        <Ionicons
-                          name={isCompleted ? 'checkmark-circle' : (isSelected ? 'radio-button-on' : 'radio-button-off')}
-                          size={16}
-                          color={isSelected ? '#2557C7' : (isCompleted ? '#16A34A' : (isDark ? '#94A3B8' : '#64748B'))}
-                        />
-                        <View>
-                          <Text
-                            style={{
-                              fontSize: 13,
-                              fontWeight: isSelected ? '700' : '600',
-                              color: isSelected ? '#2557C7' : (isDark ? '#FFFFFF' : '#0F172A'),
-                            }}
-                          >
-                            {svc.title || svc.name}
-                          </Text>
-                          <Text style={{ fontSize: 10, fontWeight: '700', color: (svc.balanceAmount || 0) > 0 ? '#DC2626' : '#16A34A', marginTop: 1 }}>
-                            Bal: ₹{(svc.balanceAmount || 0).toLocaleString()}
-                          </Text>
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-              </View>
-            )}
-
+            
             {activeService && (
               <View style={[styles.serviceInfoCard, isDark && styles.serviceInfoCardDark]}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
