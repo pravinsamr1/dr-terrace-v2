@@ -6,6 +6,7 @@ import {
   Modal,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -23,8 +24,10 @@ import { useColorScheme } from '../../../core/hooks/useColorScheme';
  * @param {string} [props.stage]
  * @param {string} [props.paymentMethod]
  * @param {string} [props.voucher]
+ * @param {string} [props.verificationNotes]
+ * @param {(notes: string) => void} [props.onChangeVerificationNotes]
  * @param {boolean} [props.isSubmitting=false]
- * @param {() => void} props.onConfirm
+ * @param {(notes?: string) => void} props.onConfirm
  * @param {() => void} props.onCancel
  */
 export default function VerifyPaymentModal({
@@ -34,12 +37,24 @@ export default function VerifyPaymentModal({
   stage = '',
   paymentMethod = '',
   voucher = '',
+  verificationNotes = '',
+  onChangeVerificationNotes,
   isSubmitting = false,
   onConfirm,
   onCancel,
 }) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+
+  const [localNotes, setLocalNotes] = useState(verificationNotes || 'Amount credited and verified');
+  const notes = verificationNotes !== undefined ? verificationNotes : localNotes;
+
+  const handleNotesChange = (text) => {
+    setLocalNotes(text);
+    if (onChangeVerificationNotes) {
+      onChangeVerificationNotes(text);
+    }
+  };
 
   // Animation values (lazily initialized for stable identity)
   const [backdropOpacity] = useState(() => new Animated.Value(0));
@@ -212,8 +227,22 @@ export default function VerifyPaymentModal({
             </Text>
           </View>
 
-          {/* Details Table */}
-          
+          {/* Verification Notes Input */}
+          <View style={[styles.notesWrapper, isDark ? styles.notesWrapperDark : styles.notesWrapperLight]}>
+            <Text style={[styles.notesLabel, isDark ? styles.notesLabelDark : styles.notesLabelLight]}>
+              VERIFICATION NOTES
+            </Text>
+            <TextInput
+              style={[styles.notesInput, isDark ? styles.notesInputDark : styles.notesInputLight]}
+              placeholder="e.g. Amount credited and verified"
+              placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
+              value={notes}
+              onChangeText={handleNotesChange}
+              multiline
+              numberOfLines={2}
+              editable={!isSubmitting}
+            />
+          </View>
 
           {/* Action Buttons */}
           <View style={styles.buttonRow}>
@@ -230,7 +259,7 @@ export default function VerifyPaymentModal({
 
             <TouchableOpacity
               style={[styles.confirmBtn, isSubmitting && { opacity: 0.85 }]}
-              onPress={onConfirm}
+              onPress={() => onConfirm && onConfirm(notes)}
               activeOpacity={0.85}
               disabled={isSubmitting}
             >
@@ -485,5 +514,44 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  notesWrapper: {
+    width: '100%',
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 16,
+    borderWidth: 1,
+  },
+  notesWrapperLight: {
+    backgroundColor: '#F8FAFC',
+    borderColor: '#E2E8F0',
+  },
+  notesWrapperDark: {
+    backgroundColor: '#0F172A',
+    borderColor: '#334155',
+  },
+  notesLabel: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    marginBottom: 6,
+  },
+  notesLabelLight: {
+    color: '#64748B',
+  },
+  notesLabelDark: {
+    color: '#94A3B8',
+  },
+  notesInput: {
+    fontSize: 13,
+    minHeight: 48,
+    textAlignVertical: 'top',
+    padding: 0,
+  },
+  notesInputLight: {
+    color: '#0F172A',
+  },
+  notesInputDark: {
+    color: '#F8FAFC',
   },
 });

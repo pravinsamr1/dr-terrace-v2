@@ -32,8 +32,8 @@ const generateHTML = (app, quote, isExport = false, fallbackQuoteId = '') => {
     ? (String(qId).startsWith('DRT-') ? String(qId) : `DRT-${qId}`)
     : (quote.quoteNo ? (String(quote.quoteNo).startsWith('DRT-') ? String(quote.quoteNo) : `DRT-${quote.quoteNo}`) : '');
 
-  const qTier = (quote.packageName || quote.quoteFor || 'ECONOMIC').toUpperCase();
-  const rawWarranty = quote.warranty;
+  const qTier = (quote.package.name).toUpperCase();
+  const rawWarranty = quote.package.warranty;
   const warrantyText = String(rawWarranty).toUpperCase().includes('WARRANTY')
     ? String(rawWarranty).toUpperCase()
     : `${String(rawWarranty).toUpperCase()} WARRANTY`;
@@ -99,117 +99,158 @@ const generateHTML = (app, quote, isExport = false, fallbackQuoteId = '') => {
 
   let rate = quote.rate || (servicesList && servicesList[0] ? (servicesList[0].rate || servicesList[0][`rate${tKey}`]) : 0);
 
-  // Extract discount percent from all potential property names
-  let discountPct = Number(
-    quote.discountPercentage != null
-      ? quote.discountPercentage
-      : (quote.discountPercent != null
-          ? quote.discountPercent
-          : (quote.discount_percentage != null
-              ? quote.discount_percentage
-              : (quote.discount_percent != null
-                  ? quote.discount_percent
-                  : (quote.discount != null && Number(quote.discount) <= 100
-                      ? quote.discount
-                      : 0))))
-  ) || 0;
+  // ─── Pricing resolution ───────────────────────────────────────────────────
+  // The backend sends a structured `pricing` object with two branches:
+  //   pricing.withGst    — subTotal → discount → taxableAmount → GST → total
+  //   pricing.withoutGst — subTotal → discount → total (no GST)
+  //
+  // Correct computation order:
+  //   1. subTotal        (gross sum of all services)
+  //   2. − discount      (percentage of subTotal)
+  //   3. = taxableAmount
+  //   4. + GST           (percentage of taxableAmount)
+  //   5. = grandTotal
+  //
+  // We read authoritative values from pricing.* when available, then compute
+  // manually as a fallback using the same order.
 
-  // Determine gross subtotal (undiscounted sum)
+  // Determine gross subtotal (undiscounted sum of services)
   let subTotal = calculatedServicesSubtotal > 0
     ? calculatedServicesSubtotal
-    : Number(quote.subTotal || quote.subtotal || quote.totalAmount || quote.amount || quote.total || 0);
+    : Number(quote.subTotal || quote.subtotal || quote.pricing?.subTotal || quote.totalAmount || quote.amount || quote.total || 0);
 
+  // Detect which branch is active (WITH_GST or WITHOUT_GST)
+  const selectedPricingType = quote.pricing?.selectedType || '';
+  const pricingWithGst    = quote.pricing?.withGst    || null;
+  const pricingWithoutGst = quote.pricing?.withoutGst || null;
+
+  // Determine whether GST is applicable
   const hasGst = (() => {
-    if (quote.gstAdded === true || quote.gstAdded === false) return Boolean(quote.gstAdded);
-    if (quote.isGst === true || quote.isGst === false) return Boolean(quote.isGst);
-    if (quote.gst === '0%' || quote.gst === '0' || quote.gstRate === 0 || quote.gstRate === '0' || quote.gstPercentage === 0) return false;
+    if (selectedPricingType === 'WITHOUT_GST') return false;
+    if (selectedPricingType === 'WITH_GST') return true;
+    if (pricingWithGst && Number(pricingWithGst.gst?.amount || pricingWithGst.gst?.percentage || pricingWithGst.gst?.rate || 0) > 0) {
+      return true;
+    }
+    if (quote.gstAdded === true  || quote.gstAdded === false) return Boolean(quote.gstAdded);
+    if (quote.isGst    === true  || quote.isGst    === false) return Boolean(quote.isGst);
+    if (quote.gst === '0%' || quote.gst === '0' || quote.gstRate === 0 || quote.gstPercentage === 0) return false;
     if (quote.gstAmount != null) return Number(quote.gstAmount) > 0;
-    if (quote.gst?.gstAmount != null) return Number(quote.gst.gstAmount) > 0;
     return false;
   })();
 
+  // Active pricing branch (prefer backend data)
+  const activePricing = hasGst ? pricingWithGst : pricingWithoutGst;
+
+  // ── Discount ──────────────────────────────────────────────────────────────
+  let discountPct = Number(
+    activePricing?.discount?.percentage ??
+    activePricing?.discount?.rate ??
+    quote.discountPercentage ??
+    quote.discountPercent ??
+    quote.discount_percentage ??
+    quote.discount_percent ??
+    0
+  ) || 0;
+
+  let discountVal = Number(
+    (activePricing?.discount?.amount != null && Number(activePricing.discount.amount) > 0)
+      ? activePricing.discount.amount
+      : (quote.discountAmount != null && Number(quote.discountAmount) > 0)
+          ? quote.discountAmount
+          : (quote.discount != null && Number(quote.discount) > 0)
+              ? quote.discount
+              : (quote.discount_amount != null && Number(quote.discount_amount) > 0)
+                  ? quote.discount_amount
+                  : (discountPct > 0 ? Math.round((subTotal * (discountPct / 100)) * 100) / 100 : 0)
+  );
+
+  // Reconcile percentage ↔ value
+  if (discountPct > 0 && discountVal <= 0) {
+    discountVal = Math.round((subTotal * (discountPct / 100)) * 100) / 100;
+  }
+  if (discountVal > 0 && discountPct <= 0 && subTotal > 0) {
+    discountPct = Math.round((discountVal / subTotal) * 100 * 10) / 10;
+  }
+
+  const hasDiscount = discountPct > 0 || discountVal > 0;
+  if (!hasDiscount) { discountVal = 0; discountPct = 0; }
+
+  // ── Taxable amount (subTotal − discount) ──────────────────────────────────
+  const taxableAmount = Number(
+    activePricing?.taxableAmount != null
+      ? activePricing.taxableAmount
+      : (quote.taxableAmount != null
+          ? quote.taxableAmount
+          : Math.round((subTotal - discountVal) * 100) / 100)
+  );
+
+  // ── GST (applied on taxableAmount) ────────────────────────────────────────
   const gstPct = hasGst ? Number(
-    quote.gstPercentage != null
-      ? quote.gstPercentage
-      : (quote.gst?.gstPercentage != null
-        ? quote.gst.gstPercentage
-        : (quote.gstPercent || 18))
+    activePricing?.gst?.percentage ??
+    activePricing?.gst?.rate ??
+    quote.gstPercentage ??
+    quote.gstPercent ??
+    quote.gstRate ??
+    quote.gst?.gstPercentage ??
+    18
   ) : 0;
 
   const cgstPct = hasGst ? Number(
-    quote.cgstPercentage != null
-      ? quote.cgstPercentage
-      : (quote.gst?.cgstPercentage != null
-        ? quote.gst.cgstPercentage
-        : (gstPct / 2))
+    activePricing?.cgst?.percentage ??
+    activePricing?.cgst?.rate ??
+    quote.cgstPercentage ??
+    quote.cgstPercent ??
+    (gstPct / 2)
   ) : 0;
 
   const sgstPct = hasGst ? Number(
-    quote.sgstPercentage != null
-      ? quote.sgstPercentage
-      : (quote.gst?.sgstPercentage != null
-        ? quote.gst.sgstPercentage
-        : (gstPct / 2))
+    activePricing?.sgst?.percentage ??
+    activePricing?.sgst?.rate ??
+    quote.sgstPercentage ??
+    quote.sgstPercent ??
+    (gstPct / 2)
   ) : 0;
 
   const totalGstVal = hasGst
     ? Number(
-      quote.gstAmount != null
-        ? quote.gstAmount
-        : (quote.gst?.gstAmount != null
-          ? quote.gst.gstAmount
-          : Math.round((subTotal * (gstPct / 100)) * 100) / 100)
-    )
+        activePricing?.gst?.amount != null
+          ? activePricing.gst.amount
+          : (quote.gstAmount != null
+              ? quote.gstAmount
+              : Math.round((taxableAmount * (gstPct / 100)) * 100) / 100)
+      )
     : 0;
 
   const cgstVal = hasGst
     ? Number(
-      quote.cgstAmount != null
-        ? quote.cgstAmount
-        : (quote.gst?.cgstAmount != null
-          ? quote.gst.cgstAmount
-          : Math.round((totalGstVal / 2) * 100) / 100)
-    )
+        activePricing?.cgst?.amount != null
+          ? activePricing.cgst.amount
+          : (quote.cgstAmount != null
+              ? quote.cgstAmount
+              : Math.round(((taxableAmount * (cgstPct / 100)) || (totalGstVal / 2)) * 100) / 100)
+      )
     : 0;
 
   const sgstVal = hasGst
     ? Number(
-      quote.sgstAmount != null
-        ? quote.sgstAmount
-        : (quote.gst?.sgstAmount != null
-          ? quote.gst.sgstAmount
-          : Math.round((totalGstVal - cgstVal) * 100) / 100)
-    )
+        activePricing?.sgst?.amount != null
+          ? activePricing.sgst.amount
+          : (quote.sgstAmount != null
+              ? quote.sgstAmount
+              : Math.round(((taxableAmount * (sgstPct / 100)) || (totalGstVal - cgstVal)) * 100) / 100)
+      )
     : 0;
 
+  // ── Grand total (taxableAmount + GST, already computed by backend) ─────────
   const afterTaxTotal = hasGst
-    ? Math.round((subTotal + cgstVal + sgstVal) * 100) / 100
-    : subTotal;
+    ? Math.round((taxableAmount + cgstVal + sgstVal) * 100) / 100
+    : taxableAmount;
 
-  let discountVal = Number(
-    quote.discountAmount != null && Number(quote.discountAmount) > 0
-      ? quote.discountAmount
-      : (quote.discount_amount != null && Number(quote.discount_amount) > 0
-          ? quote.discount_amount
-          : (discountPct > 0 ? Math.round((afterTaxTotal * (discountPct / 100)) * 100) / 100 : 0))
+  const finalTotalRounded = Math.round(
+    activePricing?.totalAmount != null
+      ? Number(activePricing.totalAmount)
+      : afterTaxTotal
   );
-
-  // If discount percentage is provided (> 0) but discount value wasn't explicitly calculated, compute it
-  if (discountPct > 0 && discountVal <= 0) {
-    discountVal = Math.round((afterTaxTotal * (discountPct / 100)) * 100) / 100;
-  }
-  // If discount value is provided (> 0) but percentage was 0, compute the percentage
-  if (discountVal > 0 && discountPct <= 0 && afterTaxTotal > 0) {
-    discountPct = Math.round((discountVal / afterTaxTotal) * 100);
-  }
-
-  // Only consider discount active if user explicitly provided a discount value or percentage > 0
-  const hasDiscount = (discountPct > 0 || discountVal > 0);
-  if (!hasDiscount) {
-    discountVal = 0;
-    discountPct = 0;
-  }
-
   const assignedEmpName = quote.employeeName
     || quote.employee?.name
     || quote.assignedEmployeeName
@@ -235,12 +276,6 @@ const generateHTML = (app, quote, isExport = false, fallbackQuoteId = '') => {
       || app.withRegards?.trim()
       || defaultWithRegards
   ).trim();
-
-  const finalTotalRounded = Math.round(
-    hasDiscount
-      ? Math.max(0, afterTaxTotal - discountVal)
-      : afterTaxTotal
-  );
 
   const baseFontSize = isExport ? '12.5px' : '11px';
   const tableFontSize = isExport ? '12px' : '10.5px';
@@ -308,21 +343,29 @@ const generateHTML = (app, quote, isExport = false, fallbackQuoteId = '') => {
   today.setDate(today.getDate() + 15);
   const validDateStr = formatDateDDMMYY(today);
 
+  const activePayment = hasGst ? quote.payment?.withGst : quote.payment?.withoutGst;
+
   const advanceVal = (quote.advancePercent != null && Number(quote.advancePercent) <= 100)
     ? String(quote.advancePercent)
-    : (quote.paymentTerms?.advance != null && Number(quote.paymentTerms.advance) <= 100
-        ? String(quote.paymentTerms.advance)
-        : '60');
+    : (activePayment?.advance?.percentage != null
+        ? String(activePayment.advance.percentage)
+        : (quote.paymentTerms?.advance != null && Number(quote.paymentTerms.advance) <= 100
+            ? String(quote.paymentTerms.advance)
+            : '60'));
   const midVal = (quote.midPercent != null && Number(quote.midPercent) <= 100)
     ? String(quote.midPercent)
-    : (quote.paymentTerms?.mid != null && Number(quote.paymentTerms.mid) <= 100
-        ? String(quote.paymentTerms.mid)
-        : '30');
+    : (activePayment?.mid?.percentage != null
+        ? String(activePayment.mid.percentage)
+        : (quote.paymentTerms?.mid != null && Number(quote.paymentTerms.mid) <= 100
+            ? String(quote.paymentTerms.mid)
+            : '30'));
   const finalVal = (quote.finalPercent != null && Number(quote.finalPercent) <= 100)
     ? String(quote.finalPercent)
-    : (quote.paymentTerms?.final != null && Number(quote.paymentTerms.final) <= 100
-        ? String(quote.paymentTerms.final)
-        : '10');
+    : (activePayment?.final?.percentage != null
+        ? String(activePayment.final.percentage)
+        : (quote.paymentTerms?.final != null && Number(quote.paymentTerms.final) <= 100
+            ? String(quote.paymentTerms.final)
+            : '10'));
   const workStartText = quote.workCommencement || quote.paymentTerms?.workStart || quote.workStartNote || 'Work can be started 48hrs from the time of payment received';
   const validityText = quote.quoteValidateDate || quote.paymentTerms?.validity || quote.validityText || (`QUOTE VALID TILL ${validDateStr.toUpperCase()}`);
   const negotiationText = quote.negotiation || quote.notes || quote.paymentTerms?.negotiation || quote.negotiationNote || 'PRICE IS NEGOTIABLE FOR IMMEDIATE ORDER';
@@ -615,13 +658,23 @@ const generateHTML = (app, quote, isExport = false, fallbackQuoteId = '') => {
                 </tr>
                 ${hasGst ? `
                 <tr>
-                  <td colspan="3" rowspan="${hasDiscount ? '6' : '5'}" style="vertical-align: middle; border: 1.2px solid #000000; border-left: none; padding: ${isExport ? '4px 8px' : '3px 6px'}; font-size: ${isExport ? '11px' : '9.5px'};">
+                  <td colspan="3" rowspan="${hasDiscount ? '6' : '4'}" style="vertical-align: middle; border: 1.2px solid #000000; border-left: none; padding: ${isExport ? '4px 8px' : '3px 6px'}; font-size: ${isExport ? '11px' : '9.5px'};">
                     <p style="text-decoration: underline; font-weight: bold; margin-bottom: 2px;">Payment terms:</p>
                     ${renderPaymentTerms(true)}
                   </td>
                   <td style="font-weight: bold; border: 1.2px solid #000000; padding: ${cellPadding}; font-size: ${tableFontSize};">SUBTOTAL</td>
                   <td style="text-align: right; font-weight: bold; border: 1.2px solid #000000; border-right: none; padding: ${cellPadding}; font-size: ${totalAmountFontSize}; white-space: nowrap;">Rs. ${subTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                 </tr>
+                ${hasDiscount ? `
+                <tr>
+                  <td style="font-weight: bold; border: 1.2px solid #000000; padding: ${cellPadding}; font-size: ${tableFontSize};">DISCOUNT (${discountPct}%)</td>
+                  <td style="text-align: right; font-weight: bold; border: 1.2px solid #000000; border-right: none; color: #DC2626; padding: ${cellPadding}; font-size: ${totalAmountFontSize}; white-space: nowrap;">- Rs. ${discountVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                </tr>
+                <tr>
+                  <td style="font-weight: bold; border: 1.2px solid #000000; padding: ${cellPadding}; font-size: ${tableFontSize};">TAXABLE AMOUNT</td>
+                  <td style="text-align: right; font-weight: bold; border: 1.2px solid #000000; border-right: none; padding: ${cellPadding}; font-size: ${totalAmountFontSize}; white-space: nowrap;">Rs. ${taxableAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                </tr>
+                ` : ''}
                 <tr>
                   <td style="font-weight: bold; border: 1.2px solid #000000; padding: ${cellPadding}; font-size: ${tableFontSize};">CGST ${cgstPct}%</td>
                   <td style="text-align: right; font-weight: bold; border: 1.2px solid #000000; border-right: none; padding: ${cellPadding}; font-size: ${totalAmountFontSize}; white-space: nowrap;">Rs. ${cgstVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
@@ -631,17 +684,7 @@ const generateHTML = (app, quote, isExport = false, fallbackQuoteId = '') => {
                   <td style="text-align: right; font-weight: bold; border: 1.2px solid #000000; border-right: none; padding: ${cellPadding}; font-size: ${totalAmountFontSize}; white-space: nowrap;">Rs. ${sgstVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                 </tr>
                 <tr>
-                  <td style="font-weight: bold; border: 1.2px solid #000000; padding: ${cellPadding}; font-size: ${tableFontSize};">After Tax</td>
-                  <td style="text-align: right; font-weight: bold; border: 1.2px solid #000000; border-right: none; padding: ${cellPadding}; font-size: ${totalAmountFontSize}; white-space: nowrap;">Rs. ${afterTaxTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                </tr>
-                ${hasDiscount ? `
-                <tr>
-                  <td style="font-weight: bold; border: 1.2px solid #000000; padding: ${cellPadding}; font-size: ${tableFontSize};">DISCOUNT (${discountPct}%)</td>
-                  <td style="text-align: right; font-weight: bold; border: 1.2px solid #000000; border-right: none; color: #DC2626; padding: ${cellPadding}; font-size: ${totalAmountFontSize}; white-space: nowrap;">- Rs. ${discountVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                </tr>
-                ` : ''}
-                <tr>
-                  <td style="font-weight: bold; border: 1.2px solid #000000; padding: ${cellPadding}; font-size: ${tableFontSize};">Total</td>
+                  <td style="font-weight: 800; border: 1.2px solid #000000; padding: ${cellPadding}; font-size: ${tableFontSize};">TOTAL</td>
                   <td style="text-align: right; font-weight: 800; border: 1.2px solid #000000; border-right: none; color: #000000; padding: ${cellPadding}; font-size: ${totalAmountFontSize}; white-space: nowrap;">Rs. ${finalTotalRounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                 </tr>
                 ` : `
@@ -796,7 +839,6 @@ export default function SendQuotationScreen() {
     };
   }, [id, quoteId]);
 
-  const clientFirstName = (app.clientName || app.customerName || 'Customer').split(' ')[0];
   const clientFullName = (app.clientName || app.customerName || 'Customer').trim();
   const quotationTier = (() => {
     const raw = (quote.packageName || quote.quoteFor || '').toUpperCase();
@@ -882,14 +924,14 @@ export default function SendQuotationScreen() {
     if (router.canGoBack()) {
       router.back();
     } else {
-      const targetId = id || app?.id || app?.appointmentId;
+      const targetId = id || app.id || app.appointmentId;
       if (targetId) {
         router.replace({ pathname: '/customer-detail', params: { id: targetId, initialTab: 'quotation' } });
       } else {
         router.replace('/(tabs)');
       }
     }
-  }, [id, app?.id, app?.appointmentId, router]);
+  }, [id, app.id, app.appointmentId, router]);
 
   React.useEffect(() => {
     const onBackPress = () => {

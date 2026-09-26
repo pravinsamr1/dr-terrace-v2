@@ -51,7 +51,7 @@ const getAdditionalPaymentList = (payView) => {
 };
 
 // Helper function to extract unified receipt data model for Dr. Terrace receipts
-const getReceiptData = (app, customerGst, finalReceiptData = null, params = {}, payView = null) => {
+export const getReceiptData = (app, customerGst, finalReceiptData = null, params = {}, payView = null) => {
   const isFullReceipt = params?.isFullServiceReceipt === 'true';
 
   // For individual payment/cash receipts, only show the payment amount without GST.
@@ -64,29 +64,27 @@ const getReceiptData = (app, customerGst, finalReceiptData = null, params = {}, 
     )
   );
 
-  const docTitle = isGst ? 'TAX INVOICE' : 'PAYMENT RECEIPT';
-
-  // Compute current Indian financial year dynamically (Apr–Mar cycle)
-  const now = new Date();
-  const fyStartYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
-  const fyLabel = `${String(fyStartYear).slice(-2)}-${String(fyStartYear + 1).slice(-2)}`;
+  const docTitle = isGst ? 'TAX INVOICE' : 'CASH RECEIPT';
 
   let invoiceNo =
-    params?.receiptNumber ||
-    params?.voucher ||
     finalReceiptData?.receiptNumber ||
+    payView?.receipt?.receiptNumber ||
     payView?.receiptNumber ||
+    params?.receiptNumber ||
     app?.receiptNumber ||
-    app?.invoiceNumber ||
-    (app?.id ? `DRT ATEG ${String(app.id).padStart(3, '0')}/${fyLabel}` : '');
+    params?.voucher ||
+    '';
 
-  const dateVal = formatDateDDMMYY(
+  const rawReceiptDate =
     params?.date
       ? new Date(params.date)
-      : finalReceiptData?.receiptDate
-      ? new Date(finalReceiptData.receiptDate)
-      : (app?.finalPaidDetails?.paymentDate || app?.midTermPaidDetails?.paymentDate || app?.initialPaidDetails?.paymentDate || new Date())
-  );
+      : (finalReceiptData?.receiptDate || finalReceiptData?.receiptGeneratedAt)
+        ? new Date(finalReceiptData.receiptDate || finalReceiptData.receiptGeneratedAt)
+        : (payView?.receipt?.receiptGeneratedAt || payView?.receiptGeneratedAt)
+          ? new Date(payView.receipt?.receiptGeneratedAt || payView.receiptGeneratedAt)
+          : (app?.finalPaidDetails?.paymentDate || app?.midTermPaidDetails?.paymentDate || app?.initialPaidDetails?.paymentDate || new Date());
+
+  const dateVal = formatDateDDMMYY(rawReceiptDate);
 
   const clientName = (
     finalReceiptData?.customer?.name ||
@@ -99,7 +97,9 @@ const getReceiptData = (app, customerGst, finalReceiptData = null, params = {}, 
 
   const customerObj = finalReceiptData?.customer || payView?.customer || app?.customer || {};
   let addressLines = [];
-  if (customerObj.doorNo || customerObj.streetName) {
+  if (customerObj.address && typeof customerObj.address === 'string') {
+    addressLines = customerObj.address.split(',').map((p) => p.trim()).filter(Boolean);
+  } else if (customerObj.doorNo || customerObj.streetName) {
     const l1 = [customerObj.doorNo, customerObj.streetName].filter(Boolean).join(', ');
     if (l1) addressLines.push(l1);
     if (customerObj.area) addressLines.push(customerObj.area);
@@ -138,6 +138,7 @@ const getReceiptData = (app, customerGst, finalReceiptData = null, params = {}, 
 
   // Extract service list
   let servicesList = [];
+  let paymentAmount = 0;
 
   if (isFullReceipt) {
     if (Array.isArray(finalReceiptData?.services) && finalReceiptData.services.length > 0) {
@@ -197,26 +198,25 @@ const getReceiptData = (app, customerGst, finalReceiptData = null, params = {}, 
   } else {
     // Individual service payment / milestone receipt
     let matchedService = null;
-    // Locate the specific payment record (across services, additional work, and
-    // GST) that this receipt is for, so a Payment Receipt (non-GST) can show
-    // that payment's own id as its invoice number, prefixed with "DRT" — e.g.
-    // payment id "28b61bb6" -> "DRT28b61bb6". Tax Invoice keeps its existing
-    // invoiceNo (set above) untouched.
-    let matchedPaymentId = null;
-    if (payView && (params?.milestone || params?.voucher)) {
+    let matchedPaymentId = params?.paymentId || null;
+    if (payView && (params?.milestone || params?.voucher || params?.paymentId)) {
       const allPaymentsFlat = [
         ...(Array.isArray(payView.services) ? payView.services : []),
         ...getAdditionalPaymentList(payView),
         ...(payView.gstPayment ? [payView.gstPayment] : []),
+        ...(Array.isArray(payView.history) ? [{ payments: payView.history }] : []),
+        ...(Array.isArray(payView.payments) ? [{ payments: payView.payments }] : []),
       ].flatMap((s) => (Array.isArray(s.payments) ? s.payments : []));
       const foundPayment = allPaymentsFlat.find((p) =>
+        (params.paymentId && String(p.id) === String(params.paymentId)) ||
         (params.milestone && String(p.id) === String(params.milestone)) ||
         (params.voucher && String(p.voucher || '').toLowerCase() === String(params.voucher).toLowerCase())
       );
       if (foundPayment?.id) matchedPaymentId = foundPayment.id;
     }
-    if (!isGst && matchedPaymentId) {
-      invoiceNo = `DRT${matchedPaymentId}`;
+    if (!isGst && (matchedPaymentId || params?.paymentId)) {
+      const pid = matchedPaymentId || params?.paymentId;
+      invoiceNo = String(pid).startsWith('DRT') ? pid : `DRT${pid}`;
     }
     if (payView) {
       const allServices = [
@@ -272,7 +272,7 @@ const getReceiptData = (app, customerGst, finalReceiptData = null, params = {}, 
       ? Number(rawRate).toLocaleString('en-IN')
       : (params?.amount ? Number(params.amount).toLocaleString('en-IN') : '0');
 
-    const paymentAmount = Number(
+    paymentAmount = Number(
       params?.amount ||
       matchedService?.paidAmount ||
       matchedService?.totalPrice ||
@@ -291,24 +291,37 @@ const getReceiptData = (app, customerGst, finalReceiptData = null, params = {}, 
     ];
   }
 
-  const baseTotal = Number(
-    finalReceiptData?.grossSubtotal ||
-    finalReceiptData?.originalTotalPrice ||
-    payView?.grossSubtotal ||
-    payView?.totalPrice ||
-    params?.totalCost ||
-    params?.amount ||
-    app?.totalPayment ||
-    app?.totalCost ||
-    app?.cost ||
-    0
-  );
+  const baseTotal = isFullReceipt
+    ? Number(
+      finalReceiptData?.quotation?.totalAmount ||
+      finalReceiptData?.grossSubtotal ||
+      finalReceiptData?.originalTotalPrice ||
+      payView?.pricing?.withoutGstTotal ||
+      payView?.pricing?.subTotal ||
+      payView?.grossSubtotal ||
+      payView?.totalPrice ||
+      params?.totalCost ||
+      params?.amount ||
+      app?.totalPayment ||
+      app?.totalCost ||
+      app?.cost ||
+      0
+    )
+    : Number(paymentAmount || params?.amount || 0);
 
   if (servicesList.length === 0) {
+    const defaultTitle =
+      finalReceiptData?.quotation?.title ||
+      payView?.quotationTitle ||
+      (Array.isArray(app?.packages) &&
+        app.packages.flatMap((p) => p.quotations || []).find((q) => q.isConfirmed)?.packageName) ||
+      app?.serviceType ||
+      'TERRACE WATERPROOFING';
+
     servicesList = [
       {
         sNo: 1,
-        name: (app?.serviceType || 'TERRACE WATERPROOFING').toUpperCase(),
+        name: defaultTitle.toUpperCase(),
         measurement: formatSqft(params?.sqft) || (app?.sqft && !isNaN(app.sqft) ? formatSqft(app.sqft) : '1'),
         rate: params?.rate ? Number(params.rate).toLocaleString('en-IN') : Number(baseTotal).toLocaleString('en-IN'),
         total: baseTotal,
@@ -376,7 +389,18 @@ const getReceiptData = (app, customerGst, finalReceiptData = null, params = {}, 
 };
 
 // Helper function to generate Tax Invoice / Payment Receipt HTML matching the official Dr. Terrace format
-const generateTaxInvoiceHTML = (app, customerGst, finalReceiptData = null, params = {}, payView = null) => {
+// ============================================================
+// MULTI-PAGE TAX INVOICE / RECEIPT PDF
+// Designed specifically for Expo Print
+// ============================================================
+
+export const generateTaxInvoiceHTML = (
+  app,
+  customerGst,
+  finalReceiptData = null,
+  params = {},
+  payView = null
+) => {
   const {
     isGst,
     docTitle,
@@ -394,402 +418,1247 @@ const generateTaxInvoiceHTML = (app, customerGst, finalReceiptData = null, param
     sgstAmount,
     afterTax,
     grandTotal,
-  } = getReceiptData(app, customerGst, finalReceiptData, params, payView);
+  } = getReceiptData(
+    app,
+    customerGst,
+    finalReceiptData,
+    params,
+    payView
+  );
 
-  const subTotalFormatted = Number(subTotal).toLocaleString('en-IN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  const cgstFormatted = Number(cgstAmount).toLocaleString('en-IN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  const sgstFormatted = Number(sgstAmount).toLocaleString('en-IN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  const afterTaxFormatted = Number(afterTax).toLocaleString('en-IN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  const grandTotalFormatted = Number(grandTotal).toLocaleString('en-IN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+  // ==========================================================
+  // HELPERS
+  // ==========================================================
 
-  const serviceRowsHtml = servicesList
-    .map(
-      (svc) => `
+  const money = (value) =>
+    Number(value || 0).toLocaleString('en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+
+  const escapeHtml = (value) =>
+    String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+
+  // ==========================================================
+  // IMPORTANT:
+  //
+  // We deliberately create pages ourselves instead of relying
+  // on fixed HTML headers/footers.
+  //
+  // This is much more reliable with expo-print.
+  // ==========================================================
+
+  const FIRST_PAGE_ROWS = 10;
+  const NORMAL_PAGE_ROWS = 17;
+  const FINAL_PAGE_ROWS = 9;
+
+  // ==========================================================
+  // SPLIT SERVICES INTO PAGES
+  // ==========================================================
+
+  const splitServicesIntoPages = (items) => {
+    if (!items || items.length === 0) {
+      return [[]];
+    }
+
+    const pages = [];
+
+    // --------------------------------------------------------
+    // First page
+    // Has:
+    // - Header
+    // - Billing address
+    // - Site address
+    // - Table
+    // --------------------------------------------------------
+
+    pages.push(items.slice(0, FIRST_PAGE_ROWS));
+
+    let remaining = items.slice(FIRST_PAGE_ROWS);
+
+    while (remaining.length > 0) {
+      pages.push(remaining.slice(0, NORMAL_PAGE_ROWS));
+      remaining = remaining.slice(NORMAL_PAGE_ROWS);
+    }
+
+    return pages;
+  };
+
+  let servicePages = splitServicesIntoPages(servicesList);
+
+  // ==========================================================
+  // If the final page has too many rows, move some rows to a
+  // new final page so that totals/signature/seal have room.
+  // ==========================================================
+
+  if (servicePages.length > 1) {
+    const lastIndex = servicePages.length - 1;
+    const lastPage = servicePages[lastIndex];
+
+    if (lastPage.length > FINAL_PAGE_ROWS) {
+      const keepRows = lastPage.slice(0, FINAL_PAGE_ROWS);
+      const moveRows = lastPage.slice(FINAL_PAGE_ROWS);
+
+      servicePages[lastIndex] = keepRows;
+
+      servicePages.push(moveRows);
+    }
+  }
+
+  // ==========================================================
+  // HEADER
+  // ==========================================================
+
+  const renderHeader = () => `
+    <div class="letterhead">
+
+      <table class="header-table">
+
+        <tr>
+
+          <td class="header-logo-cell">
+
+            <img
+              src="data:image/png;base64,${logoBase64}"
+              class="header-logo"
+            />
+
+          </td>
+
+          <td class="header-title-cell">
+
+            <div class="document-title">
+              ${escapeHtml(docTitle)}
+            </div>
+
+          </td>
+
+          <td class="header-meta-cell">
+
+            <div>
+              INV : ${escapeHtml(invoiceNo)}
+            </div>
+
+            <div>
+              DATE : ${escapeHtml(currentDate)}
+            </div>
+
+          </td>
+
+        </tr>
+
+      </table>
+
+    </div>
+  `;
+
+  // ==========================================================
+  // FOOTER
+  // ==========================================================
+
+  const renderFooter = () => `
+    <div class="company-footer">
+
+      <div class="footer-line"></div>
+
+      <table class="footer-table">
+
+        <tr>
+
+          <td class="footer-company">
+
+            <strong>
+              Dr. Terrace Water Proofing
+              (ISO - 9001: 2008 Certified)
+            </strong>
+
+            <br />
+
+            Parsn Commercial Complex,
+            C-13, B-13, 2nd Floor,
+            Kodambakkam High Road,
+            Nungambakkam,
+
+            <br />
+
+            Chennai - 600006
+
+            <br />
+
+            www.drterrace.com /
+            www.drterracewaterproofing.com
+
+            <br />
+
+            <strong>
+              GST NO 33AANFD9271D1ZE
+            </strong>
+
+          </td>
+
+          <td class="footer-logo-cell">
+
+            <img
+              src="data:image/png;base64,${logoBase64}"
+              class="footer-logo"
+            />
+
+          </td>
+
+        </tr>
+
+      </table>
+
+    </div>
+  `;
+
+  // ==========================================================
+  // BILLING SECTION
+  // ONLY ON FIRST PAGE
+  // ==========================================================
+
+  const renderBilling = () => `
+    <div class="billing-section">
+
+      <div class="billing-title">
+        BILLING ADDRESS
+      </div>
+
+      <div class="billing-name">
+        ${escapeHtml(clientName)}
+      </div>
+
+      ${addressLines
+        .map(
+          (line) => `
+            <div class="billing-line">
+              ${escapeHtml(line)}
+            </div>
+          `
+        )
+        .join('')}
+
+      ${
+        gstinVal
+          ? `
+            <div class="billing-line gst-line">
+              GST - ${escapeHtml(gstinVal)}
+            </div>
+          `
+          : ''
+      }
+
+    </div>
+
+    <div class="site-address">
+
+      SITE ADDRESS:
+      ${escapeHtml(siteAddress)}
+
+    </div>
+  `;
+
+  // ==========================================================
+  // TABLE HEADER
+  // ==========================================================
+
+  const renderTableHeader = () => `
+    <thead>
+
       <tr>
-        <td class="td-center">${svc.sNo}</td>
-        <td class="td-bold" style="padding: 8px;">${svc.name}</td>
-        <td class="td-center">${svc.measurement}</td>
-        <td class="td-center">${svc.rate}</td>
-        <td class="td-right td-bold">Rs.&nbsp;&nbsp;&nbsp;&nbsp;${Number(svc.total).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+
+        <th class="col-sno">
+          S. No
+        </th>
+
+        <th class="col-service">
+          Service
+        </th>
+
+        <th class="col-measurement">
+          Measurement
+        </th>
+
+        <th class="col-rate">
+          Cost / sft (Rs)
+        </th>
+
+        <th class="col-total">
+          Total
+        </th>
+
       </tr>
-    `
-    )
+
+    </thead>
+  `;
+
+  // ==========================================================
+  // SERVICE ROWS
+  // ==========================================================
+
+  const renderServiceRows = (items) =>
+    items
+      .map(
+        (svc) => `
+          <tr class="service-row">
+
+            <td class="center">
+              ${escapeHtml(svc.sNo)}
+            </td>
+
+            <td class="service-name">
+              ${escapeHtml(svc.name)}
+            </td>
+
+            <td class="center">
+              ${escapeHtml(svc.measurement)}
+            </td>
+
+            <td class="center">
+              ${escapeHtml(svc.rate)}
+            </td>
+
+            <td class="right bold">
+              Rs. ${money(svc.total)}
+            </td>
+
+          </tr>
+        `
+      )
+      .join('');
+
+  // ==========================================================
+  // HSN
+  // ==========================================================
+
+  const renderHsn = () =>
+    isGst
+      ? `
+        <tr class="hsn-row">
+
+          <td></td>
+
+          <td class="center bold">
+            HSN CODE : 995453
+          </td>
+
+          <td></td>
+
+          <td></td>
+
+          <td></td>
+
+        </tr>
+      `
+      : '';
+
+  // ==========================================================
+  // TOTALS
+  // ONLY FINAL PAGE
+  // ==========================================================
+
+  const renderTotals = () => `
+    <table class="totals-table">
+
+      <tr>
+
+        <td colspan="2"></td>
+
+        <td colspan="2" class="center bold">
+          Sub Total
+        </td>
+
+        <td class="right bold">
+          Rs. ${money(subTotal)}
+        </td>
+
+      </tr>
+
+      ${
+        isGst
+          ? `
+            <tr>
+
+              <td colspan="2"></td>
+
+              <td class="center bold">
+                CGST
+              </td>
+
+              <td class="center bold">
+                ${cgstRate}%
+              </td>
+
+              <td class="right bold">
+                Rs. ${money(cgstAmount)}
+              </td>
+
+            </tr>
+
+            <tr>
+
+              <td colspan="2"></td>
+
+              <td class="center bold">
+                SGST
+              </td>
+
+              <td class="center bold">
+                ${sgstRate}%
+              </td>
+
+              <td class="right bold">
+                Rs. ${money(sgstAmount)}
+              </td>
+
+            </tr>
+
+            <tr>
+
+              <td colspan="2"></td>
+
+              <td colspan="2" class="center bold">
+                After Tax
+              </td>
+
+              <td class="right bold">
+                Rs. ${money(afterTax)}
+              </td>
+
+            </tr>
+          `
+          : ''
+      }
+
+      <tr class="grand-total-row">
+
+        <td colspan="2"></td>
+
+        <td colspan="2" class="center bold">
+          TOTAL
+        </td>
+
+        <td class="right bold total-amount">
+          Rs. ${money(grandTotal)}
+        </td>
+
+      </tr>
+
+    </table>
+  `;
+
+  // ==========================================================
+  // SIGNATURE + SEAL
+  // ==========================================================
+
+  const renderSignature = () => `
+    <div class="signature-section">
+
+      <table class="signature-table">
+
+        <tr>
+
+          <td class="signature-left">
+
+            <div class="sign-title">
+              With regards,
+            </div>
+
+            <div class="signer-name">
+              P.SRIDHAR
+            </div>
+
+            <div class="signer-role">
+              ADMIN
+            </div>
+
+            <div class="signer-phone">
+              &#9742; 044 &ndash; 45 000 775
+            </div>
+
+          </td>
+
+          <td class="signature-right">
+
+            <img
+              src="data:image/png;base64,${sealBase64}"
+              class="stamp-img"
+              alt="Official Seal"
+            />
+
+          </td>
+
+        </tr>
+
+      </table>
+
+    </div>
+  `;
+
+  // ==========================================================
+  // CREATE EACH PAGE
+  // ==========================================================
+
+  const pagesHtml = servicePages
+    .map((pageItems, pageIndex) => {
+
+      const isFirstPage = pageIndex === 0;
+      const isLastPage = pageIndex === servicePages.length - 1;
+
+      return `
+        <section class="invoice-page">
+
+          <!-- ================================
+               LETTERHEAD
+               ================================ -->
+
+          ${renderHeader()}
+
+
+          <!-- ================================
+               MAIN CONTENT
+               ================================ -->
+
+          <div class="page-content">
+
+            ${
+              isFirstPage
+                ? `
+                  ${renderBilling()}
+                `
+                : `
+                  <div class="continuation-title">
+                    ${escapeHtml(docTitle)}
+                    &nbsp;&mdash;&nbsp;
+                    CONTINUED
+                  </div>
+                `
+            }
+
+
+            <!-- ==============================
+                 SERVICES TABLE
+                 ============================== -->
+
+            <table class="items-table">
+
+              <colgroup>
+
+                <col class="col-sno" />
+
+                <col class="col-service" />
+
+                <col class="col-measurement" />
+
+                <col class="col-rate" />
+
+                <col class="col-total" />
+
+              </colgroup>
+
+              ${renderTableHeader()}
+
+              <tbody>
+
+                ${renderServiceRows(pageItems)}
+
+              </tbody>
+
+            </table>
+
+
+            ${
+              isLastPage
+                ? `
+                  ${renderHsn()}
+
+                  ${renderTotals()}
+
+                  ${renderSignature()}
+                `
+                : ''
+            }
+
+          </div>
+
+
+          <!-- ================================
+               COMPANY FOOTER
+               ================================ -->
+
+          ${renderFooter()}
+
+        </section>
+      `;
+    })
     .join('');
 
-  const addressLinesHtml = addressLines
-    .map((l) => `<div class="billing-line">${l}</div>`)
-    .join('');
+  // ==========================================================
+  // FINAL HTML
+  // ==========================================================
 
   return `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="utf-8">
-        <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-        <style>
-          @page {
-            size: A4;
-            margin: 15mm;
-          }
-          body {
-            font-family: 'Plus Jakarta Sans', Arial, sans-serif;
-            color: #000000;
-            margin: 0;
-            padding: 10px;
-            background-color: #ffffff;
-            font-size: 11px;
-            line-height: 1.35;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-          }
-          .page-frame {
-            border: 2px solid #000000;
-            padding: 24px 20px 16px 20px;
-            box-sizing: border-box;
-            min-height: 980px;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-          }
-          .top-header {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 20px;
-          }
-          .top-header td {
-            vertical-align: top;
-            border: none;
-            padding: 0;
-          }
-          .header-logo-container {
-            width: 25%;
-          }
-          .header-logo-img {
-            width: 90px;
-            height: 70px;
-            object-fit: contain;
-          }
-          .header-title-container {
-            width: 50%;
-            text-align: center;
-            padding-top: 15px;
-          }
-          .doc-title {
-            font-size: 17px;
-            font-weight: 900;
-            text-decoration: underline;
-            letter-spacing: 0.5px;
-            text-transform: uppercase;
-          }
-          .header-meta-container {
-            width: 25%;
-            text-align: right;
-            font-size: 11.5px;
-            font-weight: bold;
-            line-height: 1.6;
-            padding-top: 10px;
-          }
-          .billing-section {
-            margin-bottom: 16px;
-          }
-          .billing-title {
-            font-size: 11.5px;
-            font-weight: 900;
-            text-decoration: underline;
-            margin-bottom: 4px;
-            text-transform: uppercase;
-          }
-          .billing-name {
-            font-size: 11.5px;
-            font-weight: 900;
-            text-transform: uppercase;
-            margin-bottom: 2px;
-          }
-          .billing-line {
-            font-size: 11px;
-            font-weight: 600;
-            line-height: 1.35;
-          }
-          .site-address-bar {
-            text-align: center;
-            font-size: 12px;
-            font-weight: 900;
-            margin-top: 12px;
-            margin-bottom: 10px;
-            text-transform: uppercase;
-          }
-          .invoice-table {
-            width: 100%;
-            border-collapse: collapse;
-            border: 1.5px solid #000000;
-            margin-bottom: 20px;
-          }
-          .invoice-table th {
-            border: 1.5px solid #000000;
-            padding: 8px 4px;
-            font-size: 11.5px;
-            font-weight: 900;
-            text-align: center;
-            background-color: #ffffff;
-          }
-          .invoice-table td {
-            border: 1.5px solid #000000;
-            padding: 6px 8px;
-            font-size: 11px;
-            vertical-align: middle;
-          }
-          .td-center {
-            text-align: center;
-          }
-          .td-right {
-            text-align: right;
-          }
-          .td-bold {
-            font-weight: 900;
-          }
-          .footer-section {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 10px;
-          }
-          .footer-section td {
-            border: none;
-            padding: 0;
-            vertical-align: middle;
-          }
-          .sign-block {
-            font-size: 11px;
-            line-height: 1.4;
-          }
-          .sign-title {
-            font-size: 11px;
-            margin-bottom: 2px;
-          }
-          .signature-container {
-            margin: 4px 0 3px 0;
-          }
-          .signature-img {
-            width: 140px;
-            height: 48px;
-            object-fit: contain;
-            display: block;
-          }
-          .signer-name {
-            font-size: 12px;
-            font-weight: 900;
-            text-transform: uppercase;
-          }
-          .signer-role {
-            font-size: 11px;
-            font-weight: 900;
-            text-transform: uppercase;
-          }
-          .signer-phone {
-            font-size: 11px;
-            font-weight: 900;
-            margin-top: 2px;
-          }
-          .stamp-container {
-            text-align: right;
-            padding-right: 15px;
-            vertical-align: middle;
-          }
-          .stamp-img {
-            width: 120px;
-            height: 120px;
-            object-fit: contain;
-            display: inline-block;
-            transform: rotate(-6deg);
-          }
-          .divider-dotted {
-            border-top: 1px dotted #000000;
-            margin: 16px 0 10px 0;
-          }
-          .company-footer-table {
-            width: 100%;
-            border-collapse: collapse;
-          }
-          .company-footer-table td {
-            border: none;
-            padding: 0;
-            vertical-align: middle;
-          }
-          .company-footer-text {
-            font-size: 9.5px;
-            line-height: 1.4;
-            color: #000000;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="page-frame">
-          <div>
-            <!-- Top Header -->
-            <table class="top-header">
-              <tr>
-                <td class="header-logo-container">
-                  <img src="data:image/png;base64,${logoBase64}" class="header-logo-img" />
-                </td>
-                <td class="header-title-container">
-                  <div class="doc-title">${docTitle}</div>
-                </td>
-                <td class="header-meta-container">
-                  <div>INV : ${invoiceNo}</div>
-                  <div>DATE : ${currentDate}</div>
-                </td>
-              </tr>
-            </table>
+<!DOCTYPE html>
 
-            <!-- Billing Address -->
-            <div class="billing-section">
-              <div class="billing-title">BILLING ADDRESS</div>
-              <div class="billing-name">${clientName}</div>
-              ${addressLinesHtml}
-              ${gstinVal ? `<div class="billing-line"><strong>GST-${gstinVal}</strong></div>` : ''}
-            </div>
+<html>
 
-            <!-- Site Address Bar -->
-            <div class="site-address-bar">
-              Site ADDRESS: ${siteAddress}
-            </div>
+<head>
 
-            <!-- Invoice Table Grid -->
-            <table class="invoice-table">
-              <thead>
-                <tr>
-                  <th style="width: 8%;">S. No</th>
-                  <th style="width: 42%;">Service</th>
-                  <th style="width: 15%;">Measurment</th>
-                  <th style="width: 17%;">Cost / sft (Rs)</th>
-                  <th style="width: 18%;">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${serviceRowsHtml}
-                
-                <!-- Empty Row for visual spacing -->
-                <tr>
-                  <td class="td-center" style="height: 24px;"></td>
-                  <td></td>
-                  <td></td>
-                  <td></td>
-                  <td></td>
-                </tr>
+<meta charset="utf-8" />
 
-                <!-- HSN Code Row -->
-                <tr>
-                  <td></td>
-                  <td class="td-center td-bold" style="padding: 7px;">HSN CODE : 995453</td>
-                  <td></td>
-                  <td></td>
-                  <td></td>
-                </tr>
+<meta
+  name="viewport"
+  content="width=device-width, initial-scale=1"
+/>
 
-                <!-- Sub Total Row -->
-                <tr>
-                  <td colspan="2"></td>
-                  <td colspan="2" class="td-center td-bold">Sub Total</td>
-                  <td class="td-right td-bold">Rs.&nbsp;&nbsp;&nbsp;&nbsp;${subTotalFormatted}</td>
-                </tr>
+<style>
 
-                ${
-                  isGst
-                    ? `
-                  <!-- CGST Row -->
-                  <tr>
-                    <td colspan="2" rowspan="4" style="border: 1.5px solid #000000;"></td>
-                    <td class="td-center td-bold">CGST</td>
-                    <td class="td-center td-bold">${cgstRate}%</td>
-                    <td class="td-right td-bold">Rs.&nbsp;&nbsp;&nbsp;&nbsp;${cgstFormatted}</td>
-                  </tr>
-                  <!-- SGST Row -->
-                  <tr>
-                    <td class="td-center td-bold">SGST</td>
-                    <td class="td-center td-bold">${sgstRate}%</td>
-                    <td class="td-right td-bold">Rs.&nbsp;&nbsp;&nbsp;&nbsp;${sgstFormatted}</td>
-                  </tr>
-                  <!-- After Tax Row -->
-                  <tr>
-                    <td colspan="2" class="td-center td-bold">After Tax</td>
-                    <td class="td-right td-bold">Rs.&nbsp;&nbsp;&nbsp;&nbsp;${afterTaxFormatted}</td>
-                  </tr>
-                  <!-- Total Row -->
-                  <tr>
-                    <td colspan="2" class="td-center td-bold">Total</td>
-                    <td class="td-right td-bold">Rs.&nbsp;&nbsp;&nbsp;&nbsp;${grandTotalFormatted}</td>
-                  </tr>
-                `
-                    : `
-                  <!-- Total Row Without GST -->
-                  <tr>
-                    <td colspan="2" style="border: 1.5px solid #000000;"></td>
-                    <td colspan="2" class="td-center td-bold">Total</td>
-                    <td class="td-right td-bold">Rs.&nbsp;&nbsp;&nbsp;&nbsp;${grandTotalFormatted}</td>
-                  </tr>
-                `
-                }
-              </tbody>
-            </table>
-          </div>
+/* ============================================================
+   A4 PAGE
+   ============================================================ */
 
-          <!-- Bottom Signatures, Stamp & Footer -->
-          <div>
-            <table class="footer-section">
-              <tr>
-                <td style="width: 50%; vertical-align: top;">
-                  <div class="sign-block">
-                    <div class="sign-title">With regards,</div>
-                    <div class="signer-name" style="margin-top: 6px;">P.SRIDHAR</div>
-                    <div class="signer-role">ADMIN</div>
-                    <div class="signer-phone">&#9742; 044 &ndash; 45 000 775</div>
-                  </div>
-                </td>
-                <td style="width: 50%;" class="stamp-container">
-                  <img src="data:image/png;base64,${sealBase64}" class="stamp-img" alt="Official Seal" />
-                </td>
-              </tr>
-            </table>
+@page {
+  size: A4;
+  margin: 0;
+}
 
-            <!-- Dotted Divider -->
-            <div class="divider-dotted"></div>
+html,
+body {
 
-            <!-- Company Details Footer -->
-            <table class="company-footer-table">
-              <tr>
-                <td style="width: 82%;">
-                  <div class="company-footer-text">
-                    <strong>Dr. Terrace water Proofing (ISO - 9001: 2008 Certified)</strong><br>
-                    Parsn Commercial Complex, C-13, B-13, 2nd floor, Kodambakkam High Road, Nungambakkam,<br>
-                    Chennai- 600006, www.drterrace.com / www.drterracewaterproofing.com<br>
-                    <strong>GST NO 33AANFD9271D1ZE</strong>
-                  </div>
-                </td>
-                <td style="width: 18%; text-align: right;">
-                  <img src="data:image/png;base64,${logoBase64}" style="width: 65px; height: 55px; object-fit: contain;" />
-                </td>
-              </tr>
-            </table>
-          </div>
-        </div>
-      </body>
-    </html>
-  `;
+  margin: 0;
+
+  padding: 0;
+
+  background: #ffffff;
+
+  color: #000000;
+
+  font-family:
+    Helvetica,
+    Arial,
+    sans-serif;
+
+  -webkit-print-color-adjust: exact;
+
+  print-color-adjust: exact;
+}
+
+
+/* ============================================================
+   EACH PHYSICAL PAGE
+   ============================================================ */
+
+.invoice-page {
+  width: 210mm;
+  height: 297mm;
+
+  box-sizing: border-box;
+
+  padding:
+    13mm
+    13mm
+    18mm
+    13mm;
+
+  position: relative;
+
+  background: #ffffff;
+
+  /* PAGE BORDER */
+  border: 1.5px solid #000000;
+
+  page-break-after: always;
+  break-after: page;
+
+  overflow: hidden;
+}
+
+
+/*
+ * Do NOT create another page after the final page.
+ */
+
+.invoice-page:last-child {
+
+  page-break-after: auto;
+
+  break-after: auto;
+}
+
+
+/* ============================================================
+   LETTERHEAD
+   ============================================================ */
+
+.letterhead {
+
+  width: 100%;
+
+  height: 25mm;
+
+  box-sizing: border-box;
+
+  border-bottom: 1.5px solid #000000;
+
+  margin-bottom: 7mm;
+}
+
+
+.header-table {
+
+  width: 100%;
+
+  border-collapse: collapse;
+
+  table-layout: fixed;
+}
+
+
+.header-table td {
+
+  border: none;
+
+  padding: 0;
+
+  vertical-align: middle;
+}
+
+
+.header-logo-cell {
+
+  width: 28%;
+
+  text-align: left;
+}
+
+
+.header-logo {
+
+  width: 82px;
+
+  height: 62px;
+
+  object-fit: contain;
+}
+
+
+.header-title-cell {
+
+  width: 44%;
+
+  text-align: center;
+}
+
+
+.document-title {
+
+  font-size: 17px;
+
+  font-weight: 900;
+
+  text-decoration: underline;
+
+  text-transform: uppercase;
+
+  letter-spacing: 0.5px;
+}
+
+
+.header-meta-cell {
+
+  width: 28%;
+
+  text-align: right;
+
+  font-size: 10.5px;
+
+  font-weight: 900;
+
+  line-height: 1.7;
+}
+
+
+/* ============================================================
+   PAGE CONTENT
+   ============================================================ */
+
+.page-content {
+
+  width: 100%;
+
+  box-sizing: border-box;
+}
+
+
+/* ============================================================
+   BILLING ADDRESS
+   ============================================================ */
+
+.billing-section {
+
+  margin-bottom: 8mm;
+}
+
+
+.billing-title {
+
+  font-size: 11px;
+
+  font-weight: 900;
+
+  text-decoration: underline;
+
+  text-transform: uppercase;
+
+  margin-bottom: 3px;
+}
+
+
+.billing-name {
+
+  font-size: 11px;
+
+  font-weight: 900;
+
+  text-transform: uppercase;
+
+  margin-bottom: 2px;
+}
+
+
+.billing-line {
+
+  font-size: 10.5px;
+
+  font-weight: 600;
+
+  line-height: 1.35;
+}
+
+
+.gst-line {
+
+  margin-top: 3px;
+
+  font-weight: 900;
+}
+
+
+/* ============================================================
+   SITE ADDRESS
+   ============================================================ */
+
+.site-address {
+
+  text-align: center;
+
+  font-size: 11px;
+
+  font-weight: 900;
+
+  text-transform: uppercase;
+
+  margin-bottom: 5mm;
+
+  line-height: 1.4;
+}
+
+
+/* ============================================================
+   CONTINUATION PAGE
+   ============================================================ */
+
+.continuation-title {
+
+  text-align: center;
+
+  font-size: 10px;
+
+  font-weight: 900;
+
+  text-transform: uppercase;
+
+  margin-bottom: 5mm;
+}
+
+
+/* ============================================================
+   ITEMS TABLE
+   ============================================================ */
+
+.items-table {
+
+  width: 100%;
+
+  border-collapse: collapse;
+
+  table-layout: fixed;
+
+  margin: 0;
+}
+
+
+.items-table th {
+
+  border: 1.4px solid #000000;
+
+  padding: 7px 4px;
+
+  font-size: 10px;
+
+  font-weight: 900;
+
+  text-align: center;
+
+  vertical-align: middle;
+
+  background: #ffffff;
+}
+
+
+.items-table td {
+
+  border: 1.4px solid #000000;
+
+  padding: 6px 7px;
+
+  font-size: 10px;
+
+  vertical-align: middle;
+
+  line-height: 1.3;
+}
+
+
+.items-table tr {
+
+  page-break-inside: avoid;
+
+  break-inside: avoid;
+}
+
+
+/* ============================================================
+   COLUMNS
+   ============================================================ */
+
+.col-sno {
+
+  width: 8%;
+}
+
+
+.col-service {
+
+  width: 42%;
+}
+
+
+.col-measurement {
+
+  width: 15%;
+}
+
+
+.col-rate {
+
+  width: 17%;
+}
+
+
+.col-total {
+
+  width: 18%;
+}
+
+
+/* ============================================================
+   TEXT
+   ============================================================ */
+
+.center {
+
+  text-align: center;
+}
+
+
+.right {
+
+  text-align: right;
+}
+
+
+.bold {
+
+  font-weight: 900;
+}
+
+
+.service-name {
+
+  font-weight: 900;
+
+  word-break: normal;
+
+  overflow-wrap: break-word;
+}
+
+
+/* ============================================================
+   HSN
+   ============================================================ */
+
+.hsn-row {
+
+  page-break-inside: avoid;
+
+  break-inside: avoid;
+}
+
+
+.hsn-row td {
+
+  font-weight: 900;
+}
+
+
+/* ============================================================
+   TOTALS
+   ============================================================ */
+
+.totals-table {
+
+  width: 100%;
+
+  border-collapse: collapse;
+
+  table-layout: fixed;
+}
+
+
+.totals-table td {
+
+  border: 1.4px solid #000000;
+
+  padding: 6px 7px;
+
+  font-size: 10px;
+
+  vertical-align: middle;
+}
+
+
+.grand-total-row td {
+
+  font-size: 11px;
+
+  font-weight: 900;
+}
+
+
+.total-amount {
+
+  font-size: 12px !important;
+
+  font-weight: 900;
+}
+
+
+/* ============================================================
+   SIGNATURE
+   ============================================================ */
+
+.signature-section {
+
+  margin-top: 9mm;
+
+  page-break-inside: avoid;
+
+  break-inside: avoid;
+}
+
+
+.signature-table {
+
+  width: 100%;
+
+  border-collapse: collapse;
+}
+
+
+.signature-table td {
+
+  border: none;
+
+  padding: 0;
+
+  vertical-align: top;
+}
+
+
+.signature-left {
+
+  width: 50%;
+}
+
+
+.signature-right {
+
+  width: 50%;
+
+  text-align: right;
+}
+
+
+.sign-title {
+
+  font-size: 10px;
+
+  margin-bottom: 5px;
+}
+
+
+.signer-name {
+
+  font-size: 11px;
+
+  font-weight: 900;
+
+  text-transform: uppercase;
+}
+
+
+.signer-role {
+
+  font-size: 10px;
+
+  font-weight: 900;
+
+  text-transform: uppercase;
+
+  margin-top: 2px;
+}
+
+
+.signer-phone {
+
+  font-size: 10px;
+
+  font-weight: 900;
+
+  margin-top: 3px;
+}
+
+
+.stamp-img {
+
+  width: 105px;
+
+  height: 105px;
+
+  object-fit: contain;
+
+  display: inline-block;
+
+  transform: rotate(-6deg);
+}
+
+
+/* ============================================================
+   COMPANY FOOTER
+   ============================================================ */
+
+.company-footer {
+
+  position: absolute;
+
+  left: 13mm;
+
+  right: 13mm;
+
+  bottom: 7mm;
+
+  height: 18mm;
+
+  box-sizing: border-box;
+}
+
+
+.footer-line {
+
+  border-top: 1px dotted #000000;
+
+  margin-bottom: 3mm;
+}
+
+
+.footer-table {
+
+  width: 100%;
+
+  border-collapse: collapse;
+
+  table-layout: fixed;
+}
+
+
+.footer-table td {
+
+  border: none;
+
+  padding: 0;
+
+  vertical-align: middle;
+}
+
+
+.footer-company {
+
+  width: 82%;
+
+  font-size: 8px;
+
+  line-height: 1.35;
+}
+
+
+.footer-logo-cell {
+
+  width: 18%;
+
+  text-align: right;
+}
+
+
+.footer-logo {
+
+  width: 55px;
+
+  height: 45px;
+
+  object-fit: contain;
+}
+
+</style>
+
+</head>
+
+
+<body>
+
+${pagesHtml}
+
+</body>
+
+</html>
+`;
 };
+
 
 export default function ReceiptScreen() {
   const params = useLocalSearchParams();
@@ -832,20 +1701,50 @@ export default function ReceiptScreen() {
       .then((res) => {
         if (res?.success && res.data) {
           setPayView(res.data);
+        } else {
+          paymentRepository.getPaymentSummary(qId).then((sRes) => {
+            if (sRes?.success && sRes.data) {
+              setPayView(sRes.data);
+            }
+          }).catch(() => { });
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        paymentRepository.getPaymentSummary(qId).then((sRes) => {
+          if (sRes?.success && sRes.data) {
+            setPayView(sRes.data);
+          }
+        }).catch(() => { });
+      });
 
-    // If full service receipt, also fetch final receipt data
+    // If full service receipt, retrieve or generate official final receipt
     if (params.isFullServiceReceipt === 'true') {
       paymentRepository
-        .generateFinalReceipt(qId, params.gstNumber, params.hasGst === 'true')
+        .getFinalReceipt(qId, params.gstNumber)
         .then((res) => {
           if (res?.success && res.data) {
             setFinalReceiptData(res.data);
+          } else {
+            paymentRepository
+              .generateFinalReceipt(qId, params.gstNumber, params.hasGst === 'true')
+              .then((genRes) => {
+                if (genRes?.success && genRes.data) {
+                  setFinalReceiptData(genRes.data);
+                }
+              })
+              .catch(() => {});
           }
         })
-        .catch(() => {});
+        .catch(() => {
+          paymentRepository
+            .generateFinalReceipt(qId, params.gstNumber, params.hasGst === 'true')
+            .then((genRes) => {
+              if (genRes?.success && genRes.data) {
+                setFinalReceiptData(genRes.data);
+              }
+            })
+            .catch(() => {});
+        });
     }
   }, [
     params.isFullServiceReceipt,
@@ -976,7 +1875,9 @@ export default function ReceiptScreen() {
   };
 
   const handleShareRef = React.useRef(handleShare);
-  handleShareRef.current = handleShare;
+  React.useEffect(() => {
+    handleShareRef.current = handleShare;
+  });
 
   React.useEffect(() => {
     if (params.autoShare === 'true' && app) {
@@ -1087,15 +1988,17 @@ export default function ReceiptScreen() {
             </View>
 
             {/* HSN CODE Row */}
-            <View style={styles.gridDataRow}>
-              <View style={[styles.gridEmptyCell, { width: '10%' }]} />
-              <Text style={[styles.gridTdCenter, styles.gridTdBold, { width: '40%' }]}>
-                HSN CODE : 995453
-              </Text>
-              <View style={[styles.gridEmptyCell, { width: '16%' }]} />
-              <View style={[styles.gridEmptyCell, { width: '17%' }]} />
-              <View style={[styles.gridEmptyCell, { width: '17%', borderRightWidth: 0 }]} />
-            </View>
+            {isGst && (
+              <View style={styles.gridDataRow}>
+                <View style={[styles.gridEmptyCell, { width: '10%' }]} />
+                <Text style={[styles.gridTdCenter, styles.gridTdBold, { width: '40%' }]}>
+                  HSN CODE : 995453
+                </Text>
+                <View style={[styles.gridEmptyCell, { width: '16%' }]} />
+                <View style={[styles.gridEmptyCell, { width: '17%' }]} />
+                <View style={[styles.gridEmptyCell, { width: '17%', borderRightWidth: 0 }]} />
+              </View>
+            )}
 
             {/* Sub Total Row */}
             <View style={styles.gridDataRow}>

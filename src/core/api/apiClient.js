@@ -119,6 +119,17 @@ apiClient.interceptors.request.use(
             reject(error);
           };
 
+          // Forward upload progress to Axios onUploadProgress callback
+          if (typeof cfg.onUploadProgress === 'function') {
+            xhr.upload.onprogress = (event) => {
+              cfg.onUploadProgress({
+                loaded: event.loaded,
+                total: event.total || 0,
+                lengthComputable: event.lengthComputable,
+              });
+            };
+          }
+
           xhr.send(cfg.data);
         });
       };
@@ -383,11 +394,11 @@ export const ApiV2 = {
     },
     addAdditionalService: (quotationId, data) => {
       if (typeof FormData !== 'undefined' && data instanceof FormData) {
-        return apiClient.post(`/quotations/${quotationId}/additional-services`, data, {
+        return apiClient.post(`/quotation-payments/${quotationId}/additional-services`, data, {
           headers: { 'Content-Type': 'multipart/form-data' },
         });
       }
-      return apiClient.post(`/quotations/${quotationId}/additional-services`, data);
+      return apiClient.post(`/quotation-payments/${quotationId}/additional-services`, data);
     },
     recordAdditionalServicePayment: (quotationId, serviceId, data) => {
       if (typeof FormData !== 'undefined' && data instanceof FormData) {
@@ -423,6 +434,8 @@ export const ApiV2 = {
       }
       return apiClient.post(`/quotations/${quotationId}/gst-payment`, data);
     },
+    getFinalReceipt: (quotationId, params) =>
+      apiClient.get(`/quotations/${quotationId}/final-receipt`, { params }),
     generateFinalReceipt: (quotationId, data) =>
       apiClient.post(`/quotations/${quotationId}/final-receipt`, data || {}),
     toggleReceiptLock: (quotationId, data) =>

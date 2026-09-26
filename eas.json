@@ -12,14 +12,14 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk",
-        "gradleCommand": ":app:assembleRelease -PenableSeparateBuildPerCPUArchitecture=true"
+        "gradleCommand": ":app:assembleRelease"
       }
     },
     "production": {
       "autoIncrement": true,
       "android": {
         "buildType": "apk",
-        "gradleCommand": ":app:assembleRelease -PenableSeparateBuildPerCPUArchitecture=true"
+        "gradleCommand": ":app:assembleRelease"
       }
     }
   },

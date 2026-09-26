@@ -202,7 +202,8 @@ export default function EditQuotationScreen() {
 
   // Tax & Discount States
   const [gstAdded, setGstAdded] = useState(false);
-  const [gstPercent, setGstPercent] = useState('18');
+  const [gstPercent, setGstPercent] = useState('');
+  const [gstAmount, setGstAmount] = useState(0);
   const [discountPercent, setDiscountPercent] = useState('');
   const [discountAmount, setDiscountAmount] = useState(0);
   const [subtotal, setSubtotal] = useState(0);
@@ -416,10 +417,38 @@ export default function EditQuotationScreen() {
 
     setIsLoading(true);
     try {
-      const res = await quotationService.getQuotationEditView(targetQuoteId);
-      if (res && res.success && res.quotation) {
-        setExistingQuotation(res.quotation);
-        const q = res.quotation;
+      let res = await quotationService.getQuotationEditView(targetQuoteId);
+      let q = res?.quotation;
+      if (!q) {
+        const fallbackRes = await quotationService.getQuotationById(targetQuoteId);
+        if (fallbackRes?.success && fallbackRes?.quotation) {
+          q = fallbackRes.quotation;
+          if (!res) res = {};
+          res.quotation = q;
+        } else {
+          const pdfRes = await quotationService.getQuotationPdfView(targetQuoteId);
+          if (pdfRes?.success && pdfRes?.quotation) {
+            q = pdfRes.quotation;
+            if (!res) res = {};
+            res.quotation = q;
+          }
+        }
+      }
+
+      if (q) {
+        setExistingQuotation(q);
+
+        if (!res?.packages || res.packages.length === 0 || !res?.properties || res.properties.length === 0) {
+          const pvRes = await quotationService.getPageView();
+          if (pvRes?.success) {
+            if (!res.properties || res.properties.length === 0) {
+              res.properties = pvRes.properties || [];
+            }
+            if (!res.packages || res.packages.length === 0) {
+              res.packages = pvRes.packages || [];
+            }
+          }
+        }
 
         if (Array.isArray(res.properties) && res.properties.length > 0) {
           setPropertiesList(res.properties);
@@ -742,33 +771,52 @@ export default function EditQuotationScreen() {
         }
 
         // GST
-        const gstAddedRaw = q.gstAdded;
-        const isGstRaw = q.isGst;
-        const gstAmountRaw = Number(q.gstAmount || 0);
-        const gstPercentageRaw = Number(q.gstPercentage || 0);
+        const selectedType = q.pricing?.selectedType || '';
+        const withGst = q.pricing?.withGst || null;
+
+        const resolveRate = (...candidates) => {
+          for (const c of candidates) {
+            if (c != null) {
+              const num = typeof c === 'number' ? c : parseFloat(String(c).replace('%', ''));
+              if (!isNaN(num) && num > 0) return String(num);
+            }
+          }
+          return '';
+        };
 
         let isExistingGst = false;
-        if (gstAddedRaw === true || isGstRaw === true) {
+        if (selectedType === 'WITH_GST') {
           isExistingGst = true;
-        } else if (gstAddedRaw === false || isGstRaw === false) {
+        } else if (selectedType === 'WITHOUT_GST') {
           isExistingGst = false;
-        } else if (gstPercentageRaw > 0 || gstAmountRaw > 0) {
-          isExistingGst = true;
-        } else if (typeof q.gst === 'string' && q.gst !== '0%' && q.gst !== '0' && q.gst !== '') {
-          isExistingGst = true;
+        } else {
+          isExistingGst = Boolean(
+            q.gstAdded === true ||
+            q.isGst === true ||
+            Number(q.gstAmount || 0) > 0 ||
+            Number(q.gstPercentage || 0) > 0 ||
+            (withGst?.gst?.amount != null && Number(withGst.gst.amount) > 0) ||
+            (typeof q.gst === 'string' && q.gst !== '0%' && q.gst !== '0' && q.gst.trim() !== '')
+          );
         }
 
-        const rawGstRate = q.gstRate ?? q.gstPercentage;
-        const parsedGstRate = typeof rawGstRate === 'number'
-          ? rawGstRate
-          : (typeof rawGstRate === 'string' ? parseFloat(rawGstRate.replace('%', '')) : NaN);
-        const gstVal = (!isNaN(parsedGstRate) && parsedGstRate > 0)
-          ? String(parsedGstRate)
-          : (gstPercentageRaw > 0 ? String(gstPercentageRaw)
-            : (typeof q.gst === 'string' ? String(q.gst).replace('%', '') : '18'));
+        let gstVal = resolveRate(
+          withGst?.gst?.percentage,
+          withGst?.gst?.rate,
+          withGst?.cgst?.percentage != null ? withGst.cgst.percentage * 2 : null,
+          withGst?.sgst?.percentage != null ? withGst.sgst.percentage * 2 : null,
+          q.gstPercentage,
+          q.gstRate,
+          q.gstPercent,
+          q.gst
+        );
+
+        if (!gstVal) {
+          gstVal = '18';
+        }
 
         setGstAdded(isExistingGst);
-        setGstPercent(isExistingGst && gstVal && gstVal !== '0' ? gstVal : '18');
+        setGstPercent(gstVal);
       } else {
         const pvRes = await quotationService.getPageView();
         if (pvRes && pvRes.success) {
@@ -911,6 +959,7 @@ export default function EditQuotationScreen() {
     const gstMultiplier = parseFloat(gstPercent) || 0;
     const taxFactor = gstAdded ? gstMultiplier / 100 : 0;
     const tax = Math.round(sub * taxFactor);
+    setGstAmount(tax);
     const baseWithGst = sub + (gstAdded ? tax : 0);
 
     const discPct = Math.max(0, Math.min(100, parseFloat(discountPercent) || 0));
@@ -1504,7 +1553,13 @@ export default function EditQuotationScreen() {
             <Text style={[styles.gstLabelText, isDark && styles.textDark]}>Include GST</Text>
             <TouchableOpacity
               style={[styles.gstBtn, gstAdded ? styles.gstBtnActive : styles.gstBtnInactive]}
-              onPress={() => setGstAdded(!gstAdded)}
+              onPress={() => {
+                const next = !gstAdded;
+                setGstAdded(next);
+                if (next && (!gstPercent || gstPercent === '0')) {
+                  setGstPercent('18');
+                }
+              }}
               activeOpacity={0.8}
             >
               <Text style={styles.gstBtnText}>
@@ -1515,7 +1570,14 @@ export default function EditQuotationScreen() {
 
           {gstAdded && (
             <View style={styles.inputGroup}>
-              <Text style={[styles.inputLabel, isDark && styles.labelDark]}>GST Percentage (%)</Text>
+              <View style={styles.labelRowBetween}>
+                <Text style={[styles.inputLabel, isDark && styles.labelDark]}>GST Percentage (%)</Text>
+                {parseFloat(gstPercent) > 0 && (
+                  <Text style={[styles.discountTagText, { color: '#059669', backgroundColor: isDark ? '#064E3B' : '#ECFDF5' }]}>
+                    + Rs.{Math.round(gstAmount).toLocaleString()} ({gstPercent}%)
+                  </Text>
+                )}
+              </View>
               <View style={[styles.inputFieldWrap, isDark && styles.inputFieldWrapDark]}>
                 <TextInput
                   style={[styles.textInput, isDark && styles.textDark]}

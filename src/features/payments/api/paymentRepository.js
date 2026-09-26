@@ -255,6 +255,8 @@ export const paymentRepository = {
    * Fetch the unified Payment State (pay-view) for a confirmed quotation.
    * Returns: totalPrice, totalPaid, balanceAmount, services[], additionalPayment[],
    *          accounts[], currentActiveServiceId, canMakePayment, withGst, etc.
+   * NOTE: Kept for AdditionalPaymentScreen, ReceiptScreen and PaymentVerificationScreen
+   * which still use the blockchain ledger model. New screens should use getPaymentSummary().
    */
   getPayView: async (quotationId) => {
     const response = await apiClient.get(API_ENDPOINTS.QUOTATION_PAY_VIEW(quotationId));
@@ -264,6 +266,39 @@ export const paymentRepository = {
       success: Boolean(data?.id || data?.totalPrice !== undefined),
       data: data || null,
     };
+  },
+
+  /**
+   * Fetch the new quotation-payments summary.
+   * GET /api/v2/quotation-payments/:id
+   *
+   * Returns: { quotationId, clientName, gstDecision, customerGstNumber,
+   *   pricing { subTotal, withoutGstTotal, withGstTotal },
+   *   progress { totalPaid, withGstBalance, withoutGstBalance, paymentStatus },
+   *   history [], hasUnverifiedPayments, canMakePayment }
+   */
+  getPaymentSummary: async (quotationId) => {
+    if (!quotationId) {
+      return { success: false, data: null, message: 'Quotation ID is required' };
+    }
+    try {
+      const endpoint = API_ENDPOINTS.QUOTATION_PAYMENT_SUMMARY(String(quotationId));
+      const response = await apiClient.get(endpoint);
+      const resData = response?.data;
+      const data = resData?.data || resData;
+      return {
+        success: Boolean(resData?.success !== false && data),
+        data: data || null,
+        message: resData?.message || 'Payment summary retrieved successfully',
+      };
+    } catch (err) {
+      return {
+        success: false,
+        data: null,
+        message: extractApiErrorMessage(err, 'Failed to fetch payment summary'),
+        error: err,
+      };
+    }
   },
 
   /**
@@ -294,16 +329,16 @@ export const paymentRepository = {
   },
 
   /**
+   * POST /api/v2/quotation-payments/:id/additional-services
+   *
    * Create an on-site variation work order (additional service).
-   * Supports optional inline payment fields (amount, paymentMethod, voucher/accountId/upiId, notes, proofImage)
-   * which are recorded atomically alongside service creation (API v2 Section 3).
-   * If inline payment recording fails, the service is rolled back and not saved (Rule 17).
+   * Automatically recalculates totals and payment summary.
    */
-  createAdditionalService: async (quotationId, servicePayload) => {
+  addAdditionalService: async (quotationId, servicePayload) => {
     try {
       const dataToSend = preparePaymentPayload(servicePayload);
       const response = await apiClient.post(
-        API_ENDPOINTS.QUOTATION_ADDITIONAL_SERVICES(quotationId),
+        API_ENDPOINTS.QUOTATION_PAYMENT_ADDITIONAL_SERVICES(quotationId),
         dataToSend
       );
       const resData = response?.data;
@@ -320,6 +355,13 @@ export const paymentRepository = {
         error: err,
       };
     }
+  },
+
+  /**
+   * Alias for addAdditionalService for backward compatibility.
+   */
+  createAdditionalService: async (quotationId, servicePayload) => {
+    return paymentRepository.addAdditionalService(quotationId, servicePayload);
   },
 
   /**
@@ -636,6 +678,8 @@ export const paymentRepository = {
     if (quotationId && API_ENDPOINTS.QUOTATION_PAYMENT_VERIFY_VIEW) {
       endpoints.push(API_ENDPOINTS.QUOTATION_PAYMENT_VERIFY_VIEW(quotationId, targetPayId));
     }
+    endpoints.push(`/quotation-payments/verify-view/${targetPayId}`);
+    endpoints.push(`/quotation-payments/payments/${targetPayId}/verify-view`);
     if (API_ENDPOINTS.PAYMENT_VERIFY_VIEW) {
       endpoints.push(API_ENDPOINTS.PAYMENT_VERIFY_VIEW(targetPayId));
     }
@@ -791,10 +835,50 @@ export const paymentRepository = {
   },
 
   /**
-   * Generate or fetch the official Final Receipt with customer GST number (API v2 Section 11).
-   * POST or GET /api/v2/quotations/:id/final-receipt
-   * Supports customerGstNumber via POST JSON body or GET query param.
-   * Auto-recovers if GST decision was not previously confirmed by executing settlement first.
+   * Get official Final Receipt (API v2 Section 11 / canonical GET).
+   * GET /api/v2/quotations/:id/final-receipt
+   * Supports customerGstNumber as optional query param.
+   */
+  getFinalReceipt: async (quotationId, customerGstNumber = null) => {
+    try {
+      const cleanQuoteId = String(quotationId).replace(/\D/g, '') || quotationId;
+      const gstVal = customerGstNumber ? String(customerGstNumber).trim() : null;
+      const endpoint = API_ENDPOINTS.QUOTATION_FINAL_RECEIPT
+        ? API_ENDPOINTS.QUOTATION_FINAL_RECEIPT(cleanQuoteId)
+        : `/quotations/${cleanQuoteId}/final-receipt`;
+
+      const response = await apiClient.get(endpoint, {
+        params: gstVal ? { customerGstNumber: gstVal } : {},
+      });
+      const resData = response?.data;
+      if (resData?.success !== false && (resData?.data || resData?.receiptNumber)) {
+        return {
+          success: true,
+          data: resData?.data || resData,
+          message: resData?.message || 'Final receipt retrieved successfully',
+        };
+      }
+      return {
+        success: false,
+        data: null,
+        message: 'Final receipt not found',
+      };
+    } catch (err) {
+      return {
+        success: false,
+        data: null,
+        message: extractApiErrorMessage(err, 'Failed to fetch final receipt'),
+        error: err,
+      };
+    }
+  },
+
+  /**
+   * Generate official Final Receipt (API v2 Section 11 / canonical POST).
+   * POST /api/v2/quotations/:id/final-receipt
+   * Payload: { customerGstNumber?: string }
+   * Respects backend gatekeeper conditions:
+   * quotation confirmed, all services completed, GST confirmed, balance 0, unverified 0.
    */
   generateFinalReceipt: async (quotationId, customerGstNumber = null, withGst = null) => {
     try {
@@ -821,7 +905,7 @@ export const paymentRepository = {
           if (errMsg.toLowerCase().includes('gst decision') || errMsg.toLowerCase().includes('not been confirmed')) {
             throw _postErr;
           }
-          // Fallback to GET with query param as supported by API v2
+          // If already generated or GET fallback supported
           const getRes = await apiClient.get(endpoint, {
             params: gstVal ? { customerGstNumber: gstVal } : {},
           });
@@ -833,6 +917,7 @@ export const paymentRepository = {
               message: resData?.message || 'Final receipt retrieved successfully',
             };
           }
+          throw _postErr;
         }
         return null;
       };

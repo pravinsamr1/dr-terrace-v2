@@ -37,7 +37,7 @@ export const quotationRepository = {
       console.log(`[getQuotationEditView] Fetching ${API_ENDPOINTS.QUOTATIONS}/${cleanId}/edit-view`);
       const response = await apiClient.get(`${API_ENDPOINTS.QUOTATIONS}/${cleanId}/edit-view`);
       const data = response.data;
-      const quotation = data?.quotation || data?.data?.quotation || (data?.id ? data : null);
+      const quotation = data?.data?.quotation || data?.quotation || (data?.data?.id ? data.data : (data?.data || data));
       const properties = Array.isArray(data?.properties)
         ? data.properties
         : Array.isArray(data?.data?.properties)
@@ -382,6 +382,73 @@ export const quotationRepository = {
   /** Alias for getByClient */
   getQuotationsByClient: async (appointmentId) => {
     return quotationRepository.getByClient(appointmentId);
+  },
+
+  /**
+   * GET /api/v2/quotations/:id/services/options
+   * (alias: GET /api/v2/quotations/:id/additional-service-view)
+   */
+  getAdditionalServiceOptions: async (quotationId) => {
+    if (!quotationId) {
+      return { success: false, data: null, services: [], message: 'Quotation ID is required' };
+    }
+    try {
+      const cleanQuoteId = String(quotationId).replace(/\D/g, '') || quotationId;
+      const endpoint = API_ENDPOINTS.QUOTATION_SERVICES_OPTIONS
+        ? API_ENDPOINTS.QUOTATION_SERVICES_OPTIONS(String(cleanQuoteId))
+        : `/quotations/${cleanQuoteId}/services/options`;
+      const response = await apiClient.get(endpoint);
+      const resData = response?.data;
+      const data = resData?.data || resData;
+      return {
+        success: Boolean(resData?.success !== false && data),
+        data: data || null,
+        services: Array.isArray(data?.services) ? data.services : [],
+        tier: data?.tier || null,
+        allowedTiers: Array.isArray(data?.allowedTiers) ? data.allowedTiers : [],
+        existingServicesCount: data?.existingServicesCount != null ? data.existingServicesCount : 0,
+        message: resData?.message || 'Additional service options retrieved successfully',
+      };
+    } catch (err) {
+      return {
+        success: false,
+        data: null,
+        services: [],
+        message: err.response?.data?.message || err.message || 'Failed to fetch service options',
+        error: err,
+      };
+    }
+  },
+
+  /**
+   * POST /api/v2/quotations/:id/services
+   */
+  addServiceFromExisting: async (quotationId, payload) => {
+    if (!quotationId) {
+      return { success: false, message: 'Quotation ID is required' };
+    }
+    try {
+      const cleanQuoteId = String(quotationId).replace(/\D/g, '') || quotationId;
+      const endpoint = API_ENDPOINTS.QUOTATION_SERVICES_ADD(String(cleanQuoteId));
+      const response = await apiClient.post(endpoint, payload);
+      const resData = response?.data;
+      const serviceData = resData?.data?.service || resData?.service;
+      const isUpdated = Boolean(serviceData?.isUpdated ?? resData?.isUpdated);
+      return {
+        success: resData?.success !== false,
+        data: resData?.data || resData,
+        service: serviceData || null,
+        quotation: resData?.data?.quotation || resData?.quotation || null,
+        isUpdated,
+        message: resData?.message || (isUpdated ? 'Existing service in quotation updated successfully' : 'Service added to quotation successfully'),
+      };
+    } catch (err) {
+      return {
+        success: false,
+        message: err.response?.data?.message || err.message || 'Failed to add service from existing master data',
+        error: err,
+      };
+    }
   },
 };
 
