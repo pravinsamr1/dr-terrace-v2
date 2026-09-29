@@ -14,7 +14,7 @@ import { DefaultTheme, ThemeProvider } from "expo-router/react-navigation";
 import { Stack, router } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useRef, useState } from 'react';
-import { Animated, AppState, Platform, StyleSheet, Text, TextInput } from 'react-native';
+import { Animated, AppState, Platform, StyleSheet, Text } from 'react-native';
 import { MD3LightTheme, PaperProvider, configureFonts } from 'react-native-paper';
 import 'react-native-reanimated';
 
@@ -312,25 +312,8 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (fontsLoaded) {
-      // Apply Plus Jakarta Sans as the global font for ALL Text & TextInput
-      // For Android, we disable includeFontPadding to fix vertical clipping and alignment.
-      const globalFont = 'PlusJakartaSans_400Regular';
-      const defaultTextStyle = {
-        fontFamily: globalFont,
-        letterSpacing: 0,
-        ...Platform.select({
-          android: {
-            includeFontPadding: false,
-            textAlignVertical: 'center',
-          },
-        }),
-      };
-
-      if (!Text.defaultProps) Text.defaultProps = {};
-      Text.defaultProps.style = [defaultTextStyle, Text.defaultProps.style];
-
-      if (!TextInput.defaultProps) TextInput.defaultProps = {};
-      TextInput.defaultProps.style = [defaultTextStyle, TextInput.defaultProps.style];
+      // defaultProps are already set in initFonts.js at module load time.
+      // Do not re-apply here to avoid double-stacking the style array.
 
       SplashScreen.hideAsync();
     }

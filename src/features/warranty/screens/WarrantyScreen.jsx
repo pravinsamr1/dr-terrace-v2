@@ -12,7 +12,6 @@ import {
   Alert,
   Modal,
 } from 'react-native';
-import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -24,7 +23,6 @@ import { MaterialAlertModal } from '../../../shared/components/material';
 import { WARRANTY_DEFAULTS } from '../constants/warrantyConstants';
 
 export default function GenerateWarrantyScreen() {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';

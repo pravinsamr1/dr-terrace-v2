@@ -586,16 +586,17 @@ export default function EditQuotationScreen() {
         setQuotationDate(formatFromApiDate(q.quotationDate) || formatDateDDMMYY(new Date()));
 
         // Pre-fill Property Type
-        let matchedPropName = q.propertyName;
+        const qPropertyId = q.propertyId ?? q.property?.id;
+        let matchedPropName = q.propertyName || q.property?.name;
         if (!matchedPropName && Array.isArray(res.properties)) {
           const matchedProp = res.properties.find(
-            (p) => (p.id != null && p.id === q.propertyId) ||
-              (p.propertyId != null && p.propertyId === q.propertyId)
+            (p) => (p.id != null && p.id === qPropertyId) ||
+              (p.propertyId != null && p.propertyId === qPropertyId)
           );
           if (matchedProp) matchedPropName = matchedProp.name;
         }
         if (!matchedPropName) {
-          matchedPropName = q.propertyId === 2 ? 'Apartment' : q.propertyId === 3 ? 'Industries' : (q.propertyId === 200 ? 'Apartment' : q.propertyId === 201 ? 'Industries' : 'House');
+          matchedPropName = qPropertyId === 2 ? 'Apartment' : qPropertyId === 3 ? 'Industries' : (qPropertyId === 200 ? 'Apartment' : qPropertyId === 201 ? 'Industries' : 'House');
         }
         setPropertyType(matchedPropName);
 
@@ -603,7 +604,8 @@ export default function EditQuotationScreen() {
         let matchedPkgName = null;
         if (Array.isArray(res.packages)) {
           const normalized = normalizePackages(res.packages);
-          const matchedPkg = normalized.find(
+          const qPackageId = q.packageId ?? q.package?.id;
+          const matchedPkg = (qPackageId != null && normalized.find((p) => p.packageId === qPackageId)) || normalized.find(
             (p) => (p.packageId != null && (p.packageId === q.packageId || p.packageId === q.quoteFor)) ||
               (p.packages && (p.packages === q.packages || p.packages === q.packageName || p.packages === q.packageTier)) ||
               (p.packageName && q.packageName && String(p.packageName).toLowerCase() === String(q.packageName).toLowerCase())
@@ -715,12 +717,12 @@ export default function EditQuotationScreen() {
           setFinalPercent('10');
         }
 
-        setValidityText(q.quoteValidateDate || 'Quote Valid till 30 Days');
+        setValidityText(q.quoteValidateDate || q.paymentTerms?.validity || q.validTill || 'Quote Valid till 30 Days');
         setNegotiationNote(q.negotiation != null ? String(q.negotiation) : 'PRICE IS NEGOTIABLE FOR IMMEDIATE ORDER');
         setWorkStartNote(q.workCommencement != null ? String(q.workCommencement) : 'Work can be started 48hrs from the time of payment received');
 
         const matchedPkgWarranty = (res.packages || []).find((p) => p.packageId === q.packageId || p.packageName === matchedPkgName)?.warranty;
-        setWarrantyText(q.warranty || matchedPkgWarranty || (activeQuoteTier === 'elite' ? '15 Years' : activeQuoteTier === 'premium' ? '10 Years' : '5 Years'));
+        setWarrantyText(q.warranty || q.package?.warranty || matchedPkgWarranty || (activeQuoteTier === 'elite' ? '15 Years' : activeQuoteTier === 'premium' ? '10 Years' : '5 Years'));
 
         // Discount
         const existingDiscountPct = q.discountPercentage != null
@@ -1240,8 +1242,7 @@ export default function EditQuotationScreen() {
     const cleaned = rawClientName.replace(/^(mr\.|mrs\.|ms\.|dr\.)\s+/i, '').trim();
     return (cleaned || rawClientName).slice(0, 2).toUpperCase() || 'MR';
   })();
-  const prefix = (rawClientName && !rawClientName.trim().toLowerCase().startsWith('mr.')) ? 'Mr. ' : '';
-  const displayName = rawClientName ? `${prefix}${rawClientName.trim()}` : `Customer #${customerId || ''}`;
+  const displayName = rawClientName ? `${rawClientName.trim()}` : `Customer #${customerId || ''}`;
   const displayId = `DR${app?.customerId || app?.appointmentId || app?.id || existingQuotation?.customerId || customerId || ''}`.replace(/^DRDR/i, 'DR');
   const displayPhone = app?.mobileNumber || app?.phone || existingQuotation?.mobileNumber || existingQuotation?.phone || 'N/A';
   const revisionStatus = existingQuotation?.revision ? `Revision #${existingQuotation.revision}` : 'Editing';

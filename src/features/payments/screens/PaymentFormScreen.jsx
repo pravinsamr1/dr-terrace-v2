@@ -423,7 +423,6 @@ export default function PaymentFormScreen() {
   const pricing = paymentSummary?.pricing || {};
   const progress = paymentSummary?.progress || {};
   const withoutGstTotal = Math.round(Number(pricing.withoutGstTotal ?? params.withoutGstTotal ?? 0));
-  const withGstTotal = Math.round(Number(pricing.withGstTotal ?? params.withGstBalance ?? 0));
   const totalPaid = Math.round(Number(progress.totalPaid ?? 0));
   const withoutGstBalance = Math.round(Number(progress.withoutGstBalance ?? params.remainingBalance ?? 0));
   const withGstBalance = Math.round(Number(progress.withGstBalance ?? params.withGstBalance ?? 0));
@@ -434,9 +433,6 @@ export default function PaymentFormScreen() {
   const selectedBank = bankAccounts.find((b) => String(b.id) === String(selectedBankId)) || bankAccounts[0] || null;
 
   const formTitle = isFinalSettlement ? 'Final Settlement' : 'Record Payment';
-  const formSubtitle = isFinalSettlement
-    ? 'Choose GST treatment and settle the remaining balance'
-    : 'Record an intermediate payment against the quotation';
 
   const C = {
     bg: isDark ? '#0F172A' : '#F4F8FC',

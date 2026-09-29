@@ -10,11 +10,21 @@ export const quotationRepository = {
     try {
       const response = await apiClient.get(API_ENDPOINTS.QUOTATIONS_PAGE_VIEW);
       const data = response.data;
+      const properties = Array.isArray(data?.properties)
+        ? data.properties
+        : Array.isArray(data?.data?.properties)
+        ? data.data.properties
+        : [];
+      const packages = Array.isArray(data?.packages)
+        ? data.packages
+        : Array.isArray(data?.data?.packages)
+        ? data.data.packages
+        : [];
       return {
         success: true,
         data: data || {},
-        properties: Array.isArray(data?.properties) ? data.properties : [],
-        packages: Array.isArray(data?.packages) ? data.packages : [],
+        properties,
+        packages,
       };
     } catch (error) {
       console.warn('Failed to fetch quotation page view:', error.message);

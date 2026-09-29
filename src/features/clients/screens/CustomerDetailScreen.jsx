@@ -30,13 +30,11 @@ import { authRepository } from '../../auth/api/authRepository';
 import { clientRepository as clientService } from '../../clients/api/clientRepository';
 import { quotationRepository } from '../../quotations/api/quotationRepository';
 import { paymentRepository } from '../../payments/api/paymentRepository';
-import { quotationPaymentRepository } from '../../payments/api/quotationPaymentRepository';
 import SelectQuotationTiersModal from '../../quotations/components/SelectQuotationTiersModal';
 import WarrantyTab from '../../warranty/components/WarrantyTab';
 import { transformStyleForJakarta } from '../../../core/theme/initFonts';
 import { isPastDate } from '../../../core/utils/validation';
 import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
-import { extractApiErrorMessage } from '../../../core/api/apiClient';
 import { resolveProofImageUrl } from '../../../core/utils/imageUtils';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -135,10 +133,6 @@ export default function CustomerDetailScreen() {
       const filtered = (prev.quotations || []).filter(q => String(q.id) !== String(quotationId) && String(q.quotationId) !== String(quotationId));
       return { ...prev, quotations: filtered, confirmedQuoteId: String(prev.confirmedQuoteId) === String(quotationId) ? null : prev.confirmedQuoteId };
     });
-  };
-
-  const deleteAllQuotations = () => {
-    setClientData(prev => prev ? { ...prev, quotations: [], confirmedQuoteId: null } : prev);
   };
 
   const handleConfirmQuotation = async (quotationId) => {
@@ -417,8 +411,6 @@ export default function CustomerDetailScreen() {
     return { success: true, message: 'Warranty claim logged successfully.' };
   };
 
-  const addServiceCycle = () => { };
-
   // Find current appointment or client data
   // Find current appointment or client data
   const app = React.useMemo(() => {
@@ -506,7 +498,6 @@ export default function CustomerDetailScreen() {
 
     return list;
   }, [payView, app, clientData]);
-  const [isLoadingPayView, setIsLoadingPayView] = useState(false);
   const payViewRef = React.useRef(payView);
   payViewRef.current = payView;
   const payViewIdRef = React.useRef(null);
@@ -623,7 +614,6 @@ export default function CustomerDetailScreen() {
     }
 
     isFetchingPayViewRef.current = true;
-    setIsLoadingPayView(true);
     try {
       // Use the new quotation-payments summary endpoint (canonical for the Payments tab)
       const res = await paymentRepository.getPaymentSummary(String(confirmedQuoteId));
@@ -653,7 +643,6 @@ export default function CustomerDetailScreen() {
     } catch (err) {
       console.warn('Failed to fetch payment summary from API:', err?.message);
     } finally {
-      setIsLoadingPayView(false);
       isFetchingPayViewRef.current = false;
     }
     return null;
@@ -764,7 +753,6 @@ export default function CustomerDetailScreen() {
 
   // Stitch Payment Details Modal state
   const [selectedPaymentDetailModal, setSelectedPaymentDetailModal] = useState(null);
-  const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
   const [sharingPaymentId, setSharingPaymentId] = useState(null);
   // Stitch Activate Warranty Modal state
   const [showStitchWarrantyModal, setShowStitchWarrantyModal] = useState(false);
@@ -908,28 +896,9 @@ export default function CustomerDetailScreen() {
     'Bill Cleared'
   ];
 
-  const getStatusBadgeStyle = (status) => {
-    switch (status) {
-      case 'Site Visit Pending':
-        return { bg: '#EF4444', text: '#FFFFFF', icon: 'time-outline' };
-      case 'Site Visited':
-        return { bg: '#10B981', text: '#FFFFFF', icon: 'checkmark-circle' };
-      case 'Quotation Waiting':
-        return { bg: '#F59E0B', text: '#FFFFFF', icon: 'hourglass-outline' };
-      case 'Quotation Sent':
-        return { bg: '#2563EB', text: '#FFFFFF', icon: 'send-outline' };
-      case 'Job Started':
-        return { bg: '#8B5CF6', text: '#FFFFFF', icon: 'construct-outline' };
-      case 'Bill Cleared':
-        return { bg: '#059669', text: '#FFFFFF', icon: 'receipt-outline' };
-      default:
-        return { bg: '#10B981', text: '#FFFFFF', icon: 'checkmark-circle' };
-    }
-  };
-
   // Category Popup Modal and Payment choice states
   const [activeCategoryModal, setActiveCategoryModal] = useState(null); // 'Basic' | 'Mid' | 'Luxury'
-  const [chosenCategory, setChosenCategory] = useState(null);
+  const [chosenCategory] = useState(null);
   const [editingServiceIndex, setEditingServiceIndex] = useState(null);
   const [editRateVal, setEditRateVal] = useState('');
   const [editAreaVal, setEditAreaVal] = useState('');
@@ -1016,11 +985,6 @@ export default function CustomerDetailScreen() {
     (payView?.receiptStatus === 'READY' || payView?.receipt?.receiptStatus === 'READY')
   );
 
-  const receiptStatus =
-    payView?.receiptStatus ||
-    payView?.receipt?.receiptStatus ||
-    (isReceiptGenerated ? 'GENERATED' : (canGenerateReceipt ? 'READY' : 'PENDING'));
-
   const [isGeneratingReceipt, setIsGeneratingReceipt] = useState(false);
 
   // Active section tab anchor focus
@@ -1071,150 +1035,26 @@ export default function CustomerDetailScreen() {
     }
   }, [activeTabSection, fetchCustomerQuotations, fetchPayView]);
 
-  const [expandedServiceReceipts, setExpandedServiceReceipts] = useState({});
   const [showFullReceiptModal, setShowFullReceiptModal] = useState(false);
   const [fullReceiptStep, setFullReceiptStep] = useState('options'); // 'options' | 'without_gst'
   const [gstNumberInput, setGstNumberInput] = useState('');
 
+  // NOTE: no current UI element calls this — the only trigger for the Full Receipt
+  // modal (rendered below) appears to have been removed. Kept in place rather than
+  // deleted so the modal can be reconnected; do not delete as "unused".
+  // eslint-disable-next-line no-unused-vars
   const handleOpenFullReceiptModal = () => {
     setFullReceiptStep('options');
     setGstNumberInput(app?.gstNumber || app?.gstin || '');
     setShowFullReceiptModal(true);
   };
 
+  // NOTE: also currently unwired — see comment above.
+  // eslint-disable-next-line no-unused-vars
   const handleOpenFullReceiptWithGstModal = () => {
     setFullReceiptStep('with_gst_receipt');
     setGstNumberInput(app?.gstNumber || app?.gstin || '');
     setShowFullReceiptModal(true);
-  };
-
-  const toggleServiceReceipts = (serviceKey) => {
-    setExpandedServiceReceipts((prev) => ({
-      ...prev,
-      [serviceKey]: !prev[serviceKey],
-    }));
-  };
-
-  const toggleAllServiceReceipts = () => {
-    const allKeys = [
-      ...(Array.isArray(payView?.services) ? payView.services.map((s, i) => s.id || `svc_${i}`) : []),
-      ...resolvedAdditionalPayments.map((s, i) => s.id || `add_${i}`),
-      'gst_clearance',
-    ];
-    const isAnyCollapsed = allKeys.some((k) => !expandedServiceReceipts[k]);
-    const nextMap = {};
-    allKeys.forEach((k) => {
-      nextMap[k] = isAnyCollapsed;
-    });
-    setExpandedServiceReceipts(nextMap);
-  };
-
-  const handleAdminVerifyPayment = async (paymentItem) => {
-    if (!paymentItem) return;
-    const confirmedQuoteId =
-      paymentItem.quotationId ||
-      payView?.id ||
-      payView?.quotationId ||
-      app?.confirmedQuoteId ||
-      app?.activeQuotationId ||
-      null;
-    const paymentId = paymentItem.id || paymentItem.details?.id;
-
-    if (!paymentId) {
-      showAlert('Missing Identifier', 'Could not locate payment reference ID.', 'OK');
-      return;
-    }
-    if (!confirmedQuoteId) {
-      showAlert('Missing Quotation', 'Could not determine quotation ID for verification.', 'OK');
-      return;
-    }
-
-    setIsVerifyingPayment(true);
-    try {
-      // Use the new quotation-payments verify endpoint
-      const res = await quotationPaymentRepository.verifyPayment(
-        String(confirmedQuoteId),
-        String(paymentId),
-        'Verified against proof / voucher'
-      );
-
-      if (res?.success) {
-        const verifiedBy = res.data?.verifiedBy || (currentUser?.name ? `${currentUser.name} (Admin)` : 'Admin');
-        const verifiedAt = res.data?.verifiedAt || new Date().toISOString();
-
-        // 1. Optimistically update local payView history so the UI reflects verification immediately
-        setPayView((prevPayView) => {
-          if (!prevPayView) return prevPayView;
-          const updated = { ...prevPayView };
-          if (Array.isArray(updated.history)) {
-            updated.history = updated.history.map((p) => {
-              if (String(p.id) === String(paymentId)) {
-                return { ...p, isVerified: true, verifiedBy, verifiedAt };
-              }
-              return p;
-            });
-          }
-          if (Array.isArray(updated.payments)) {
-            updated.payments = updated.payments.map((p) => {
-              if (String(p.id) === String(paymentId)) {
-                return { ...p, isVerified: true, verifiedBy, verifiedAt };
-              }
-              return p;
-            });
-          }
-          // Update hasUnverifiedPayments flag optimistically
-          const remainingUnverified = (updated.history || updated.payments || []).some(
-            (p) => p.isVerified === false || p.verificationStatus === 'pending'
-          );
-          updated.hasUnverifiedPayments = remainingUnverified;
-          return updated;
-        });
-
-        // 2. Update selectedPaymentDetailModal state immediately
-        setSelectedPaymentDetailModal((prev) =>
-          prev
-            ? {
-                ...prev,
-                isVerified: true,
-                verifiedBy,
-                verifiedAt,
-                details: { ...prev.details, isVerified: true, verifiedBy, verifiedAt },
-              }
-            : null
-        );
-
-        // 3. Re-fetch payment summary from backend to ensure complete sync
-        paymentRepository.getPaymentSummary(String(confirmedQuoteId)).then((pvRes) => {
-          if (pvRes?.success && pvRes.data) {
-            const summaryData = pvRes.data;
-            const normalized = {
-              id: summaryData.quotationId || confirmedQuoteId,
-              quotationId: summaryData.quotationId || confirmedQuoteId,
-              ...summaryData,
-              totalPrice: summaryData.pricing?.withoutGstTotal ?? summaryData.pricing?.subTotal,
-              totalWithGst: summaryData.pricing?.withGstTotal,
-              totalPaid: summaryData.progress?.totalPaid,
-              balanceAmount: summaryData.progress?.withoutGstBalance,
-              payments: summaryData.history || [],
-            };
-            setPayView(normalized);
-            payViewRef.current = normalized;
-          }
-        }).catch(() => {});
-
-        showAlert(
-          'Payment Verified!',
-          'The payment has been successfully approved by Admin. View Receipt and Share options are now unlocked for all staff.',
-          'Done'
-        );
-      } else {
-        showAlert('Verification Failed', res?.message || 'Could not verify payment. Please try again.', 'OK');
-      }
-    } catch (err) {
-      showAlert('Error', err?.message || 'Failed to verify payment', 'OK');
-    } finally {
-      setIsVerifyingPayment(false);
-    }
   };
 
   const handleViewReceipt = (pay) => {
@@ -1401,6 +1241,10 @@ export default function CustomerDetailScreen() {
   const [editAppTime, setEditAppTime] = useState('');
   const [editStatus, setEditStatus] = useState('');
 
+  // NOTE: no current UI element calls this — it's the only place that opens the
+  // lock-confirmation modal with actionType 'initial_payment'. Kept in place rather
+  // than deleted so the flow can be reconnected; do not delete as "unused".
+  // eslint-disable-next-line no-unused-vars
   const handleConfirmInitialPayment = () => {
     if (quotationsList.length === 0) {
       showAlert('No Quotation Found', 'Please create a quotation first before recording initial payment.', 'warning', 'Got It');
@@ -1418,6 +1262,10 @@ export default function CustomerDetailScreen() {
     });
   };
 
+  // NOTE: no current UI element calls this — it's the only trigger for the Edit
+  // Customer Details modal (rendered below). Kept in place rather than deleted so
+  // the flow can be reconnected; do not delete as "unused".
+  // eslint-disable-next-line no-unused-vars
   const handleOpenEditCustomer = () => {
     if (!app) return;
     if (isInitialPaymentReceived) {
@@ -1612,8 +1460,6 @@ export default function CustomerDetailScreen() {
     },
   ];
 
-  const TIERS_CONFIG = DEFAULT_TIERS_CONFIG;
-
   // Merge API quotations with any locally-saved quotations (local ones take precedence by id)
   const quotationsList = React.useMemo(() => {
     const localQuotes = app?.quotations || (app?.quotation ? [{ ...app.quotation, id: app.quotation.id || Date.now() }] : []);
@@ -1742,11 +1588,8 @@ export default function CustomerDetailScreen() {
 
     // If no quotations exist yet, show only Economic Method as default
     return [DEFAULT_TIERS_CONFIG[0]];
-    // Return packages with quotations from API data (empty list if no quotations created yet)
-    return withQuotes;
   }, [apiPackages, quotationsList]);
 
-  const activeQuotationId = app?.activeQuotationId;
   const activeQuote =
     (app?.confirmedQuoteId && quotationsList.find(q => String(q.id || q.quotationId) === String(app.confirmedQuoteId))) ||
     quotationsList.find(q => q.isConfirmed || q.status === 'CONFIRMED' || q.confirmed) ||
@@ -2067,8 +1910,6 @@ export default function CustomerDetailScreen() {
   const displayId = `DR${app.appointmentId || app.customerId || app.id || ''}`;
   const displayPhone = app.mobileNumber || app.clientPhone || app.phone || app.mobile || 'No Phone Number';
 
-  const rawAppDate = app.appointmentDate || app.date || app.appointmentFixDate || '';
-  const displayAppDate = rawAppDate ? formatDateDDMMYY(rawAppDate) : 'Not Set';
   const rawFixDate = app.appointmentFixDate || app.appointmentFixedDate || app.fixDate || '';
   const displayFixDate = rawFixDate ? formatDateDDMMYY(rawFixDate) : 'Not Set';
   const displayAppTime = app.appointmentTime || app.time || 'Not Set';
@@ -2162,15 +2003,6 @@ export default function CustomerDetailScreen() {
     } finally {
       setIsSavingSiteDetails(false);
     }
-  };
-
-  const handleMakeQuotation = () => {
-    updateAppointmentInspection(app.id, {
-      attendedDate,
-      attendedTime,
-      totalArea,
-    });
-    handleOpenSelectTiersModal(['economic', 'premium', 'elite']);
   };
 
   const handleActivateWarranty = () => {
@@ -2525,7 +2357,12 @@ export default function CustomerDetailScreen() {
               {/* Row 3: Dedicated Interactive Attended Date & Attended Time Pickers */}
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                 {/* Attended Date Box */}
-                <View
+                <TouchableOpacity
+                  onPress={() => setShowDatePicker(true)}
+                  disabled={isAttendedLocked}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel="Select attended date"
                   style={{
                     width: '48%',
                     backgroundColor: isAttendedLocked ? (isDark ? '#1E293B' : '#F1F5F9') : (isDark ? '#080808' : '#EFF6FF'),
@@ -2540,33 +2377,28 @@ export default function CustomerDetailScreen() {
                     {isAttendedLocked && <Ionicons name="lock-closed" size={12} color={isDark ? '#94A3B8' : '#64748B'} />}
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
-                    <TouchableOpacity
-                      onPress={() => !isAttendedLocked && setShowDatePicker(true)}
-                      disabled={isAttendedLocked}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    >
-                      <Ionicons name="calendar" size={15} color={isAttendedLocked ? (isDark ? '#94A3B8' : '#64748B') : '#0052CC'} style={{ marginRight: 6 }} />
-                    </TouchableOpacity>
-                    <TextInput
+                    <Ionicons name="calendar" size={15} color={isAttendedLocked ? (isDark ? '#94A3B8' : '#64748B') : '#0052CC'} style={{ marginRight: 6 }} />
+                    <Text
+                      numberOfLines={1}
                       style={{
                         fontSize: 13,
                         fontWeight: '600',
-                        color: isAttendedLocked ? (isDark ? '#94A3B8' : '#64748B') : '#0052CC',
-                        padding: 0,
-                        margin: 0,
+                        color: !attendedDate ? '#9ca3af' : (isAttendedLocked ? (isDark ? '#94A3B8' : '#64748B') : '#0052CC'),
                         flex: 1,
                       }}
-                      value={attendedDate}
-                      onChangeText={setAttendedDate}
-                      editable={!isAttendedLocked}
-                      placeholder="25-07-2026"
-                      placeholderTextColor="#9ca3af"
-                    />
+                    >
+                      {attendedDate || '25-07-2026'}
+                    </Text>
                   </View>
-                </View>
+                </TouchableOpacity>
 
                 {/* Attended Time Box */}
-                <View
+                <TouchableOpacity
+                  onPress={() => setShowTimePicker(true)}
+                  disabled={isAttendedLocked}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel="Select attended time"
                   style={{
                     width: '48%',
                     backgroundColor: isAttendedLocked ? (isDark ? '#1E293B' : '#F1F5F9') : (isDark ? '#080808' : '#EFF6FF'),
@@ -2581,30 +2413,20 @@ export default function CustomerDetailScreen() {
                     {isAttendedLocked && <Ionicons name="lock-closed" size={12} color={isDark ? '#94A3B8' : '#64748B'} />}
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
-                    <TouchableOpacity
-                      onPress={() => !isAttendedLocked && setShowTimePicker(true)}
-                      disabled={isAttendedLocked}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    >
-                      <Ionicons name="time" size={15} color={isAttendedLocked ? (isDark ? '#94A3B8' : '#64748B') : '#0052CC'} style={{ marginRight: 6 }} />
-                    </TouchableOpacity>
-                    <TextInput
+                    <Ionicons name="time" size={15} color={isAttendedLocked ? (isDark ? '#94A3B8' : '#64748B') : '#0052CC'} style={{ marginRight: 6 }} />
+                    <Text
+                      numberOfLines={1}
                       style={{
                         fontSize: 13,
                         fontWeight: '500',
-                        color: isAttendedLocked ? (isDark ? '#94A3B8' : '#64748B') : '#0052CC',
-                        padding: 0,
-                        margin: 0,
+                        color: !attendedTime ? '#9ca3af' : (isAttendedLocked ? (isDark ? '#94A3B8' : '#64748B') : '#0052CC'),
                         flex: 1,
                       }}
-                      value={attendedTime}
-                      onChangeText={setAttendedTime}
-                      editable={!isAttendedLocked}
-                      placeholder="10:00 AM"
-                      placeholderTextColor="#9ca3af"
-                    />
+                    >
+                      {attendedTime || '10:00 AM'}
+                    </Text>
                   </View>
-                </View>
+                </TouchableOpacity>
               </View>
             </View>
 
@@ -3984,7 +3806,6 @@ export default function CustomerDetailScreen() {
                     ) : (
                       historyList.map((pay, idx) => {
                         const isVerified = Boolean(pay.isVerified);
-                        const isFinal = Boolean(pay.isFinalPayment);
                         return (
                           <View
                             key={pay.id || ('pay_' + idx)}
@@ -4402,37 +4223,6 @@ export default function CustomerDetailScreen() {
                 </TouchableOpacity>
               </View>
 
-            </View>
-          </View>
-        </Modal>
-      )}
-
-      {/* DatePicker Modals */}
-      {showDatePicker && Platform.OS === 'ios' && (
-        <Modal transparent animationType="slide" visible={showDatePicker}>
-          <View style={styles.pickerModalBackdrop}>
-            <View style={[styles.pickerModalCard, isDark && styles.pickerModalCardDark]}>
-              <View style={styles.pickerModalHeader}>
-                <Text style={[styles.pickerModalTitle, isDark && styles.textDark]}>Select Date</Text>
-                <TouchableOpacity onPress={() => {
-                  setShowDatePicker(false);
-                  setAttendedDate(formatDate(dateValue));
-                }}>
-                  <Text style={styles.pickerDoneText}>Done</Text>
-                </TouchableOpacity>
-              </View>
-              <DateTimePicker
-                value={dateValue}
-                mode="date"
-                display="spinner"
-                themeVariant={isDark ? 'dark' : 'light'}
-                onValueChange={(e, d) => {
-                  if (d) {
-                    setDateValue(d);
-                    setAttendedDate(formatDate(d));
-                  }
-                }}
-              />
             </View>
           </View>
         </Modal>

@@ -5,7 +5,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const fs = require('node:fs');
-const path = require('node:path');
 const babel = require('@babel/core');
 
 // Mock AsyncStorage and React Native modules for Node environment

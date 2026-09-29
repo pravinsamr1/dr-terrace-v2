@@ -51,7 +51,7 @@ const getAdditionalPaymentList = (payView) => {
 };
 
 // Helper function to extract unified receipt data model for Dr. Terrace receipts
-export const getReceiptData = (app, customerGst, finalReceiptData = null, params = {}, payView = null) => {
+const getReceiptData = (app, customerGst, finalReceiptData = null, params = {}, payView = null) => {
   const isFullReceipt = params?.isFullServiceReceipt === 'true';
 
   // For individual payment/cash receipts, only show the payment amount without GST.
@@ -64,7 +64,24 @@ export const getReceiptData = (app, customerGst, finalReceiptData = null, params
     )
   );
 
-  const docTitle = isGst ? 'TAX INVOICE' : 'CASH RECEIPT';
+  const docTitle = isGst ? 'TAX INVOICE' : (isFullReceipt ? 'CASH BILL' : 'CASH RECEIPT');
+
+  // Cash Receipt / Cash Bill show one line referencing the agreed quotation instead of itemised services
+  const receiptQuoteId =
+    params?.quotationId ||
+    finalReceiptData?.quotationId ||
+    finalReceiptData?.quotation?.id ||
+    payView?.quotationId ||
+    app?.confirmedQuoteId ||
+    app?.activeQuotationId ||
+    (Array.isArray(app?.quotations) && app.quotations.find((q) => q.isConfirmed)?.id) ||
+    '';
+  const quoteNoLabel = receiptQuoteId
+    ? (String(receiptQuoteId).startsWith('DRT-') ? String(receiptQuoteId) : `DRT-${receiptQuoteId}`)
+    : '';
+  const cashServiceText = quoteNoLabel
+    ? `All the services and measurements as per agreed quotation No. ${quoteNoLabel}`
+    : 'All the services and measurements as per agreed quotation';
 
   let invoiceNo =
     finalReceiptData?.receiptNumber ||
@@ -247,13 +264,7 @@ export const getReceiptData = (app, customerGst, finalReceiptData = null, params
       }
     }
 
-    const sName = (
-      matchedService?.title ||
-      matchedService?.serviceName ||
-      params?.stage ||
-      app?.serviceType ||
-      'TERRACE WATERPROOFING'
-    ).toUpperCase();
+    const sName = cashServiceText;
 
     const rawSqft =
       matchedService?.sqft ||
@@ -342,6 +353,11 @@ export const getReceiptData = (app, customerGst, finalReceiptData = null, params
   }
 
   const subTotal = servicesList.reduce((acc, s) => acc + (s.total || 0), 0) || baseTotal;
+
+  if (!isGst) {
+    servicesList = [{ sNo: 1, name: cashServiceText, measurement: '', rate: '', total: subTotal }];
+  }
+
   const gstPercent = Number(
     finalReceiptData?.gstPercentage ||
     payView?.gstPercentage ||
@@ -680,6 +696,7 @@ export const generateTaxInvoiceHTML = (
           Service
         </th>
 
+        ${isGst ? `
         <th class="col-measurement">
           Measurement
         </th>
@@ -687,6 +704,7 @@ export const generateTaxInvoiceHTML = (
         <th class="col-rate">
           Cost / sft (Rs)
         </th>
+        ` : ''}
 
         <th class="col-total">
           Total
@@ -715,6 +733,7 @@ export const generateTaxInvoiceHTML = (
               ${escapeHtml(svc.name)}
             </td>
 
+            ${isGst ? `
             <td class="center">
               ${escapeHtml(svc.measurement)}
             </td>
@@ -722,6 +741,7 @@ export const generateTaxInvoiceHTML = (
             <td class="center">
               ${escapeHtml(svc.rate)}
             </td>
+            ` : ''}
 
             <td class="right bold">
               Rs. ${money(svc.total)}
@@ -951,11 +971,15 @@ export const generateTaxInvoiceHTML = (
 
                 <col class="col-sno" />
 
+                ${isGst ? `
                 <col class="col-service" />
 
                 <col class="col-measurement" />
 
                 <col class="col-rate" />
+                ` : `
+                <col class="col-service" style="width:74%;" />
+                `}
 
                 <col class="col-total" />
 
@@ -1843,15 +1867,6 @@ export default function ReceiptScreen() {
     }
   };
 
-  const handlePrint = async () => {
-    try {
-      const htmlContent = generateTaxInvoiceHTML(app, customerGst, finalReceiptData, params, payView);
-      await Print.printAsync({ html: htmlContent });
-    } catch (error) {
-      Alert.alert('Error', 'Failed to print receipt: ' + error.message);
-    }
-  };
-
   const handleWhatsApp = async () => {
     try {
       const isAvailable = await Sharing.isAvailableAsync();
@@ -1957,9 +1972,9 @@ export default function ReceiptScreen() {
             {/* Table Header */}
             <View style={styles.gridHeaderRow}>
               <Text style={[styles.gridTh, { width: '10%' }]}>S. No</Text>
-              <Text style={[styles.gridTh, { width: '40%' }]}>Service</Text>
-              <Text style={[styles.gridTh, { width: '16%' }]}>Measurment</Text>
-              <Text style={[styles.gridTh, { width: '17%' }]}>Cost / sft (Rs)</Text>
+              <Text style={[styles.gridTh, { width: isGst ? '40%' : '73%' }]}>Service</Text>
+              {isGst && <Text style={[styles.gridTh, { width: '16%' }]}>Measurment</Text>}
+              {isGst && <Text style={[styles.gridTh, { width: '17%' }]}>Cost / sft (Rs)</Text>}
               <Text style={[styles.gridTh, { width: '17%', borderRightWidth: 0 }]}>Total</Text>
             </View>
 
@@ -1967,11 +1982,11 @@ export default function ReceiptScreen() {
             {servicesList.map((svc, idx) => (
               <View key={idx} style={styles.gridDataRow}>
                 <Text style={[styles.gridTdCenter, { width: '10%' }]}>{svc.sNo}</Text>
-                <Text style={[styles.gridTdLeft, styles.gridTdBold, { width: '40%' }]}>
+                <Text style={[styles.gridTdLeft, styles.gridTdBold, { width: isGst ? '40%' : '73%' }]}>
                   {svc.name}
                 </Text>
-                <Text style={[styles.gridTdCenter, { width: '16%' }]}>{svc.measurement}</Text>
-                <Text style={[styles.gridTdCenter, { width: '17%' }]}>{svc.rate}</Text>
+                {isGst && <Text style={[styles.gridTdCenter, { width: '16%' }]}>{svc.measurement}</Text>}
+                {isGst && <Text style={[styles.gridTdCenter, { width: '17%' }]}>{svc.rate}</Text>}
                 <Text style={[styles.gridTdRight, styles.gridTdBold, { width: '17%', borderRightWidth: 0 }]}>
                   Rs. {Number(svc.total).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </Text>
@@ -1981,9 +1996,9 @@ export default function ReceiptScreen() {
             {/* Empty spacing row */}
             <View style={[styles.gridDataRow, { height: 22 }]}>
               <View style={[styles.gridEmptyCell, { width: '10%' }]} />
-              <View style={[styles.gridEmptyCell, { width: '40%' }]} />
-              <View style={[styles.gridEmptyCell, { width: '16%' }]} />
-              <View style={[styles.gridEmptyCell, { width: '17%' }]} />
+              <View style={[styles.gridEmptyCell, { width: isGst ? '40%' : '73%' }]} />
+              {isGst && <View style={[styles.gridEmptyCell, { width: '16%' }]} />}
+              {isGst && <View style={[styles.gridEmptyCell, { width: '17%' }]} />}
               <View style={[styles.gridEmptyCell, { width: '17%', borderRightWidth: 0 }]} />
             </View>
 

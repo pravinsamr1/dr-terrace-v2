@@ -101,7 +101,6 @@ export default function HomeScreen() {
 
   const [upcomingAppointments, setUpcomingAppointments] = useState([]);
   const [missedAppointments, setMissedAppointments] = useState([]);
-  const [loadingAppointments, setLoadingAppointments] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [employees, setEmployees] = useState([]);
   const [activeEmployee, setActiveEmployee] = useState('');
@@ -112,7 +111,6 @@ export default function HomeScreen() {
 
   const loadData = useCallback(async () => {
     try {
-      setLoadingAppointments(true);
       const user = await authRepository.getUser();
       if (user) {
         setCurrentUser(user);
@@ -168,8 +166,6 @@ export default function HomeScreen() {
       }
     } catch (err) {
       console.warn('[HomeScreen] Error loading data:', err);
-    } finally {
-      setLoadingAppointments(false);
     }
   }, [activeEmployee]);
 

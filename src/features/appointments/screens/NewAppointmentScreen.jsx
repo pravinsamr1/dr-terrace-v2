@@ -5,12 +5,10 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  TouchableWithoutFeedback,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
   StatusBar,
-  Alert,
   Modal,
   Keyboard,
   ActivityIndicator,
@@ -279,32 +277,6 @@ export default function NewAppointmentScreen() {
     }
   };
 
-  const onDateChange = (event, selectedDate) => {
-    setShowDatePicker(false);
-    if (selectedDate) {
-      setDateValue(selectedDate);
-      setDateText(formatDate(selectedDate));
-      if (errors.date) setErrors((prev) => ({ ...prev, date: null }));
-    }
-  };
-
-  const onFixDateChange = (event, selectedDate) => {
-    setShowFixDatePicker(false);
-    if (selectedDate) {
-      setFixDateValue(selectedDate);
-      setFixDateText(formatDate(selectedDate));
-      if (errors.fixDate) setErrors((prev) => ({ ...prev, fixDate: null }));
-    }
-  };
-
-  const onTimeChange = (event, selectedTime) => {
-    setShowTimePicker(false);
-    if (selectedTime) {
-      setTimeValue(selectedTime);
-      setTimeText(formatTime(selectedTime));
-    }
-  };
-
   const validateForm = () => {
     const newErrors = {};
 
@@ -458,15 +430,6 @@ export default function NewAppointmentScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  const isAnyDropdownOpen = showAreaSuggestions || showCitySuggestions || dropdownOpen;
-
-  const closeAllDropdowns = () => {
-    setShowAreaSuggestions(false);
-    setShowCitySuggestions(false);
-    setDropdownOpen(false);
-    Keyboard.dismiss();
   };
 
   return (

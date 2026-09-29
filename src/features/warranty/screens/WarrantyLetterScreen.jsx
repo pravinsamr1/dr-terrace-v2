@@ -161,9 +161,12 @@ export default function WarrantyLetterScreen() {
       '<style>' +
       '@page{margin:44px 52px;}' +
       'body{font-family:"Plus Jakarta Sans",Helvetica,Arial,sans-serif;font-size:13.5px;color:#1e293b;line-height:1.65;}' +
-      '.logo{width:84px;height:auto;margin-bottom:8px;object-fit:contain;display:block;}' +
+      '.logo{width:84px;height:auto;object-fit:contain;display:block;}' +
+      '.header{display:flex;align-items:center;margin-bottom:8px;}' +
+      '.header-side{flex:1 1 0;}' +
       '.meta-row{display:flex;justify-content:space-between;margin-bottom:2px;}' +
       '.meta-r{color:#CC0000;font-weight:700;font-size:13px;}' +
+      '.ref-no{flex:0 1 auto;padding:0 12px;text-align:center;color:#CC0000;font-weight:800;font-size:20px;text-decoration:underline;}' +
       '.italic{font-style:italic;}' +
       'hr.thin{border:none;border-top:1px solid #CBD5E1;margin:10px 0 14px 0;}' +
       'p{margin-bottom:13px;text-align:justify;}' +
@@ -174,9 +177,12 @@ export default function WarrantyLetterScreen() {
       '.fb{font-weight:800;color:#0f172a;font-size:12px;}' +
       '.fa{font-size:11.5px;color:#374151;line-height:17px;}' +
       '</style></head><body>' +
-      '<div><img src="data:image/png;base64,' + logoBase64 + '" class="logo" /></div>' +
-      '<div class="meta-row"><span>' + currentDate + '</span><span class="meta-r">Warranty reference no-' + refNo + '</span></div>' +
-      '<div class="meta-row"><span class="italic">Warranty Letter</span>' +
+      '<div class="header"><div class="header-side"><img src="data:image/png;base64,' + logoBase64 + '" class="logo" /></div>' +
+      '<div class="ref-no">Warranty reference no-' + refNo + '</div><div class="header-side"></div></div>' +
+      '<div class="meta-row"><span>' + currentDate + '</span></div>' +
+      '<div class="meta-row">' +
+      // '<span class="italic">Warranty Letter</span>' +
+      '<span></span>' +
       (siteEngineerCode ? '<span class="meta-r">Site Engineer coad -' + siteEngineerCode + '</span>' : '') +
       '</div><hr class="thin"/>' +
       '<p>This is to certify that we have done a <b>' + serviceType + '</b> in the below mentioned building if require in future in order to claim the warranty please submit this along with your building leaking pictures.</p>' +
@@ -184,7 +190,7 @@ export default function WarrantyLetterScreen() {
       '<p><span class="lbl">Work Completed:</span> <span class="red">' + serviceType.toUpperCase() + ' COMPLETED ON ' + completedDate + '.</span></p>' +
       warrantyItemsHtml +
       '<p><span class="lbl">Warranty Including :</span> We will give free service to fix the leak which including Labour wages, Transportation, Consultation, Site Engineer allowance and salary.</p>' +
-      '<p><span class="lbl">Warranty Exclusion For :</span> Customer who has due, Leakages through untreated places, Plumbing, electrical pipes related problems, physically damaged area and for the work which was done as a complementary.</p>' +
+      '<p><span class="lbl">Warranty Exclusion For :</span> Customer who has due, Leakages through untreated places, Plumbing, electrical pipes related problems, Damage Due to crackers, Floor mate and flower pots, physically damaged area and for the work which was done as a complementary.</p>' +
       '<p>Kindly mail to service team our service team would give free visit/ service within 30 working days from the date of mail received from the client, required material has to be supplied by the client as a applicator the service which we give would be absolutely with free of cost.</p>' +
       '<p class="indent">Requested you to raise a complaint only through mail with photos with scanned copy of bills and warranty letter in future for fast action on the same. Kindly don\'t give oral complaint to our Supervisor and Sales Managers; Service Team is responsible only for mail complaint which they directly received from client to <a href="mailto:admin@drterrace.com">admin@drterrace.com</a> this will have records for both the ends.</p>' +
       '<p>Rs 500/Day Per visit would be charged for analysing the site against complaint</p>' +
@@ -268,24 +274,27 @@ export default function WarrantyLetterScreen() {
       >
         <View style={[styles.letterPage, isDark && styles.letterPageDark]}>
 
-          {/* Logo */}
+          {/* Logo | warranty reference no (centered on the page) */}
           <View style={styles.logoRow}>
-            <Image
-              source={{ uri: `data:image/png;base64,${logoBase64}` }}
-              style={styles.logoImage}
-              resizeMode="contain"
-            />
+            <View style={styles.headerSide}>
+              <Image
+                source={{ uri: `data:image/png;base64,${logoBase64}` }}
+                style={styles.logoImage}
+                resizeMode="contain"
+              />
+            </View>
+            <Text style={styles.refNo}>{'Warranty reference no-' + refNo}</Text>
+            <View style={styles.headerSide} />
           </View>
 
-          {/* Meta Row 1: date | ref no */}
+          {/* Meta Row 1: date */}
           <View style={styles.metaRow}>
             <Text style={styles.metaLeft}>{currentDate}</Text>
-            <Text style={styles.metaRight}>{'Warranty reference no-' + refNo}</Text>
           </View>
 
           {/* Meta Row 2: Warranty Letter | site engineer */}
           <View style={styles.metaRow}>
-            <Text style={styles.warrantyLabel}>Warranty Letter</Text>
+            {/* <Text style={styles.warrantyLabel}>Warranty Letter</Text> */}
             {Boolean(siteEngineerCode) && (
               <Text style={styles.metaRight}>{'Site Engineer coad -' + siteEngineerCode}</Text>
             )}
@@ -408,12 +417,14 @@ const styles = StyleSheet.create({
   },
   letterPageDark: { backgroundColor: '#1E293B', borderColor: '#475569' },
 
-  logoRow: { marginBottom: 12 },
+  logoRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  headerSide: { flex: 1, minWidth: 84 },
   logoImage: { width: 84, height: 74 },
 
   metaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 3 },
   metaLeft: { fontSize: 13, color: '#1E293B', fontWeight: '500' },
   metaRight: { fontSize: 12, color: '#CC0000', fontWeight: '700', textAlign: 'right', flex: 1, marginLeft: 8 },
+  refNo: { flexShrink: 1, paddingHorizontal: 8, fontSize: 18, color: '#CC0000', fontWeight: '800', textAlign: 'center', textDecorationLine: 'underline' },
   warrantyLabel: { fontSize: 13, fontStyle: 'italic', color: '#1E293B', fontWeight: '500' },
 
   thinLine: { height: 1, backgroundColor: '#CBD5E1', marginVertical: 10 },

@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-export const TITLE_OPTIONS = ['Mr', 'Mrs', 'Ms', 'M/s'];
+const TITLE_OPTIONS = ['Mr', 'Mrs', 'Ms', 'M/s'];
 
 /**
  * TitleDropdown Component

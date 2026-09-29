@@ -1,8 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   Image,
   Linking,
@@ -36,7 +35,6 @@ export default function EmployeeDetailScreen() {
   const [employee, setEmployee] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const isFirstMountRef = useRef(true);
 
   useEffect(() => {
     setEmployee(null);

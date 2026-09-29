@@ -7,7 +7,6 @@ import {
   ScrollView,
   StatusBar,
   Modal,
-  ActivityIndicator,
   Alert,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -249,7 +248,6 @@ export default function QuotationHistoryScreen() {
   }, [apiPackages, quotationsList]);
 
   const activeQuotationId = selectedActiveId || app?.confirmedQuoteId || app?.activeQuotationId || (quotationsList.length > 0 ? quotationsList[quotationsList.length - 1]?.id : null);
-  const activeQuote = quotationsList.find(q => q.id === activeQuotationId) || (quotationsList.length > 0 ? quotationsList[quotationsList.length - 1] : null);
 
   const getQuotationCatTotal = (quoteObj, catName) => {
     if (!quoteObj) return 0;
@@ -278,8 +276,6 @@ export default function QuotationHistoryScreen() {
     }, 0);
     return Math.round(sub * (1 + gstFact));
   };
-
-  const getShortServiceName = (sName) => (sName || '').replace(' Waterproofing', '').replace('& Toilet', '');
 
   if (isLoading && !app) {
     return (

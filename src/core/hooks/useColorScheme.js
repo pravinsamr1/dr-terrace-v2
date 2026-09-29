@@ -19,11 +19,3 @@ export function ThemeCustomProvider({ children }) {
 export function useColorScheme() {
   return 'light';
 }
-
-export function useThemeCustom() {
-  return { theme: 'light', colorScheme: 'light', setTheme: () => { } };
-}
-
-export function useToggleTheme() {
-  return () => { };
-}

@@ -15,8 +15,6 @@ const LOGIN_URL = `${BASE_URL}/auth/login`;
 const TIMEOUT_MS = 15000;
 
 test('Admin Login API Endpoint Test Suite', async (t) => {
-  let authToken;
-
   // Test 1: Successful Login with Valid Admin Credentials (Native fetch)
   await t.test('1. [fetch] POST /auth/login with valid credentials returns 200 and token', async () => {
     const startTime = Date.now();
@@ -45,8 +43,6 @@ test('Admin Login API Endpoint Test Suite', async (t) => {
     assert.ok(body.token, 'Expected response to contain "token"');
     assert.ok(typeof body.token === 'string', 'Expected "token" to be a string');
     assert.ok(body.expiresAt, 'Expected response to contain "expiresAt"');
-
-    authToken = body.token;
   });
 
   // Test 2: Successful Login via Axios (matching React Native apiClient setup)

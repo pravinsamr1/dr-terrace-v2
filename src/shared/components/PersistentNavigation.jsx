@@ -49,7 +49,7 @@ export function DrawerProvider({ children }) {
   );
 }
 
-export function useDrawer() {
+function useDrawer() {
   return useContext(DrawerContext);
 }
 

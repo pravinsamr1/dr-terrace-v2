@@ -10,7 +10,6 @@ import {
   Modal,
   TextInput,
 } from 'react-native';
-import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from '../../../core/hooks/useColorScheme';
@@ -22,7 +21,6 @@ import { DEFAULT_FALLBACKS } from '../../../shared/constants/fallbackDefaults';
 import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
 
 export default function SalaryDetailsScreen() {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
@@ -30,10 +28,9 @@ export default function SalaryDetailsScreen() {
   const [userRole, setUserRole] = useState('master');
   const [activeEmployee, setActiveEmployee] = useState('');
   const [employees, setEmployees] = useState([]);
-  const [leaveRequests, setLeaveRequests] = useState([]);
-  const [salaryAdvances, setSalaryAdvances] = useState([]);
+  const [leaveRequests] = useState([]);
+  const [salaryAdvances] = useState([]);
   const [salaryPayouts, setSalaryPayouts] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     Promise.all([
@@ -51,9 +48,7 @@ export default function SalaryDetailsScreen() {
           }
         }
       }),
-    ]).finally(() => {
-      setIsLoading(false);
-    });
+    ]);
   }, []);
 
   const markSalaryAsPaid = (payoutRecord) => {

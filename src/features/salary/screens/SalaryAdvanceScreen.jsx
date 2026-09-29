@@ -10,7 +10,6 @@ import {
   Modal,
   TextInput,
 } from 'react-native';
-import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from '../../../core/hooks/useColorScheme';
@@ -22,7 +21,6 @@ import { SALARY_DEFAULTS } from '../constants/salaryConstants';
 import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
 
 export default function SalaryAdvanceScreen() {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';

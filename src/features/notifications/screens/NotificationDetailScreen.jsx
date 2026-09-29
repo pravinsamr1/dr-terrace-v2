@@ -9,7 +9,7 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from '../../../core/hooks/useColorScheme';
 import InnerHeader from '../../../shared/components/InnerHeader';
@@ -40,7 +40,6 @@ export default function NotificationDetailScreen() {
   const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
-  const { id } = useLocalSearchParams();
   const notif = null;
 
   useFocusEffect(

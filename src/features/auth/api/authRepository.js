@@ -1,11 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { router } from 'expo-router';
 import { apiClient } from '../../../core/api/apiClient';
 import { API_ENDPOINTS } from '../../../core/config/config';
 import { notifySessionExpired } from '../../../core/auth/sessionEvents';
 
-export const AUTH_TOKEN_KEY = 'auth_token';
-export const USER_DATA_KEY = 'user_data';
+const AUTH_TOKEN_KEY = 'auth_token';
+const USER_DATA_KEY = 'user_data';
 
 /**
  * Role normalization helpers for API v2.
@@ -109,7 +108,7 @@ export const authRepository = {
       // 2. Server-side validation check
       await apiClient.get(`${API_ENDPOINTS.APPOINTMENTS}?page=1&limit=1`);
       return true;
-    } catch (err) {
+    } catch {
       // 401 Unauthorized is caught by apiClient interceptor which calls notifySessionExpired()
       return false;
     }

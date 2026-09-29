@@ -65,13 +65,9 @@ export default function ClientsScreen() {
 
   // State to filter clients list
   const [clientsList, setClientsList] = useState([]);
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const isFirstMountRef = useRef(true);
   const isFetchingRef = useRef(false);
   const pageRef = useRef(1);
   const hasMoreRef = useRef(true);
@@ -108,14 +104,11 @@ export default function ClientsScreen() {
         }
         const currentPageNum = Number(res.page) || pageToFetch;
         pageRef.current = currentPageNum;
-        setPage(currentPageNum);
-        setTotalPages(res.totalPages || 1);
 
         const moreAvailable = res.hasMore !== undefined
           ? Boolean(res.hasMore)
           : (newItems.length >= 20);
         hasMoreRef.current = moreAvailable;
-        setHasMore(moreAvailable);
       }
     } catch (err) {
       console.warn('Failed to load clients:', err.message);
@@ -131,7 +124,6 @@ export default function ClientsScreen() {
     useCallback(() => {
       pageRef.current = 1;
       hasMoreRef.current = true;
-      setHasMore(true);
       fetchClientsPage(1, false);
     }, [fetchClientsPage])
   );
@@ -139,7 +131,6 @@ export default function ClientsScreen() {
   const onRefresh = async () => {
     pageRef.current = 1;
     hasMoreRef.current = true;
-    setHasMore(true);
     await fetchClientsPage(1, true);
   };
 

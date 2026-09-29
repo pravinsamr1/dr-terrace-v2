@@ -13,7 +13,6 @@ import {
   Linking,
   ActivityIndicator,
 } from 'react-native';
-import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -27,7 +26,6 @@ import { DEFAULT_FALLBACKS } from '../../../shared/constants/fallbackDefaults';
 import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
 
 export default function AttendanceLeaveScreen() {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';

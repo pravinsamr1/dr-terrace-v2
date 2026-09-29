@@ -22,7 +22,6 @@ import { getPincodeForArea } from '../../../shared/constants/chennai-areas';
 import InnerHeader from '../../../shared/components/InnerHeader';
 import { MaterialAlertModal, MaterialFormSkeleton, MaterialOverlayLoader, MaterialSuccessModal } from '../../../shared/components/material';
 import { appointmentRepository as appointmentService } from '../../appointments/api/appointmentRepository';
-import { authRepository } from '../../auth/api/authRepository';
 import { employeeRepository as employeeService } from '../../employees/api/employeeRepository';
 import { isPastDate } from '../../../core/utils/validation';
 
@@ -154,11 +153,6 @@ export default function EditAppointmentScreen() {
   const { id } = useLocalSearchParams();
   const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme();
-  const [userRole, setUserRole] = useState('master');
-
-  useEffect(() => {
-    authRepository.getUser().then((u) => { if (u?.role) setUserRole(u.role); });
-  }, []);
 
   const isDark = colorScheme === 'dark';
   const [isLoadingDetails, setIsLoadingDetails] = useState(true);

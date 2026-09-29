@@ -32,8 +32,8 @@ const generateHTML = (app, quote, isExport = false, fallbackQuoteId = '') => {
     ? (String(qId).startsWith('DRT-') ? String(qId) : `DRT-${qId}`)
     : (quote.quoteNo ? (String(quote.quoteNo).startsWith('DRT-') ? String(quote.quoteNo) : `DRT-${quote.quoteNo}`) : '');
 
-  const qTier = (quote.package.name).toUpperCase();
-  const rawWarranty = quote.package.warranty;
+  const qTier = String(quote.package?.name).toUpperCase();
+  const rawWarranty = quote.package?.warranty ?? quote.warranty;
   const warrantyText = String(rawWarranty).toUpperCase().includes('WARRANTY')
     ? String(rawWarranty).toUpperCase()
     : `${String(rawWarranty).toUpperCase()} WARRANTY`;
@@ -803,15 +803,18 @@ export default function SendQuotationScreen() {
           }
 
           if (targetQuote) {
+            const customer = targetQuote.customer || {};
+            const address = targetQuote.address || customer.address || {};
             targetApp = {
               ...targetQuote,
-              clientName: targetQuote.clientName || targetQuote.customerName,
-              customerName: targetQuote.customerName || targetQuote.clientName,
-              mobileNumber: targetQuote.mobileNumber || targetQuote.phone,
-              phone: targetQuote.phone || targetQuote.mobileNumber,
-              area: targetQuote.address?.area || targetQuote.address?.city || targetQuote.area || '',
-              location: targetQuote.address?.area || targetQuote.address?.city || targetQuote.location || '',
-              city: targetQuote.address?.city || targetQuote.city || '',
+              clientName: targetQuote.clientName || targetQuote.customerName || customer.name,
+              customerName: targetQuote.customerName || targetQuote.clientName || customer.name,
+              mobileNumber: targetQuote.mobileNumber || targetQuote.phone || customer.mobile,
+              phone: targetQuote.phone || targetQuote.mobileNumber || customer.mobile,
+              area: address.area || address.city || targetQuote.area || '',
+              location: address.area || address.city || targetQuote.location || '',
+              city: address.city || targetQuote.city || '',
+              propertyType: targetQuote.propertyType || targetQuote.property?.name,
             };
           }
         } catch (err) {
@@ -839,9 +842,9 @@ export default function SendQuotationScreen() {
     };
   }, [id, quoteId]);
 
-  const clientFullName = (app.clientName || app.customerName || 'Customer').trim();
+  const clientFullName = String(quote.customer?.name || app.clientName || app.customerName || 'Customer').trim();
   const quotationTier = (() => {
-    const raw = (quote.packageName || quote.quoteFor || '').toUpperCase();
+    const raw = String(quote.package?.tier || quote.package?.name || quote.packageName || quote.quoteFor || '').toUpperCase();
     if (raw.includes('PREMIUM') || raw.includes('MID')) return 'Premium';
     if (raw.includes('ELITE') || raw.includes('LUXURY')) return 'Elite';
     return 'Economy';

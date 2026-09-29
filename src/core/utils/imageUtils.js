@@ -98,7 +98,7 @@ export function formatFileSize(bytes) {
  * Derives the root server URL (origin) from API_BASE_URL by stripping `/api/v1` or `/api/v2` suffixes.
  * E.g., 'https://example.com/api/v2' -> 'https://example.com'
  */
-export function getServerOrigin() {
+function getServerOrigin() {
   const base = API_BASE_URL || '';
   return base.replace(/\/api\/v[12]\/?$/i, '').replace(/\/$/, '');
 }

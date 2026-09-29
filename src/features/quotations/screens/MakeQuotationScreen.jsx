@@ -591,10 +591,7 @@ export default function MakeQuotationScreen() {
     return ['Terrace Waterproofing', 'Bathroom Waterproofing'];
   }, [dynamicServicesMap]);
 
-  const propertyOptions = useMemo(() => {
-    if (propertiesList.length > 0) return propertiesList.map((p) => p.name);
-    return ['House (Residential)', 'Apartment / Flat', 'Villa / Bungalow', 'Commercial Property'];
-  }, [propertiesList]);
+  const propertyOptions = useMemo(() => propertiesList.map((p) => p.name), [propertiesList]);
 
   const getDynamicSubtitles = useCallback((serviceName, tierName) => {
     if (!serviceName) return [];

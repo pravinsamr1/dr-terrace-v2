@@ -1,4 +1,3 @@
-import React from 'react';
 import { Platform, StyleSheet, Text, TextInput } from 'react-native';
 
 const FONT_MAP = {
@@ -163,16 +162,5 @@ Text.defaultProps.style = [defaultTextStyle, Text.defaultProps.style];
 
 if (!TextInput.defaultProps) TextInput.defaultProps = {};
 TextInput.defaultProps.style = [defaultTextStyle, TextInput.defaultProps.style];
-
-// 4. Wrapped Text and TextInput components that guarantee Plus Jakarta Sans for inline styles
-export const AppText = React.forwardRef((props, ref) => {
-  return <Text ref={ref} {...props} style={transformStyleForJakarta(props.style, true)} />;
-});
-AppText.displayName = 'AppText';
-
-export const AppTextInput = React.forwardRef((props, ref) => {
-  return <TextInput ref={ref} {...props} style={transformStyleForJakarta(props.style, true)} />;
-});
-AppTextInput.displayName = 'AppTextInput';
 
 export default true;
