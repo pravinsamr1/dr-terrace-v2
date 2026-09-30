@@ -107,12 +107,9 @@ export default function WarrantyLetterScreen() {
   const serviceType = appointment?.serviceType || 'Waterproofing System';
 
   const nameLower = appointment?.clientName?.trim?.().toLowerCase() || '';
-  const hasPrefix =
-    nameLower.startsWith('mr.') ||
-    nameLower.startsWith('mrs.') ||
-    nameLower.startsWith('ms.');
+  const hasPrefix = ""
   const clientName = appointment?.clientName
-    ? ((hasPrefix ? '' : 'MR.') + appointment.clientName.toUpperCase())
+    ? ((hasPrefix ? '' : '') + appointment.clientName.toUpperCase())
     : 'VALUED CLIENT';
   const address = (appointment?.address || appointment?.location || 'Chennai').toUpperCase();
   const mobile = appointment?.mobile || appointment?.phone || appointment?.mobileNumber || '';
@@ -126,7 +123,7 @@ export default function WarrantyLetterScreen() {
       ? formatDateDDMMYY(appointment.warranty.completedDate)
       : 'N/A';
 
-  const validYears = appointment?.warranty?.validYears || '10 Years';
+  const validYears = appointment?.warranty?.validYears;
   const serviceWarranties = appointment?.warranty?.serviceWarranties || [];
 
   // PDF
@@ -306,7 +303,7 @@ export default function WarrantyLetterScreen() {
           {/* Intro */}
           <Text style={styles.body}>
             {'This is to certify that we have done a '}
-            <Text style={styles.bold}>{serviceType}</Text>
+            <Text style={[styles.body, { fontWeight: '700', color: '#0F172A'}]}>{serviceType}</Text>
             {' in the below mentioned building if require in future in order to claim the warranty please submit this along with your building leaking pictures.'}
           </Text>
 

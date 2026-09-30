@@ -90,10 +90,6 @@ export default function PaymentFormScreen() {
   const [dateObj, setDateObj] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
 
-  // ─── GST decision (final settlement only) ───────────────────────────────
-  const [applyGst, setApplyGst] = useState(false);
-  const [customerGstNumber, setCustomerGstNumber] = useState('');
-
   // ─── Proof image ─────────────────────────────────────────────────────────
   const [proofImage, setProofImage] = useState(null); // { uri, name, type, size? }
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -158,21 +154,11 @@ export default function PaymentFormScreen() {
     if (!paymentSummary) return;
     const progress = paymentSummary.progress || {};
     if (isFinalSettlement) {
-      // Pre-fill the without-GST balance; user can toggle applyGst to see the GST amount
-      const bal = Number(applyGst
-        ? progress.withGstBalance
-        : progress.withoutGstBalance) || 0;
+      // Final settlement pays the whole remaining balance (grand total - paid)
+      const bal = Number(progress.balanceAmount) || 0;
       if (bal > 0) setPaymentAmount(String(bal));
     }
   }, [paymentSummary, isFinalSettlement]);
-
-  // ─── Recalculate final amount when applyGst changes ────────────────────
-  useEffect(() => {
-    if (!isFinalSettlement || !paymentSummary) return;
-    const progress = paymentSummary.progress || {};
-    const bal = Number(applyGst ? progress.withGstBalance : progress.withoutGstBalance) || 0;
-    if (bal > 0) setPaymentAmount(String(bal));
-  }, [applyGst, paymentSummary, isFinalSettlement]);
 
   // ─── Proof image handlers ─────────────────────────────────────────────────
   const handleTakePhoto = async () => {
@@ -289,10 +275,11 @@ export default function PaymentFormScreen() {
       return false;
     }
 
-    if (isFinalSettlement && applyGst && !customerGstNumber.trim()) {
+    const balanceLimit = Math.round(Number(paymentSummary?.progress?.balanceAmount));
+    if (Number.isFinite(balanceLimit) && amt > balanceLimit) {
       Alert.alert(
-        'GST Number Required',
-        'A customer GSTIN is required when applying GST to the final settlement.'
+        'Amount Exceeds Balance',
+        `Payment amount (₹${Math.round(amt).toLocaleString()}) exceeds the remaining balance (₹${balanceLimit.toLocaleString()}).`
       );
       return false;
     }
@@ -347,14 +334,9 @@ export default function PaymentFormScreen() {
 
       let result;
       if (isFinalSettlement) {
-        const finalPayload = {
-          ...basePayload,
-          applyGst,
-          customerGstNumber: applyGst ? customerGstNumber.trim() : undefined,
-        };
         result = await quotationPaymentRepository.recordFinalSettlement(
           quotationId,
-          finalPayload,
+          basePayload,
           { onUploadProgress }
         );
       } else {
@@ -368,7 +350,7 @@ export default function PaymentFormScreen() {
       if (result?.success) {
         const summary = result.data?.summary || {};
         const paymentStatus = summary?.progress?.paymentStatus || '';
-        const gstDecision = summary?.gstDecision || '';
+        const invoiceType = summary?.invoiceType || '';
 
         const isFullyPaidNow = paymentStatus === 'FULLY_PAID' || isFinalSettlement;
         const alertButtons = isFullyPaidNow
@@ -401,7 +383,7 @@ export default function PaymentFormScreen() {
           isFinalSettlement ? 'Final Settlement Recorded' : 'Payment Recorded',
           result.message ||
             (isFinalSettlement
-              ? `Final settlement completed. GST: ${gstDecision || (applyGst ? 'APPLIED' : 'OPTED_OUT')}. Status: ${paymentStatus || 'FULLY_PAID'}.`
+              ? `Final settlement completed.${invoiceType === 'TAX_INVOICE' ? ' Tax invoice.' : invoiceType === 'CASH_BILL' ? ' Cash bill.' : ''} Status: ${paymentStatus || 'FULLY_PAID'}.`
               : 'Payment recorded successfully. Awaiting Admin verification.'),
           alertButtons
         );
@@ -422,13 +404,14 @@ export default function PaymentFormScreen() {
   // ─── Derived display values ──────────────────────────────────────────────
   const pricing = paymentSummary?.pricing || {};
   const progress = paymentSummary?.progress || {};
-  const withoutGstTotal = Math.round(Number(pricing.withoutGstTotal ?? params.withoutGstTotal ?? 0));
+  const grandTotal = Math.round(Number(pricing.grandTotal ?? params.grandTotal ?? 0));
   const totalPaid = Math.round(Number(progress.totalPaid ?? 0));
-  const withoutGstBalance = Math.round(Number(progress.withoutGstBalance ?? params.remainingBalance ?? 0));
-  const withGstBalance = Math.round(Number(progress.withGstBalance ?? params.withGstBalance ?? 0));
+  const balanceAmount = Math.round(Number(progress.balanceAmount ?? params.remainingBalance ?? 0));
   const paymentStatus = progress.paymentStatus || 'UNPAID';
   const hasUnverifiedPayments = Boolean(paymentSummary?.hasUnverifiedPayments);
-  const gstDecision = paymentSummary?.gstDecision || 'PENDING';
+  const isTaxCustomer = paymentSummary?.isTaxCustomer != null
+    ? Boolean(paymentSummary.isTaxCustomer)
+    : (paymentSummary?.gstDecision === 'APPLIED' || params.hasGst === 'true');
 
   const selectedBank = bankAccounts.find((b) => String(b.id) === String(selectedBankId)) || bankAccounts[0] || null;
 
@@ -528,9 +511,9 @@ export default function PaymentFormScreen() {
                 Payment Progress
               </Text>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-                <Text style={{ fontSize: 12, color: C.sub }}>Without GST Total</Text>
+                <Text style={{ fontSize: 12, color: C.sub }}>{pricing.gst ? 'Total Payable (incl. GST)' : 'Total Payable'}</Text>
                 <Text style={{ fontSize: 14, fontWeight: '700', color: C.text }}>
-                  ₹{withoutGstTotal.toLocaleString()}
+                  ₹{grandTotal.toLocaleString()}
                 </Text>
               </View>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -541,23 +524,15 @@ export default function PaymentFormScreen() {
               </View>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
                 <Text style={{ fontSize: 12, color: C.sub }}>Remaining Balance</Text>
-                <Text style={{ fontSize: 14, fontWeight: '700', color: withoutGstBalance > 0 ? C.danger : C.success }}>
-                  ₹{withoutGstBalance.toLocaleString()}
+                <Text style={{ fontSize: 14, fontWeight: '700', color: balanceAmount > 0 ? C.danger : C.success }}>
+                  ₹{balanceAmount.toLocaleString()}
                 </Text>
               </View>
-              {/* {withGstBalance > 0 && (
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                  <Text style={{ fontSize: 12, color: C.sub }}>Balance with GST</Text>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: C.text }}>
-                    ₹{withGstBalance.toLocaleString()}
-                  </Text>
-                </View>
-              )} */}
             </View>
           )}
 
           {/* Fully Paid Status & Create Full Receipt banner */}
-          {(paymentStatus === 'FULLY_PAID' || (withoutGstBalance <= 0 && totalPaid > 0)) && (
+          {(paymentStatus === 'FULLY_PAID' || (balanceAmount <= 0 && totalPaid > 0)) && (
             <View style={[styles.card, { backgroundColor: isDark ? 'rgba(5,150,105,0.15)' : '#DCFCE7', borderColor: '#86EFAC', marginBottom: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 14 }]}>
               <View style={{ flex: 1, marginRight: 10 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
@@ -587,7 +562,7 @@ export default function PaymentFormScreen() {
                       id: params.id,
                       quotationId: quotationId,
                       isFullServiceReceipt: 'true',
-                      hasGst: (gstDecision === 'APPLIED' || params.hasGst === 'true') ? 'true' : 'false',
+                      hasGst: isTaxCustomer ? 'true' : 'false',
                     },
                   });
                 }}
@@ -616,85 +591,6 @@ export default function PaymentFormScreen() {
             </View>
           )}
 
-          {/* GST Decision section (final settlement only) */}
-          {isFinalSettlement && (
-            <View style={[styles.card, { backgroundColor: C.card, borderColor: C.border, marginBottom: 14 }]}>
-              <Text style={{ fontSize: 15, fontWeight: '700', color: C.text, marginBottom: 12 }}>
-                GST Treatment
-              </Text>
-              <Text style={{ fontSize: 13, color: C.sub, marginBottom: 14, lineHeight: 18 }}>
-                Choose how GST applies to the final settlement. This decision is permanent once submitted.
-              </Text>
-
-              {/* Without GST option */}
-              <TouchableOpacity
-                style={[
-                  styles.gstOption,
-                  {
-                    borderColor: !applyGst ? C.primary : C.border,
-                    backgroundColor: !applyGst ? (isDark ? '#1E3A8A22' : '#EFF6FF') : C.inputBg,
-                  },
-                ]}
-                onPress={() => setApplyGst(false)}
-                activeOpacity={0.8}
-              >
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                  <View style={[styles.radioOuter, { borderColor: !applyGst ? C.primary : C.border }]}>
-                    {!applyGst && <View style={[styles.radioInner, { backgroundColor: C.primary }]} />}
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 14, fontWeight: '700', color: C.text }}>Without GST</Text>
-                    <Text style={{ fontSize: 12, color: C.sub, marginTop: 2 }}>
-                      Settle ₹{withoutGstBalance.toLocaleString()} · Quotation: OPTED_OUT
-                    </Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
-
-              {/* With GST option */}
-              <TouchableOpacity
-                style={[
-                  styles.gstOption,
-                  {
-                    borderColor: applyGst ? C.success : C.border,
-                    backgroundColor: applyGst ? (isDark ? '#06402B22' : '#DCFCE7') : C.inputBg,
-                    marginTop: 10,
-                  },
-                ]}
-                onPress={() => setApplyGst(true)}
-                activeOpacity={0.8}
-              >
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                  <View style={[styles.radioOuter, { borderColor: applyGst ? C.success : C.border }]}>
-                    {applyGst && <View style={[styles.radioInner, { backgroundColor: C.success }]} />}
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 14, fontWeight: '700', color: C.text }}>With 18% GST</Text>
-                    <Text style={{ fontSize: 12, color: C.sub, marginTop: 2 }}>
-                      Settle ₹{withGstBalance.toLocaleString()} · Quotation: APPLIED
-                    </Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
-
-              {/* Customer GSTIN (required when applyGst = true) */}
-              {applyGst && (
-                <View style={{ marginTop: 14 }}>
-                  <Text style={[styles.label, { color: C.sub }]}>Customer GSTIN *</Text>
-                  <TextInput
-                    style={[styles.input, { backgroundColor: C.inputBg, borderColor: C.border, color: C.text }]}
-                    value={customerGstNumber}
-                    onChangeText={setCustomerGstNumber}
-                    placeholder="e.g. 33AAAAA0000A1Z5"
-                    placeholderTextColor={C.sub}
-                    autoCapitalize="characters"
-                    maxLength={15}
-                  />
-                </View>
-              )}
-            </View>
-          )}
-
           {/* Amount */}
           <View style={[styles.card, { backgroundColor: C.card, borderColor: C.border, marginBottom: 14 }]}>
             <Text style={[styles.label, { color: C.sub }]}>
@@ -711,9 +607,7 @@ export default function PaymentFormScreen() {
             />
             {isFinalSettlement && (
               <Text style={{ fontSize: 11, color: C.sub, marginTop: 6 }}>
-                {applyGst
-                  ? `With GST balance: ₹${withGstBalance.toLocaleString()}`
-                  : `Without GST balance: ₹${withoutGstBalance.toLocaleString()}`}
+                {`Balance to settle: ₹${balanceAmount.toLocaleString()} · ${isTaxCustomer ? 'Tax invoice' : 'Cash bill'}`}
               </Text>
             )}
           </View>
@@ -1202,24 +1096,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 3,
-  },
-  gstOption: {
-    borderWidth: 2,
-    borderRadius: 14,
-    padding: 14,
-  },
-  radioOuter: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  radioInner: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
   },
   uploadBtn: {
     borderWidth: 2,

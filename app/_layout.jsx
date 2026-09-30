@@ -237,6 +237,7 @@ function RootLayoutContent() {
           <Stack.Screen name="additional-payment" options={{ headerShown: false }} />
           <Stack.Screen name="payment-verification" options={{ headerShown: false }} />
           <Stack.Screen name="receipt" options={{ headerShown: false }} />
+          <Stack.Screen name="proforma-invoice" options={{ headerShown: false }} />
           <Stack.Screen name="employee-add" options={{ headerShown: false }} />
           <Stack.Screen name="employee-list" options={{ headerShown: false }} />
           <Stack.Screen name="employee-detail" options={{ headerShown: false }} />

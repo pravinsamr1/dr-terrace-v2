@@ -31,15 +31,15 @@
 /**
  * @typedef {Object} QuotationVerifyPricing
  * @property {number} subTotal
- * @property {number} withoutGstTotal
- * @property {number} withGstTotal
+ * @property {{percentage: number, amountForTax: number, amountForNonTax: number} | null} discount
+ * @property {{percentage: number, amount: number, cgst: {percentage: number, amount: number}, sgst: {percentage: number, amount: number}} | null} gst
+ * @property {number} grandTotal - amount payable, computed by the server from the quotation pricing rules
  */
 
 /**
  * @typedef {Object} QuotationVerifyProgress
  * @property {number} totalPaid
- * @property {number} withGstBalance
- * @property {number} withoutGstBalance
+ * @property {number} balanceAmount - grandTotal - totalPaid; the balance to show and pay against
  * @property {'UNPAID' | 'PARTIALLY_PAID' | 'FULLY_PAID'} paymentStatus
  */
 
@@ -53,7 +53,9 @@
  * @property {string} [clientMobile]
  * @property {string} siteAddress
  * @property {boolean} isConfirmed
- * @property {'PENDING' | 'APPLIED' | 'OPTED_OUT' | string} gstDecision
+ * @property {'APPLIED' | 'OPTED_OUT' | string} gstDecision
+ * @property {boolean} isTaxCustomer - tax invoice (true) vs cash bill (false); GST itself follows pricing.gst
+ * @property {'TAX_INVOICE' | 'CASH_BILL' | string} invoiceType
  * @property {string | null} customerGstNumber
  * @property {QuotationVerifyPricing} pricing
  * @property {QuotationVerifyProgress} progress
@@ -132,7 +134,6 @@ export const PAYMENT_METHODS = {
 };
 
 export const GST_DECISIONS = {
-  PENDING: 'PENDING',
   APPLIED: 'APPLIED',
   OPTED_OUT: 'OPTED_OUT',
 };

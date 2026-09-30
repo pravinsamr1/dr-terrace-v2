@@ -19,8 +19,10 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from '../../../core/hooks/useColorScheme';
 import { transformStyleForJakarta } from '../../../core/theme/initFonts';
-import { isPastDate } from '../../../core/utils/validation';
+import { isPastDate, isValidGstin } from '../../../core/utils/validation';
 import { formatDateDDMMYY, toApiDateString, parseDateToDateObj } from '../../../core/utils/dateFormat';
+import { calculateQuotationPricing, lineAmount } from '../utils/quotationPricing';
+import { extractValidTillDate } from '../utils/quotationValidity';
 import InnerHeader from '../../../shared/components/InnerHeader';
 import { MaterialAlertModal, MaterialFormSkeleton, MaterialOverlayLoader } from '../../../shared/components/material';
 import { appointmentRepository as appointmentService } from '../../appointments/api/appointmentRepository';
@@ -255,15 +257,15 @@ export default function MakeQuotationScreen() {
     return true;
   });
   const [gstPercent, setGstPercent] = useState('18');
+  const [customerGstNumber, setCustomerGstNumber] = useState('');
+  // Customer type only decides the final document (tax invoice vs cash bill); it never changes GST amounts
+  const [isGstCustomer, setIsGstCustomer] = useState(true);
   const [discountPercent, setDiscountPercent] = useState('');
   const [discountAmount, setDiscountAmount] = useState(0);
   const [subtotal, setSubtotal] = useState(0);
   const [total, setTotal] = useState(0);
 
-  // Milestone Terms & Clauses
-  const [advancePercent, setAdvancePercent] = useState('60');
-  const [midPercent, setMidPercent] = useState('30');
-  const [finalPercent, setFinalPercent] = useState('10');
+  // Terms & Clauses
   const [validityText, setValidityText] = useState(getValidityFormatted);
   const [negotiationNote, setNegotiationNote] = useState('PRICE IS NEGOTIABLE FOR IMMEDIATE ORDER');
   const [workStartNote, setWorkStartNote] = useState('Work can be started 48hrs from the time of payment received');
@@ -688,9 +690,6 @@ export default function MakeQuotationScreen() {
       discountAmount,
       gstAdded,
       gstPercent,
-      advancePercent,
-      midPercent,
-      finalPercent,
       validityText,
       negotiationNote,
       workStartNote,
@@ -710,9 +709,6 @@ export default function MakeQuotationScreen() {
     discountAmount,
     gstAdded,
     gstPercent,
-    advancePercent,
-    midPercent,
-    finalPercent,
     validityText,
     negotiationNote,
     workStartNote,
@@ -726,8 +722,14 @@ export default function MakeQuotationScreen() {
     if (tierId === activeTier) {
       return total;
     }
-    if (drafts && drafts[tierId]?.total != null) {
-      return drafts[tierId].total;
+    const draft = drafts && drafts[tierId];
+    if (draft) {
+      return calculateQuotationPricing({
+        subTotal: draft.subtotal,
+        gstPercentage: draft.gstAdded ? draft.gstPercent : 0,
+        discountPercentage: draft.discountPercent,
+        isTaxCustomer: isGstCustomer,
+      }).grandTotal;
     }
 
     // Estimate based on active services & rates for tierId
@@ -735,18 +737,16 @@ export default function MakeQuotationScreen() {
     Object.keys(selectedServicesMap).forEach((sName) => {
       if (selectedServicesMap[sName]) {
         const cfg = servicesConfig[sName] || {};
-        const aVal = parseFloat(cfg.area || siteArea) || 0;
-        const rVal = parseFloat(getDynamicRate(sName, tierId)) || 0;
-        sub += aVal * rVal;
+        sub += lineAmount(cfg.area || siteArea, getDynamicRate(sName, tierId));
       }
     });
-    const gstFactor = gstAdded ? (parseFloat(gstPercent) || 0) / 100 : 0;
-    const tax = Math.round(sub * gstFactor);
-    const baseWithGst = sub + tax;
-    const discPct = Math.max(0, Math.min(100, parseFloat(discountPercent) || 0));
-    const discAmt = discPct > 0 ? (baseWithGst * discPct) / 100 : 0;
-    return Math.max(0, baseWithGst - discAmt);
-  }, [activeTier, total, selectedServicesMap, servicesConfig, siteArea, getDynamicRate, gstAdded, gstPercent, discountPercent]);
+    return calculateQuotationPricing({
+      subTotal: sub,
+      gstPercentage: gstAdded ? gstPercent : 0,
+      discountPercentage: discountPercent,
+      isTaxCustomer: isGstCustomer,
+    }).grandTotal;
+  }, [activeTier, total, selectedServicesMap, servicesConfig, siteArea, getDynamicRate, gstAdded, gstPercent, discountPercent, isGstCustomer]);
 
   // Handle Switching Tiers (Economic / Premium / Elite)
   const handleSelectTier = useCallback((tierId, force = false) => {
@@ -769,17 +769,6 @@ export default function MakeQuotationScreen() {
         if (targetDraft.servicesConfig) setServicesConfig(targetDraft.servicesConfig);
         if (targetDraft.discountPercent !== undefined) setDiscountPercent(targetDraft.discountPercent);
         if (targetDraft.gstAdded !== undefined) setGstAdded(targetDraft.gstAdded);
-        let dAdv = parseFloat(targetDraft.advancePercent);
-        let dMid = parseFloat(targetDraft.midPercent);
-        let dFin = parseFloat(targetDraft.finalPercent);
-        if (isNaN(dAdv) || isNaN(dMid) || isNaN(dFin) || Math.abs((dAdv + dMid + dFin) - 100) > 0.5) {
-          dAdv = 60;
-          dMid = 30;
-          dFin = 10;
-        }
-        setAdvancePercent(String(dAdv));
-        setMidPercent(String(dMid));
-        setFinalPercent(String(dFin));
         if (targetDraft.validityText) setValidityText(targetDraft.validityText);
         if (targetDraft.negotiationNote) setNegotiationNote(targetDraft.negotiationNote);
         if (targetDraft.workStartNote) setWorkStartNote(targetDraft.workStartNote);
@@ -992,26 +981,21 @@ export default function MakeQuotationScreen() {
     Object.keys(selectedServicesMap).forEach((sName) => {
       if (selectedServicesMap[sName]) {
         const cfg = servicesConfig[sName] || {};
-        const aVal = parseFloat(cfg.area || siteArea) || 0;
-        const rVal = parseFloat(cfg.rate || 0) || 0;
-        sub += aVal * rVal;
+        sub += lineAmount(cfg.area || siteArea, cfg.rate);
       }
     });
 
     setSubtotal(sub);
 
-    const gstMultiplier = parseFloat(gstPercent) || 0;
-    const taxFactor = gstAdded ? gstMultiplier / 100 : 0;
-    const tax = Math.round(sub * taxFactor);
-    const baseWithGst = sub + (gstAdded ? tax : 0);
-
-    const discPct = Math.max(0, Math.min(100, parseFloat(discountPercent) || 0));
-    const discAmt = discPct > 0 ? (baseWithGst * discPct) / 100 : 0;
-    setDiscountAmount(discAmt);
-
-    const calculatedTotal = Math.max(0, baseWithGst - discAmt);
-    setTotal(calculatedTotal);
-  }, [siteArea, gstAdded, gstPercent, discountPercent, selectedServicesMap, servicesConfig]);
+    const pricing = calculateQuotationPricing({
+      subTotal: sub,
+      gstPercentage: gstAdded ? gstPercent : 0,
+      discountPercentage: discountPercent,
+      isTaxCustomer: isGstCustomer,
+    });
+    setDiscountAmount(pricing.discountAmount);
+    setTotal(pricing.grandTotal);
+  }, [siteArea, gstAdded, gstPercent, discountPercent, isGstCustomer, selectedServicesMap, servicesConfig]);
 
   useEffect(() => {
     handleCalculate();
@@ -1052,6 +1036,10 @@ export default function MakeQuotationScreen() {
         showAlert('Validation Error', `Please choose a variation / subtitle for "${sName}".`, 'warning');
         return false;
       }
+      if (cfg.serviceDetailId == null) {
+        showAlert('Validation Error', `"${sName}" is not available in the catalog for this package. Remove it or pick another variation.`, 'warning');
+        return false;
+      }
       const aVal = parseFloat(cfg.area);
       const rVal = parseFloat(cfg.rate);
       if (isNaN(aVal) || aVal <= 0) {
@@ -1064,13 +1052,25 @@ export default function MakeQuotationScreen() {
       }
     }
 
-    if (!validityText?.trim()) {
-      showAlert('Validation Error', 'Quote Validity Date / Note is required.', 'warning');
+    const validTillIso = extractValidTillDate(validityText);
+    if (!validTillIso) {
+      showAlert('Validation Error', 'Quote Validity must contain a valid date, e.g. "Quote Valid till 13-10-26".', 'warning');
+      return false;
+    }
+    if (validTillIso < toApiDateString(quotationDate)) {
+      showAlert('Validation Error', 'Quote Validity date cannot be before the Quotation Date.', 'warning');
+      return false;
+    }
+
+    if (isGstCustomer && customerGstNumber.trim() && !isValidGstin(customerGstNumber)) {
+      showAlert('Validation Error', 'Customer GSTIN is not valid. Expected format: 33AAAAA0000A1Z5.', 'warning');
       return false;
     }
 
     return true;
   }, [
+    customerGstNumber,
+    isGstCustomer,
     quotationDate,
     propertyType,
     quoteFor,
@@ -1116,150 +1116,58 @@ export default function MakeQuotationScreen() {
         || (isTierMatch(tierId, 'elite') && p.packageId === 3);
     });
     const resolvedPkgId = Number(selectedPkg?.packageId || selectedPkg?.id) || (isTierMatch(tierId, 'economic') ? 1 : tierId === 'elite' ? 3 : 2);
-    const warrantyVal = selectedPkg?.warranty || (isTierMatch(tierId, 'economic') ? '5 Years' : tierId === 'elite' ? '15 Years' : '10 Years');
 
     const draftServicesMap = draft?.selectedServicesMap || selectedServicesMap || {};
     const activeServicesList = Object.keys(draftServicesMap).filter((k) => draftServicesMap[k]);
-    const quotationServicesRequest = activeServicesList.map((sName, idx) => {
+    const quotationServicesRequest = activeServicesList.map((sName) => {
       const cfg = draft?.servicesConfig?.[sName] || servicesConfig[sName] || {};
-      const dynService = findServiceInMap(dynamicServicesMap, sName);
-
-      const areaVal = parseFloat(cfg.area || draft?.siteArea || siteArea || 0);
-      const rateVal = parseFloat(cfg.rate || 0);
-      const sDetailId = cfg.serviceDetailId != null ? Number(cfg.serviceDetailId) : null;
-      const sSubtitle = cfg.selectedSubtitle || cfg.subtitle || 'Default';
-      const sDesc = cfg.spec || (Array.isArray(cfg.specs) && cfg.specs.length > 0 ? cfg.specs.join(', ') : 'Standard Treatment');
-      const sWarranty = cfg.warranty || selectedPkg?.warranty || warrantyVal || '';
+      const serviceDetailId = cfg.serviceDetailId != null ? Number(cfg.serviceDetailId) : null;
+      if (!serviceDetailId) {
+        throw new Error(`"${sName}" is not available in the catalog for the ${tierId} package. Remove it or pick another variation.`);
+      }
+      const description = cfg.spec || (Array.isArray(cfg.specs) ? cfg.specs.filter(Boolean).join(', ') : '');
 
       return {
-        serviceId: Number(dynService?.serviceId || idx + 1),
-        serviceDetailId: sDetailId,
-        title: sName,
-        serviceName: sName,
-        subtitle: sSubtitle,
-        tierType: dynService?.tierType || 'MultiTier',
-        description: sDesc,
-        area: areaVal,
-        rate: rateVal,
-        totalPrice: Math.round(areaVal * rateVal),
-        warranty: sWarranty,
+        serviceDetailId,
+        area: parseFloat(cfg.area || draft?.siteArea || siteArea || 0),
+        rate: parseFloat(cfg.rate || 0),
+        ...(description ? { description } : {}),
       };
     });
 
-    const tierSubtotal = draft?.subtotal || 0;
+    // The server recalculates these with the same rules and rejects the request if they differ
+    const subTotalVal = quotationServicesRequest.reduce((sum, line) => sum + lineAmount(line.area, line.rate), 0);
+    const pricing = calculateQuotationPricing({
+      subTotal: subTotalVal,
+      gstPercentage: draft?.gstAdded ? draft?.gstPercent : 0,
+      discountPercentage: draft?.discountPercent,
+      isTaxCustomer: isGstCustomer,
+    });
 
-    const gstRate = parseFloat(draft?.gstPercent || 0);
-    const isGstOn = Boolean(draft?.gstAdded);
-    const gstAmount = isGstOn ? Math.round(tierSubtotal * (gstRate / 100)) : 0;
-    const baseWithGst = tierSubtotal + (isGstOn ? gstAmount : 0);
-
-    const discPct = Math.max(0, Math.min(100, parseFloat(draft?.discountPercent || 0)));
-    const discAmt = discPct > 0 ? Math.round((baseWithGst * discPct) / 100) : 0;
-    const calculatedTierTotal = Math.max(0, baseWithGst - discAmt);
-    const tierTotal = draft?.total != null ? draft.total : calculatedTierTotal;
-    const discountedSubtotal = Math.max(0, baseWithGst - discAmt);
-
-    let advPct = parseFloat(draft?.advancePercent ?? advancePercent ?? 60);
-    let midPct = parseFloat(draft?.midPercent ?? midPercent ?? 30);
-    let finPct = parseFloat(draft?.finalPercent ?? finalPercent ?? 10);
-    if (isNaN(advPct) || isNaN(midPct) || isNaN(finPct) || Math.abs((advPct + midPct + finPct) - 100) > 0.5) {
-      advPct = 60;
-      midPct = 30;
-      finPct = 10;
-    } else {
-      finPct = Math.round((100 - advPct - midPct) * 100) / 100;
-    }
-    const advanceAmount = Math.round((tierTotal * advPct) / 100);
-    const midCostAmount = Math.round((tierTotal * midPct) / 100);
-    const finalAmountVal = Math.round(tierTotal - advanceAmount - midCostAmount);
-
-    const empId = Number(currentUser?.id || currentUser?.employeeId || app?.assignedEmployeeId || app?.employeeId) || 2;
     const appId = Number(app?.appointmentId || app?.id || params.id) || null;
-    const custId = Number(app?.customerId || app?.id || params.id) || appId;
-
-    const quoteValidateDateVal = draft?.validityText?.trim() || validityText?.trim() || 'Quote Valid till 30 days';
-    const negotiationVal = draft?.negotiationNote?.trim() || negotiationNote?.trim() || 'Nil';
-    const workCommencementVal = draft?.workStartNote?.trim() || workStartNote?.trim() || 'Within 2 days of advance payment';
-    const withRegardsVal = draft?.withRegards?.trim() || withRegards?.trim() || 'Mr. SRIRAM';
-
-    const propNameVal = selectedProp?.name || targetPropType || 'House';
-    const pkgNameVal = selectedPkg?.packageName || selectedPkg?.name || (isTierMatch(tierId, 'economic') ? 'Acrylic Elastomeric Coating' : 'Waterproofing Treatment');
-    const pkgTierVal = selectedPkg?.packages && !isTierMatch(selectedPkg.packages, 'economic')
-      ? selectedPkg.packages
-      : (isTierMatch(tierId, 'economic') ? 'Economic' : tierId === 'elite' ? 'Elite' : 'Premium');
-
-    const cgstAmountVal = Math.round(gstAmount / 2);
-    const sgstAmountVal = gstAmount - cgstAmountVal;
-
-    const gstPayloadFields = isGstOn
-      ? {
-        gstPercentage: gstRate,
-        gstRate: gstRate,
-        gstAmount,
-        cgstPercentage: gstRate / 2,
-        sgstPercentage: gstRate / 2,
-        cgstAmount: cgstAmountVal,
-        sgstAmount: sgstAmountVal,
-        isGst: true,
-        gstAdded: true,
-      }
-      : {
-        gstPercentage: 0,
-        gstRate: 0,
-        gstAmount: 0,
-        cgstPercentage: 0,
-        sgstPercentage: 0,
-        cgstAmount: 0,
-        sgstAmount: 0,
-        isGst: false,
-        gstAdded: false,
-      };
+    const validTillVal = extractValidTillDate(draft?.validityText || validityText);
+    const withRegardsVal = (draft?.withRegards || withRegards || '').trim();
+    const negotiationVal = (draft?.negotiationNote || negotiationNote || '').trim();
+    const workCommencementVal = (draft?.workStartNote || workStartNote || '').trim();
 
     return {
-      quotationDate: formatToApiDate(draft?.quotationDate || quotationDate),
-      propertyId,
-      propertyName: propNameVal,
-      packageId: resolvedPkgId,
-      quoteFor: resolvedPkgId,
-      packageName: pkgNameVal,
-      packageTier: pkgTierVal,
       appointmentId: appId,
-      employeeId: empId,
-      customerId: custId,
-      withRegards: withRegardsVal,
-      withRegardsName: withRegardsVal,
-      isGst: isGstOn,
-      gstAdded: isGstOn,
+      propertyId,
+      packageId: resolvedPkgId,
+      quotationDate: formatToApiDate(draft?.quotationDate || quotationDate),
+      ...(validTillVal ? { validTill: validTillVal } : {}),
+      isTaxCustomer: isGstCustomer,
+      ...(isGstCustomer && customerGstNumber.trim() ? { customerGstNumber: customerGstNumber.trim().toUpperCase() } : {}),
+      ...(withRegardsVal ? { withRegards: withRegardsVal } : {}),
+      ...(negotiationVal ? { negotiation: negotiationVal } : {}),
+      ...(workCommencementVal ? { workCommencement: workCommencementVal } : {}),
       services: quotationServicesRequest,
-      advance: advanceAmount,
-      midCost: midCostAmount,
-      final: finalAmountVal,
-      advancePercent: advPct,
-      midPercent: midPct,
-      finalPercent: finPct,
-      paymentTerms: {
-        advance: advPct,
-        mid: midPct,
-        final: finPct,
-        validity: quoteValidateDateVal,
-        negotiation: negotiationVal,
-        workStart: workCommencementVal,
+      amount: {
+        gstPercentage: pricing.gstPercentage,
+        discountPercentage: pricing.discountPercentage,
+        subTotal: pricing.subTotal,
+        grandTotal: pricing.grandTotal,
       },
-      discount: discPct,
-      discountPercentage: discPct,
-      discountPercent: discPct,
-      discountAmount: discAmt,
-      subTotal: Math.round(tierSubtotal),
-      totalAmount: Math.round(discountedSubtotal),
-      grandTotal: Math.round(tierTotal),
-      totalWithGst: Math.round(tierTotal),
-      quoteValidateDate: quoteValidateDateVal,
-      negotiation: negotiationVal,
-      workCommencement: workCommencementVal,
-      warranty: warrantyVal,
-      revision: 1,
-      isConfirmed: false,
-      ...gstPayloadFields,
     };
   }, [
     quoteFor,
@@ -1269,18 +1177,15 @@ export default function MakeQuotationScreen() {
     selectedServicesMap,
     servicesConfig,
     siteArea,
-    dynamicServicesMap,
-    currentUser,
     app,
     params.id,
     validityText,
     negotiationNote,
     workStartNote,
     withRegards,
+    customerGstNumber,
+    isGstCustomer,
     quotationDate,
-    advancePercent,
-    midPercent,
-    finalPercent,
   ]);
 
   // Transition to next tier after saving current draft
@@ -1789,6 +1694,59 @@ export default function MakeQuotationScreen() {
             </View>
           )}
 
+          {/* Customer type: GST customer or Without GST customer */}
+          <View style={styles.inputGroup}>
+            <Text style={[styles.inputLabel, isDark && styles.labelDark]}>Customer Type</Text>
+            <View style={styles.gstRadioRow}>
+              {[
+                { value: true, label: 'GST Customer' },
+                { value: false, label: 'Without GST Customer' },
+              ].map((opt) => {
+                const selected = isGstCustomer === opt.value;
+                return (
+                  <TouchableOpacity
+                    key={opt.label}
+                    style={[
+                      styles.gstRadioOption,
+                      isDark && styles.gstRadioOptionDark,
+                      selected && (isDark ? styles.gstRadioOptionSelectedDark : styles.gstRadioOptionSelected),
+                    ]}
+                    onPress={() => setIsGstCustomer(opt.value)}
+                    activeOpacity={0.8}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected }}
+                  >
+                    <View style={[styles.gstRadioOuter, selected && styles.gstRadioOuterSelected]}>
+                      {selected && <View style={styles.gstRadioInner} />}
+                    </View>
+                    <Text style={[styles.gstLabelText, isDark && styles.textDark, { flexShrink: 1 }]}>{opt.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={[styles.gstRadioHint, isDark && styles.subtextDark]}>
+              GST Customer gets a tax invoice; Without GST Customer gets a cash bill.
+            </Text>
+          </View>
+
+          {isGstCustomer && (
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, isDark && styles.labelDark]}>Customer GSTIN (optional)</Text>
+              <View style={[styles.inputFieldWrap, isDark && styles.inputFieldWrapDark]}>
+                <TextInput
+                  style={[styles.textInput, isDark && styles.textDark]}
+                  value={customerGstNumber}
+                  onChangeText={(val) => setCustomerGstNumber(val.toUpperCase())}
+                  placeholder="e.g. 33AAAAA0000A1Z5"
+                  placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  maxLength={15}
+                />
+              </View>
+            </View>
+          )}
+
           {/* Discount Percentage */}
           <View style={styles.inputGroup}>
             <View style={styles.labelRowBetween}>
@@ -1863,7 +1821,7 @@ export default function MakeQuotationScreen() {
                 style={[styles.textInput, isDark && styles.textDark]}
                 value={validityText}
                 onChangeText={setValidityText}
-                placeholder="Quote Valid till..."
+                placeholder="Quote Valid till DD-MM-YY"
                 placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
               />
             </View>
@@ -2342,11 +2300,6 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     marginBottom: 8,
   },
-  gstLabelText: {
-    fontSize: 12.5,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
   gstBtn: {
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -2362,6 +2315,62 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  gstLabelText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  gstRadioRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  gstRadioHint: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 6,
+  },
+  gstRadioOption: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    backgroundColor: '#F8FAFC',
+  },
+  gstRadioOptionDark: {
+    borderColor: '#334155',
+    backgroundColor: '#1E293B',
+  },
+  gstRadioOptionSelected: {
+    borderColor: '#2B59A2',
+    backgroundColor: '#EFF6FF',
+  },
+  gstRadioOptionSelectedDark: {
+    borderColor: '#2B59A2',
+    backgroundColor: '#1E3A8A33',
+  },
+  gstRadioOuter: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#94A3B8',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gstRadioOuterSelected: {
+    borderColor: '#2B59A2',
+  },
+  gstRadioInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#2B59A2',
   },
   discountInputRow: {
     flexDirection: 'row',

@@ -441,17 +441,15 @@ export default function PaymentVerificationScreen() {
         clientName: payView.customer?.name || payView.clientName || client?.name || '',
         mobileNumber: payView.customer?.mobile || client?.mobileNumber || '',
         isConfirmed: payView.isConfirmed ?? true,
-        gstDecision: payView.gstDecision || 'PENDING',
+        gstDecision: payView.gstDecision || (payView.isTaxCustomer ? 'APPLIED' : 'OPTED_OUT'),
         customerGstNumber: payView.customerGstNumber || null,
         pricing: {
           subTotal: payView.subTotal || payView.totalPrice || 0,
-          withoutGstTotal: payView.withoutGstTotal || payView.totalPrice || 0,
-          withGstTotal: payView.withGstTotal || payView.totalWithGst || 0,
+          grandTotal: payView.pricing?.grandTotal ?? payView.grandTotal ?? payView.totalPrice ?? 0,
         },
         progress: {
           totalPaid: payView.totalPaid || 0,
-          withoutGstBalance: payView.balanceAmount || 0,
-          withGstBalance: payView.withGstBalance || 0,
+          balanceAmount: payView.progress?.balanceAmount ?? payView.balanceAmount ?? 0,
           paymentStatus: payView.status || 'PARTIALLY_PAID',
         },
         totalWithGst: payView.totalPrice || payView.totalWithGst || 0,
@@ -702,15 +700,13 @@ export default function PaymentVerificationScreen() {
 
   // Quotation Financial Summary (Section 13)
   const subTotal = pricing.subTotal !== undefined ? pricing.subTotal : quotationContext?.pricing?.subTotal ?? quotationContext?.totalWithGst ?? null;
-  const withoutGstTotal = pricing.withoutGstTotal !== undefined ? pricing.withoutGstTotal : quotationContext?.pricing?.withoutGstTotal ?? null;
-  const withGstTotal = pricing.withGstTotal !== undefined ? pricing.withGstTotal : quotationContext?.pricing?.withGstTotal ?? quotationContext?.totalWithGst ?? null;
+  const grandTotal = pricing.grandTotal !== undefined ? pricing.grandTotal : quotationContext?.pricing?.grandTotal ?? null;
   const totalPaid = progress.totalPaid !== undefined ? progress.totalPaid : quotationContext?.progress?.totalPaid ?? quotationContext?.totalPaid ?? null;
-  const withoutGstBalance = progress.withoutGstBalance !== undefined ? progress.withoutGstBalance : quotationContext?.progress?.withoutGstBalance ?? quotationContext?.balanceAmount ?? null;
-  const withGstBalance = progress.withGstBalance !== undefined ? progress.withGstBalance : quotationContext?.progress?.withGstBalance ?? null;
+  const balanceAmount = progress.balanceAmount !== undefined ? progress.balanceAmount : quotationContext?.progress?.balanceAmount ?? quotationContext?.balanceAmount ?? null;
   const paymentStatus = progress.paymentStatus || quotationContext?.progress?.paymentStatus || quotation.paymentStatus || null;
 
   // GST Information (Section 14)
-  const gstDecision = quotation.gstDecision || quotationContext?.gstDecision || 'PENDING';
+  const gstDecision = quotation.gstDecision || quotationContext?.gstDecision || '';
   const customerGstNumber = quotation.customerGstNumber || quotationContext?.customerGstNumber || null;
 
   const handleCopyText = async (text, fieldName = 'voucher') => {
@@ -1559,7 +1555,7 @@ export default function PaymentVerificationScreen() {
         )}
 
         {/* Quotation Financial Summary Card (Section 13) */}
-        {(subTotal !== null || withGstTotal !== null || totalPaid !== null) && (
+        {(subTotal !== null || grandTotal !== null || totalPaid !== null) && (
           <View style={[styles.specCard, isDark && styles.specCardDark]}>
             <Text style={styles.specSectionTitle}>QUOTATION FINANCIAL SUMMARY</Text>
 
@@ -1572,20 +1568,11 @@ export default function PaymentVerificationScreen() {
               </View>
             )}
 
-            {withoutGstTotal !== null && (
+            {grandTotal !== null && (
               <View style={styles.specRow}>
-                <Text style={styles.specLabel}>Without GST Total</Text>
+                <Text style={styles.specLabel}>{pricing?.gst ? 'Total Payable (incl. GST)' : 'Total Payable'}</Text>
                 <Text style={[styles.specValue, isDark && styles.textDark]}>
-                  ₹{Number(withoutGstTotal).toLocaleString()}
-                </Text>
-              </View>
-            )}
-
-            {withGstTotal !== null && (
-              <View style={styles.specRow}>
-                <Text style={styles.specLabel}>With GST Total</Text>
-                <Text style={[styles.specValue, isDark && styles.textDark]}>
-                  ₹{Number(withGstTotal).toLocaleString()}
+                  ₹{Number(grandTotal).toLocaleString()}
                 </Text>
               </View>
             )}
@@ -1599,30 +1586,16 @@ export default function PaymentVerificationScreen() {
               </View>
             )}
 
-            {withoutGstBalance !== null && (
+            {balanceAmount !== null && (
               <View style={styles.specRow}>
-                <Text style={styles.specLabel}>Without GST Balance</Text>
+                <Text style={styles.specLabel}>Balance</Text>
                 <Text
                   style={[
                     styles.specValue,
-                    { color: withoutGstBalance > 0 ? '#B45309' : '#16A34A', fontWeight: '800' },
+                    { color: balanceAmount > 0 ? '#B45309' : '#16A34A', fontWeight: '800' },
                   ]}
                 >
-                  ₹{Number(withoutGstBalance).toLocaleString()}
-                </Text>
-              </View>
-            )}
-
-            {withGstBalance !== null && (
-              <View style={styles.specRow}>
-                <Text style={styles.specLabel}>With GST Balance</Text>
-                <Text
-                  style={[
-                    styles.specValue,
-                    { color: withGstBalance > 0 ? '#B45309' : '#16A34A', fontWeight: '800' },
-                  ]}
-                >
-                  ₹{Number(withGstBalance).toLocaleString()}
+                  ₹{Number(balanceAmount).toLocaleString()}
                 </Text>
               </View>
             )}
@@ -1655,10 +1628,10 @@ export default function PaymentVerificationScreen() {
               <Text style={styles.specLabel}>GST Status</Text>
               <Text style={[styles.specValue, isDark && styles.textDark, { fontWeight: '700' }]}>
                 {gstDecision === 'APPLIED'
-                  ? 'GST Applied'
+                  ? 'GST Applied (Tax invoice)'
                   : gstDecision === 'OPTED_OUT'
-                  ? 'GST: Not Applied'
-                  : 'GST Decision: Pending'}
+                  ? 'No GST (Cash bill)'
+                  : '—'}
               </Text>
             </View>
 

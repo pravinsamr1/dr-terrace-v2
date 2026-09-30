@@ -580,7 +580,7 @@ export default function QuotationHistoryScreen() {
                               ₹{qAmount.toLocaleString()}
                             </Text>
                             <Text style={{ fontSize: 11, color: isDark ? '#94A3B8' : '#64748B', marginLeft: 6, fontWeight: '600' }}>
-                              {quote.gstAdded ? '(incl. GST)' : '(excl. GST)'}
+                              {quote.gstAdded === true ? '(incl. GST)' : quote.gstAdded === false ? '(excl. GST)' : ''}
                             </Text>
                           </View>
 

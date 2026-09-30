@@ -272,9 +272,9 @@ export const paymentRepository = {
    * Fetch the new quotation-payments summary.
    * GET /api/v2/quotation-payments/:id
    *
-   * Returns: { quotationId, clientName, gstDecision, customerGstNumber,
-   *   pricing { subTotal, withoutGstTotal, withGstTotal },
-   *   progress { totalPaid, withGstBalance, withoutGstBalance, paymentStatus },
+   * Returns: { quotationId, clientName, gstDecision, isTaxCustomer, invoiceType, customerGstNumber,
+   *   pricing { subTotal, discount, gst, grandTotal },
+   *   progress { totalPaid, balanceAmount, paymentStatus },
    *   history [], hasUnverifiedPayments, canMakePayment }
    */
   getPaymentSummary: async (quotationId) => {
@@ -392,8 +392,8 @@ export const paymentRepository = {
   },
 
   /**
-   * Confirm final settlement with deferred GST election.
-   * settlementPayload: { withGst, amount, paymentMethod, accountId?, voucher?, upiId?, notes? }
+   * Confirm final settlement. GST follows the quotation's isGst; withGst is optional and must match it (400 otherwise).
+   * settlementPayload: { withGst?, amount, paymentMethod, accountId?, voucher?, upiId?, notes? }
    */
   confirmFinalSettlement: async (quotationId, settlementPayload) => {
     try {
@@ -877,10 +877,11 @@ export const paymentRepository = {
    * Generate official Final Receipt (API v2 Section 11 / canonical POST).
    * POST /api/v2/quotations/:id/final-receipt
    * Payload: { customerGstNumber?: string }
+   * The receipt type (tax invoice / cash bill) follows the quotation's isGst; it is not chosen here.
    * Respects backend gatekeeper conditions:
-   * quotation confirmed, all services completed, GST confirmed, balance 0, unverified 0.
+   * quotation confirmed, all services completed, balance 0, unverified 0.
    */
-  generateFinalReceipt: async (quotationId, customerGstNumber = null, withGst = null) => {
+  generateFinalReceipt: async (quotationId, customerGstNumber = null) => {
     try {
       const cleanQuoteId = String(quotationId).replace(/\D/g, '') || quotationId;
       const gstVal = customerGstNumber ? String(customerGstNumber).trim() : null;
@@ -901,10 +902,6 @@ export const paymentRepository = {
             };
           }
         } catch (_postErr) {
-          const errMsg = _postErr?.response?.data?.message || _postErr?.message || '';
-          if (errMsg.toLowerCase().includes('gst decision') || errMsg.toLowerCase().includes('not been confirmed')) {
-            throw _postErr;
-          }
           // If already generated or GET fallback supported
           const getRes = await apiClient.get(endpoint, {
             params: gstVal ? { customerGstNumber: gstVal } : {},
@@ -922,29 +919,8 @@ export const paymentRepository = {
         return null;
       };
 
-      try {
-        const result = await executeReceiptCall();
-        if (result) return result;
-      } catch (firstErr) {
-        const errMsg = firstErr?.response?.data?.message || firstErr?.message || '';
-        if (errMsg.toLowerCase().includes('gst decision') || errMsg.toLowerCase().includes('not been confirmed')) {
-          const isWithGst = withGst !== null ? Boolean(withGst) : Boolean(gstVal);
-          try {
-            await paymentRepository.confirmFinalSettlement(cleanQuoteId, {
-              withGst: isWithGst,
-              ...(gstVal ? { customerGstNumber: gstVal } : {}),
-            });
-          } catch (_settleErr) {
-            await paymentRepository.updatePricingConfig(cleanQuoteId, {
-              withGst: isWithGst,
-            }).catch(() => {});
-          }
-          const retryResult = await executeReceiptCall();
-          if (retryResult) return retryResult;
-        } else {
-          throw firstErr;
-        }
-      }
+      const result = await executeReceiptCall();
+      if (result) return result;
 
       return {
         success: false,

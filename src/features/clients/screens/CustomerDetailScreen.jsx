@@ -18,6 +18,7 @@ import {
   Text as RNText,
   TextInput as RNTextInput,
   TouchableOpacity,
+  TurboModuleRegistry,
   View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -38,8 +39,10 @@ import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
 import { resolveProofImageUrl } from '../../../core/utils/imageUtils';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import { cacheDirectory, copyAsync, downloadAsync } from 'expo-file-system/legacy';
+import PdfThumbnail from 'react-native-pdf-thumbnail';
+import { cacheDirectory, copyAsync, deleteAsync, downloadAsync, getInfoAsync, writeAsStringAsync } from 'expo-file-system/legacy';
 import { generateTaxInvoiceHTML } from '../../payments/screens/ReceiptScreen';
+import { generateHTML as generateQuotationHTML } from '../../quotations/screens/SendQuotationScreen';
 
 const Text = React.forwardRef((props, ref) => (
   <RNText ref={ref} {...props} style={transformStyleForJakarta(props.style, true)} />
@@ -70,13 +73,22 @@ export default function CustomerDetailScreen() {
 
   const { handleScroll } = useTabBarScroll();
 
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedQuotationIds, setSelectedQuotationIds] = useState([]);
+  const [isSharing, setIsSharing] = useState(false);
+
   const handleBack = useCallback(() => {
+    if (isSelectionMode) {
+      setIsSelectionMode(false);
+      setSelectedQuotationIds([]);
+      return;
+    }
     if (router.canGoBack()) {
       router.back();
     } else {
       router.replace('/(tabs)');
     }
-  }, [router]);
+  }, [router, isSelectionMode]);
 
   useEffect(() => {
     const onBackPress = () => {
@@ -626,10 +638,10 @@ export default function CustomerDetailScreen() {
           quotationId: summaryData.quotationId || confirmedQuoteId,
           ...summaryData,
           // Map new API fields to legacy consumers
-          totalPrice: summaryData.pricing?.withoutGstTotal ?? summaryData.pricing?.subTotal,
-          totalWithGst: summaryData.pricing?.withGstTotal,
+          totalPrice: summaryData.pricing?.subTotal,
+          totalWithGst: summaryData.pricing?.grandTotal,
           totalPaid: summaryData.progress?.totalPaid,
-          balanceAmount: summaryData.progress?.withoutGstBalance,
+          balanceAmount: summaryData.progress?.balanceAmount,
           // history is already present in new API
           payments: summaryData.history || [],
           additionalServices: summaryData.additionalServices || summaryData.quotation?.additionalServices || (Array.isArray(summaryData.additionalPayment) ? summaryData.additionalPayment : summaryData.additionalPayment ? [summaryData.additionalPayment] : []),
@@ -1057,6 +1069,22 @@ export default function CustomerDetailScreen() {
     setShowFullReceiptModal(true);
   };
 
+  // Payments are numbered 1, 2, 3 ... in the order they were made for this customer's quotation,
+  // not by their global payment id (e.g. 622, 623).
+  const paymentList = Array.isArray(payView?.history)
+    ? payView.history
+    : (Array.isArray(payView?.payments) ? payView.payments : []);
+  const paymentSeqById = new Map(
+    paymentList
+      .filter((p) => p?.id != null)
+      .sort((a, b) => Number(a.id) - Number(b.id))
+      .map((p, i) => [String(p.id), i + 1])
+  );
+  const getPaymentLabel = (pay) => {
+    if (pay?.id == null) return 'Payment';
+    return `Payment ${paymentSeqById.get(String(pay.id)) ?? pay.id}`;
+  };
+
   const handleViewReceipt = (pay) => {
     if (!pay) return;
     const targetQuoteId =
@@ -1073,7 +1101,7 @@ export default function CustomerDetailScreen() {
       payView?.quotationTitle ||
       app?.service ||
       app?.serviceType ||
-      `Payment ${pay.id}`;
+      getPaymentLabel(pay);
 
     router.push({
       pathname: '/receipt',
@@ -1087,7 +1115,7 @@ export default function CustomerDetailScreen() {
         voucher: pay.voucher || pay.referenceNumber || '',
         method: pay.paymentMethod || pay.method || '',
         date: pay.paymentDate || pay.createdAt || '',
-        stage: pay.stage || pay.title || `Payment ${pay.id}`,
+        stage: pay.stage || pay.title || getPaymentLabel(pay),
         serviceTitle: resolvedServiceTitle,
         isFullServiceReceipt: 'false',
       },
@@ -1112,7 +1140,7 @@ export default function CustomerDetailScreen() {
         payView?.quotationTitle ||
         app?.service ||
         app?.serviceType ||
-        `Payment ${pay.id}`;
+        getPaymentLabel(pay);
 
       const receiptParams = {
         id: app?.id || params.id,
@@ -1124,7 +1152,7 @@ export default function CustomerDetailScreen() {
         voucher: pay.voucher || pay.referenceNumber || '',
         method: pay.paymentMethod || pay.method || '',
         date: pay.paymentDate || pay.createdAt || '',
-        stage: pay.stage || pay.title || `Payment ${pay.id}`,
+        stage: pay.stage || pay.title || getPaymentLabel(pay),
         serviceTitle: resolvedServiceTitle,
         isFullServiceReceipt: 'false',
       };
@@ -1193,7 +1221,7 @@ export default function CustomerDetailScreen() {
       }
 
       await Sharing.shareAsync(shareUri, {
-        dialogTitle: `Payment Proof - Payment #${pay.id}`,
+        dialogTitle: `Payment Proof - ${getPaymentLabel(pay)}`,
       });
     } catch (err) {
       Alert.alert('Error', 'Failed to share proof document: ' + err.message);
@@ -1208,7 +1236,7 @@ export default function CustomerDetailScreen() {
     if (hasProof) {
       Alert.alert(
         'Share Document',
-        `Choose document to share for Payment #${pay.id}`,
+        `Choose document to share for ${getPaymentLabel(pay)}`,
         [
           {
             text: 'Payment Receipt (PDF)',
@@ -1226,6 +1254,128 @@ export default function CustomerDetailScreen() {
     }
   };
 
+  // Proforma invoice (tax customers only): built from the quotation's pdf-view data and shared as a PDF
+  const handleToggleSelectQuote = (qId) => {
+    const id = String(qId);
+    setSelectedQuotationIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const handleEnterSelectionMode = () => {
+    setIsSelectionMode(true);
+    setSelectedQuotationIds([]);
+  };
+
+  const handleExitSelectionMode = () => {
+    setIsSelectionMode(false);
+    setSelectedQuotationIds([]);
+  };
+
+  const handleShareSelected = async () => {
+    if (selectedQuotationIds.length === 0 || isSharing) return;
+
+    // Metro reports a failed module load as a fatal error rather than throwing, so check the native module first
+    if (!TurboModuleRegistry.get('RNShare')) {
+      Alert.alert('App Update Required', 'Sharing several PDFs at once needs the latest app build. Please rebuild/reinstall the app.');
+      return;
+    }
+    const Share = require('react-native-share').default;
+
+    try {
+      setIsSharing(true);
+
+      // Fetch all pdf-view data concurrently
+      const responses = await Promise.all(
+        selectedQuotationIds.map((qId) => quotationRepository.getQuotationPdfView(qId))
+      );
+
+      const failed = responses.filter((r) => !r || !r.success || !r.quotation);
+      if (failed.length > 0) {
+        const loaded = responses.length - failed.length;
+        Alert.alert(
+          'Unable to Load Quotations',
+          `${loaded} of ${responses.length} quotations loaded. Please try again.`
+        );
+        return;
+      }
+
+      // Unique per-batch filenames so two revisions of one tier don't overwrite each other in the cache
+      const baseNames = responses.map(({ quotation: q }) => {
+        const clientName = String(q.customer?.name || q.clientName || q.customerName || 'Customer').replace(/[^a-zA-Z0-9_-]/g, '_');
+        const rawTier = String(q.package?.tier || q.package?.name || q.packageName || '').toUpperCase();
+        let tier = 'Economy';
+        if (rawTier.includes('PREMIUM') || rawTier.includes('MID')) tier = 'Premium';
+        else if (rawTier.includes('ELITE') || rawTier.includes('LUXURY')) tier = 'Elite';
+        return { clientName, tier };
+      });
+      const fileNames = responses.map(({ quotation: q }, idx) => {
+        const { clientName, tier } = baseNames[idx];
+        const isDuplicate = baseNames.filter((b) => b.clientName === clientName && b.tier === tier).length > 1;
+        const suffix = isDuplicate ? `_Rev${q.revision ?? q.revisionNo ?? q.id ?? idx + 1}` : '';
+        return `${clientName}_${tier}${suffix}_quotation.pdf`;
+      });
+
+      // Generate each quotation as its own PDF file
+      const pdfUris = await Promise.all(
+        responses.map(async (r, idx) => {
+          const q = r.quotation;
+          const a = {
+            ...q,
+            clientName: q.customer?.name || q.clientName || q.customerName,
+            customerName: q.customer?.name || q.customerName || q.clientName,
+            mobileNumber: q.mobileNumber || q.phone || q.customer?.mobile,
+            area: q.address?.area || q.address?.city || q.area || '',
+            propertyType: q.propertyType || q.property?.name,
+          };
+          const html = generateQuotationHTML(a, q, true, String(q.id || q.quotationId || selectedQuotationIds[idx]));
+          const { uri, base64 } = await Print.printToFileAsync({ html, base64: true });
+
+          const targetUri = cacheDirectory ? `${cacheDirectory}${fileNames[idx]}` : null;
+          if (targetUri && base64) {
+            try {
+              const existing = await getInfoAsync(targetUri);
+              if (existing.exists) await deleteAsync(targetUri, { idempotent: true });
+              await writeAsStringAsync(targetUri, base64, { encoding: 'base64' });
+              return targetUri;
+            } catch (_) {
+              return uri;
+            }
+          }
+          return uri;
+        })
+      );
+
+      // Android WhatsApp shows no PDF thumbnail, so send a page-1 image ahead of each PDF; a failed preview is skipped
+      const shareUris = Platform.OS === 'android'
+        ? (await Promise.all(pdfUris.map(async (pdfUri) => {
+            try {
+              const { uri: previewUri } = await PdfThumbnail.generate(pdfUri, 0, 85);
+              return [previewUri, pdfUri];
+            } catch (previewErr) {
+              console.warn('Quotation preview image failed:', previewErr?.message);
+              return [pdfUri];
+            }
+          }))).flat()
+        : pdfUris;
+
+      // expo-sharing takes one file only; a lone file uses the single-file intent (as View PDF), several share together
+      const result = await Share.open({
+        ...(shareUris.length === 1 ? { url: shareUris[0] } : { urls: shareUris }),
+        type: 'application/pdf',
+        title: 'Share Quotations',
+        failOnCancel: false,
+      });
+
+      // Keep the selection when the sheet is dismissed without sharing so the user can retry
+      if (result?.success) handleExitSelectionMode();
+    } catch (err) {
+      console.error('Failed to share quotations:', err);
+      Alert.alert('Error', 'Failed to generate quotation PDFs. Please try again.');
+    } finally {
+      setIsSharing(false);
+    }
+  };
 
   const [showEditCustomerModal, setShowEditCustomerModal] = useState(false);
   const [editClientName, setEditClientName] = useState('');
@@ -2040,7 +2190,24 @@ export default function CustomerDetailScreen() {
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
       {/* Header Area */}
-      <InnerHeader title="Customer Detail" onBack={handleBack} paddingTop={insets.top} isDark={isDark} />
+      <InnerHeader
+        title={isSelectionMode ? 'Select Quotations' : 'Customer Detail'}
+        onBack={handleBack}
+        paddingTop={insets.top}
+        isDark={isDark}
+        right={
+          isSelectionMode ? (
+            <TouchableOpacity onPress={handleExitSelectionMode} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} activeOpacity={0.7}>
+              <RNText style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '700' }}>Clear</RNText>
+            </TouchableOpacity>
+          ) : activeTabSection === 'quotation' && quotationsList.length > 0 ? (
+            <TouchableOpacity onPress={handleEnterSelectionMode} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} activeOpacity={0.7} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Ionicons name="share-outline" size={16} color="#FFFFFF" />
+              <RNText style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>Share</RNText>
+            </TouchableOpacity>
+          ) : null
+        }
+      />
 
       {/* Main Content Area */}
       <ScrollView
@@ -2869,12 +3036,15 @@ export default function CustomerDetailScreen() {
                             );
                             const sCount = quote.servicesList?.length || 0;
 
+                            const currentQId = String(quote.id || quote.quotationId || '');
+                            const isCurrentSelected = isSelectionMode && currentQId && selectedQuotationIds.includes(currentQId);
+
                             return (
                               <View
                                 key={`current-${quote.id}`}
                                 style={{
-                                  borderWidth: isConfirmed ? 1.8 : 1.2,
-                                  borderColor: isConfirmed ? '#10B981' : (isDark ? '#334155' : '#E2E8F0'),
+                                  borderWidth: isCurrentSelected ? 2 : (isConfirmed ? 1.8 : 1.2),
+                                  borderColor: isCurrentSelected ? '#2563EB' : (isConfirmed ? '#10B981' : (isDark ? '#334155' : '#E2E8F0')),
                                   borderRadius: 14,
                                   padding: 12,
                                   backgroundColor: isConfirmed
@@ -2884,6 +3054,24 @@ export default function CustomerDetailScreen() {
                                   marginBottom: previousRevisions.length > 0 ? 12 : 0,
                                 }}
                               >
+                                {/* Selection Row (visible in selection mode) */}
+                                {isSelectionMode && currentQId && (
+                                  <TouchableOpacity
+                                    onPress={() => handleToggleSelectQuote(currentQId)}
+                                    style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 8 }}
+                                    activeOpacity={0.7}
+                                    hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                                  >
+                                    <Ionicons
+                                      name={isCurrentSelected ? 'checkmark-circle' : 'ellipse-outline'}
+                                      size={22}
+                                      color={isCurrentSelected ? '#2563EB' : (isDark ? '#475569' : '#94A3B8')}
+                                    />
+                                    <RNText style={{ fontSize: 12, fontWeight: '600', color: isCurrentSelected ? '#2563EB' : (isDark ? '#94A3B8' : '#64748B') }}>
+                                      {isCurrentSelected ? 'Selected' : 'Select this quotation'}
+                                    </RNText>
+                                  </TouchableOpacity>
+                                )}
                                 {/* Header: Status Tag + Revision + Date + Delete Button */}
                                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                                   <View style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 1, flexWrap: 'wrap', gap: 6 }}>
@@ -2956,7 +3144,7 @@ export default function CustomerDetailScreen() {
                                     ₹{Math.round(quote.total != null ? quote.total : (quote.amount != null ? quote.amount : (quote.totalAmount || 0))).toLocaleString()}
                                   </Text>
                                   <Text style={{ fontSize: 11, color: isDark ? '#94A3B8' : '#64748B', marginLeft: 6, fontWeight: '600' }}>
-                                    {quote.gstAdded ? '(incl. GST)' : '(excl. GST)'}
+                                    {quote.gstAdded === true ? '(incl. GST)' : quote.gstAdded === false ? '(excl. GST)' : ''}
                                   </Text>
                                 </View>
 
@@ -3175,6 +3363,9 @@ export default function CustomerDetailScreen() {
                                   payView?.isReceiptLocked
                                 );
 
+                                const revQId = String(revQuote.id || revQuote.quotationId || '');
+                                const isRevSelected = isSelectionMode && revQId && selectedQuotationIds.includes(revQId);
+
                                 return (
                                   <View
                                     key={`rev-${revQuote.id || rIdx}`}
@@ -3183,10 +3374,26 @@ export default function CustomerDetailScreen() {
                                       borderRadius: 10,
                                       padding: 10,
                                       marginBottom: rIdx === previousRevisions.length - 1 ? 0 : 8,
-                                      borderWidth: 1,
-                                      borderColor: isDark ? '#262626' : '#E2E8F0',
+                                      borderWidth: isRevSelected ? 1.5 : 1,
+                                      borderColor: isRevSelected ? '#2563EB' : (isDark ? '#262626' : '#E2E8F0'),
                                     }}
                                   >
+                                    {isSelectionMode && revQId && (
+                                      <TouchableOpacity
+                                        onPress={() => handleToggleSelectQuote(revQId)}
+                                        style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 6 }}
+                                        activeOpacity={0.7}
+                                      >
+                                        <Ionicons
+                                          name={isRevSelected ? 'checkmark-circle' : 'ellipse-outline'}
+                                          size={18}
+                                          color={isRevSelected ? '#2563EB' : (isDark ? '#475569' : '#94A3B8')}
+                                        />
+                                        <RNText style={{ fontSize: 11, fontWeight: '600', color: isRevSelected ? '#2563EB' : (isDark ? '#94A3B8' : '#64748B') }}>
+                                          {isRevSelected ? 'Selected' : 'Select'}
+                                        </RNText>
+                                      </TouchableOpacity>
+                                    )}
                                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 }}>
                                         <View style={{
@@ -3314,51 +3521,6 @@ export default function CustomerDetailScreen() {
                 })
                 )}
 
-                {/* Add Additional Service Button as new at the bottom of Quotation Tab */}
-                {isInitialPaymentReceived && !isReceiptLocked && !isFinalPaymentMade && (
-                  <View style={{ marginTop: 16 }}>
-                    <TouchableOpacity
-                      style={{
-                        height: 50,
-                        borderRadius: 14,
-                        backgroundColor: '#059669',
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: 8,
-                        shadowColor: '#059669',
-                        shadowOpacity: 0.25,
-                        shadowOffset: { width: 0, height: 4 },
-                        shadowRadius: 8,
-                        elevation: 3,
-                      }}
-                      onPress={() => {
-                        const targetQuoteId =
-                          app?.confirmedQuoteId ||
-                          app?.activeQuotationId ||
-                          payView?.id ||
-                          payView?.quotationId ||
-                          quotationsList.find((q) => q.isConfirmed)?.id ||
-                          quotationsList[0]?.id;
-                        router.push({
-                          pathname: '/additional-payment',
-                          params: {
-                            id: app.id,
-                            quotationId: targetQuoteId ? String(targetQuoteId) : '',
-                            clientName: app.customerName || app.name || '',
-                          },
-                        });
-                      }}
-                      activeOpacity={0.85}
-                    >
-                      <Ionicons name="add-circle" size={20} color="#FFFFFF" />
-                      <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>
-                        Add Additional Service
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-
 
 
 
@@ -3398,11 +3560,14 @@ export default function CustomerDetailScreen() {
               const pricing = payView?.pricing || {};
               const progress = payView?.progress || {};
 
-              const withoutGstTotal = Math.round(Number(pricing.withoutGstTotal ?? payView?.totalPrice ?? payView?.subtotalAfterDiscount ?? payView?.grossSubtotal ?? app?.totalCost ?? 0));
-              const withGstTotal = Math.round(Number(pricing.withGstTotal ?? payView?.totalWithGst ?? (withoutGstTotal > 0 ? Math.round(withoutGstTotal * 1.18) : 0)));
+              const subTotalAmount = Math.round(Number(pricing.subTotal ?? payView?.totalPrice ?? payView?.subtotalAfterDiscount ?? payView?.grossSubtotal ?? app?.totalCost ?? 0));
               const totalPaid = Math.round(Number(progress.totalPaid ?? payView?.totalPaid ?? 0));
-              const withoutGstBalance = Math.round(Number(progress.withoutGstBalance ?? payView?.balanceAmount ?? Math.max(0, withoutGstTotal - totalPaid)));
-              const withGstBalance = Math.round(Number(progress.withGstBalance ?? Math.max(0, withGstTotal - totalPaid)));
+              // Tax state (tax invoice vs cash bill); GST itself is charged whenever the quotation has a GST percentage
+              const isTaxCustomer = payView?.isTaxCustomer != null
+                ? Boolean(payView.isTaxCustomer)
+                : payView?.gstDecision === 'APPLIED';
+              const grandTotal = Math.round(Number(pricing.grandTotal ?? payView?.totalWithGst ?? subTotalAmount));
+              const balanceAmount = Math.round(Number(progress.balanceAmount ?? payView?.balanceAmount ?? Math.max(0, grandTotal - totalPaid)));
 
               const historyList = Array.isArray(payView?.history)
                 ? payView.history
@@ -3411,8 +3576,8 @@ export default function CustomerDetailScreen() {
               const unverifiedPayment = historyList.find((p) => p.isVerified === false || p.verificationStatus === 'pending');
               const hasUnverified = Boolean(unverifiedPayment || payView?.hasUnverifiedPayments);
 
-              const paymentStatus = progress.paymentStatus || (totalPaid === 0 ? 'UNPAID' : (withoutGstBalance <= 0 ? 'FULLY_PAID' : 'PARTIALLY_PAID'));
-              const paidPct = withoutGstTotal > 0 ? Math.min(100, Math.round((totalPaid / withoutGstTotal) * 100)) : (totalPaid > 0 ? 100 : 0);
+              const paymentStatus = progress.paymentStatus || (totalPaid === 0 ? 'UNPAID' : (balanceAmount <= 0 ? 'FULLY_PAID' : 'PARTIALLY_PAID'));
+              const paidPct = grandTotal > 0 ? Math.min(100, Math.round((totalPaid / grandTotal) * 100)) : (totalPaid > 0 ? 100 : 0);
 
               const statusColor = paymentStatus === 'FULLY_PAID' ? '#10B981' : (paymentStatus === 'PARTIALLY_PAID' ? '#2557C7' : '#F59E0B');
               const statusBg = paymentStatus === 'FULLY_PAID' ? (isDark ? '#064E3B' : '#DCFCE7') : (paymentStatus === 'PARTIALLY_PAID' ? (isDark ? '#1E3A8A' : '#EFF6FF') : (isDark ? '#78350F' : '#FEF3C7'));
@@ -3465,7 +3630,7 @@ export default function CustomerDetailScreen() {
                           Quotation Total
                         </Text>
                         <Text style={{ fontSize: 24, fontWeight: '800', color: isDark ? '#FFFFFF' : '#0F172A', marginTop: 3 }}>
-                          ₹{withoutGstTotal.toLocaleString()}
+                          ₹{grandTotal.toLocaleString()}
                         </Text>
                       </View>
                     </View>
@@ -3479,10 +3644,10 @@ export default function CustomerDetailScreen() {
                       <Text style={{ fontSize: 12, fontWeight: '600', color: isDark ? '#94A3B8' : '#64748B' }}>
                         Paid so far: <Text style={{ color: '#10B981', fontWeight: '700' }}>₹{totalPaid.toLocaleString()}</Text> ({paidPct}%)
                       </Text>
-                      {payView?.gstDecision && payView.gstDecision !== 'PENDING' && (
-                        <View style={{ backgroundColor: payView.gstDecision === 'APPLIED' ? '#DCFCE7' : '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                          <Text style={{ fontSize: 10, fontWeight: '700', color: payView.gstDecision === 'APPLIED' ? '#166534' : '#475569' }}>
-                            GST: {payView.gstDecision}
+                      {payView?.id && (
+                        <View style={{ backgroundColor: isTaxCustomer ? '#DCFCE7' : '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                          <Text style={{ fontSize: 10, fontWeight: '700', color: isTaxCustomer ? '#166534' : '#475569' }}>
+                            {isTaxCustomer ? 'Tax invoice' : 'Cash bill'}
                           </Text>
                         </View>
                       )}
@@ -3511,7 +3676,7 @@ export default function CustomerDetailScreen() {
                           Sequential Verification Required
                         </Text>
                         <Text style={{ fontSize: 11, color: isDark ? '#FDE68A' : '#B45309', marginTop: 1 }}>
-                          {'Payment #' + (unverifiedPayment?.id || '') + ' is awaiting Admin verification. Previous payment must be verified before recording next payment.'}
+                          {getPaymentLabel(unverifiedPayment) + ' is awaiting Admin verification. Previous payment must be verified before recording next payment.'}
                         </Text>
                       </View>
                     </View>
@@ -3519,7 +3684,7 @@ export default function CustomerDetailScreen() {
 
                   {/* Action Buttons Row */}
                   <View style={{ flexDirection: 'row', gap: 10, marginBottom: 18 }}>
-                    {isReceiptGenerated || canGenerateReceipt || (paymentStatus === 'FULLY_PAID' || progress.paymentStatus === 'FULLY_PAID' || (withoutGstBalance <= 0 && totalPaid > 0)) ? (
+                    {isReceiptGenerated || canGenerateReceipt || (paymentStatus === 'FULLY_PAID' || progress.paymentStatus === 'FULLY_PAID' || (balanceAmount <= 0 && totalPaid > 0)) ? (
                       <View style={{ flexDirection: 'row', gap: 10, flex: 1 }}>
                         {(() => {
                           const isReadyToGenerate = isReceiptGenerated || canGenerateReceipt;
@@ -3531,10 +3696,8 @@ export default function CustomerDetailScreen() {
                               unreadyReason = 'Payment awaiting verification';
                             } else if (payView?.allServicesCompleted === false) {
                               unreadyReason = 'Services not completed';
-                            } else if (payView?.gstDecision === 'PENDING') {
-                              unreadyReason = 'GST decision pending';
-                            } else if (withoutGstBalance > 0) {
-                              unreadyReason = `Balance remaining: ₹${withoutGstBalance.toLocaleString('en-IN')}`;
+                            } else if (balanceAmount > 0) {
+                              unreadyReason = `Balance remaining: ₹${balanceAmount.toLocaleString('en-IN')}`;
                             } else {
                               unreadyReason = 'Receipt conditions pending';
                             }
@@ -3566,18 +3729,13 @@ export default function CustomerDetailScreen() {
                                 if (!isReadyToGenerate) {
                                   Alert.alert(
                                     'Receipt Unavailable',
-                                    `The official final receipt cannot be generated yet:\n\n• ${unreadyReason}\n\nAll conditions (confirmed quotation, all services completed, GST decision confirmed, 0 balance, and admin verification of all payments) must be satisfied.`,
+                                    `The official final receipt cannot be generated yet:\n\n• ${unreadyReason}\n\nAll conditions (confirmed quotation, all services completed, 0 balance, and admin verification of all payments) must be satisfied.`,
                                     [{ text: 'OK' }]
                                   );
                                   return;
                                 }
 
-                                const isWithGst = Boolean(
-                                  payView?.gstDecision === 'APPLIED' ||
-                                  payView?.withGst ||
-                                  payView?.isGst ||
-                                  app?.hasGst
-                                );
+                                const isWithGst = isTaxCustomer;
                                 const customerGst =
                                   payView?.customerGstNumber ||
                                   app?.customerGstNumber ||
@@ -3596,8 +3754,8 @@ export default function CustomerDetailScreen() {
                                       receiptNumber: payView?.receipt?.receiptNumber || payView?.receiptNumber || app?.receiptNumber || '',
                                       hasGst: isWithGst ? 'true' : 'false',
                                       gstNumber: customerGst,
-                                      totalCost: String(withoutGstTotal || app?.totalCost || ''),
-                                      amount: String(totalPaid || withoutGstTotal || ''),
+                                      totalCost: String(subTotalAmount || app?.totalCost || ''),
+                                      amount: String(totalPaid || subTotalAmount || ''),
                                       stage: isWithGst ? 'Full Project Settlement (with GST)' : 'Full Project Settlement',
                                     },
                                   });
@@ -3609,8 +3767,7 @@ export default function CustomerDetailScreen() {
                                 try {
                                   const res = await paymentRepository.generateFinalReceipt(
                                     activeQuoteId,
-                                    customerGst || null,
-                                    isWithGst
+                                    customerGst || null
                                   );
                                   const recData = res?.data;
                                   const recNo = recData?.receiptNumber || res?.receiptNumber;
@@ -3649,8 +3806,8 @@ export default function CustomerDetailScreen() {
                                       receiptNumber: recNo || '',
                                       hasGst: isWithGst ? 'true' : 'false',
                                       gstNumber: customerGst,
-                                      totalCost: String(recData?.grossSubtotal || withoutGstTotal || app?.totalCost || ''),
-                                      amount: String(recData?.totalPaid || totalPaid || withoutGstTotal || ''),
+                                      totalCost: String(recData?.grossSubtotal || subTotalAmount || app?.totalCost || ''),
+                                      amount: String(recData?.totalPaid || totalPaid || subTotalAmount || ''),
                                       stage: isWithGst ? 'Full Project Settlement (with GST)' : 'Full Project Settlement',
                                     },
                                   });
@@ -3698,22 +3855,21 @@ export default function CustomerDetailScreen() {
                             flex: 1,
                             height: 46,
                             borderRadius: 12,
-                            backgroundColor: hasUnverified || withoutGstBalance <= 0 || isReceiptLocked ? (isDark ? '#334155' : '#E2E8F0') : '#2557C7',
+                            backgroundColor: hasUnverified || balanceAmount <= 0 || isReceiptLocked ? (isDark ? '#334155' : '#E2E8F0') : '#2557C7',
                             flexDirection: 'row',
                             alignItems: 'center',
                             justifyContent: 'center',
                             gap: 6,
                           }}
-                          disabled={hasUnverified || withoutGstBalance <= 0 || isReceiptLocked}
+                          disabled={hasUnverified || balanceAmount <= 0 || isReceiptLocked}
                           onPress={() => {
                             router.push({
                               pathname: '/payment-form',
                               params: {
                                 id: app.id,
                                 quotationId: activeQuoteId,
-                                remainingBalance: String(withoutGstBalance),
-                                withGstBalance: String(withGstBalance),
-                                withoutGstTotal: String(withoutGstTotal),
+                                remainingBalance: String(balanceAmount),
+                                grandTotal: String(grandTotal),
                                 clientName: app.customerName || app.name || '',
                                 mobileNumber: app.customerPhone || app.phone || '',
                               },
@@ -3721,59 +3877,41 @@ export default function CustomerDetailScreen() {
                           }}
                           activeOpacity={0.8}
                         >
-                          <Ionicons name="add-circle" size={18} color={hasUnverified || withoutGstBalance <= 0 || isReceiptLocked ? '#94A3B8' : '#FFFFFF'} />
+                          <Ionicons name="add-circle" size={18} color={hasUnverified || balanceAmount <= 0 || isReceiptLocked ? '#94A3B8' : '#FFFFFF'} />
                           <Text style={{
                             fontSize: 14,
                             fontWeight: '700',
-                            color: hasUnverified || withoutGstBalance <= 0 || isReceiptLocked ? '#94A3B8' : '#FFFFFF',
+                            color: hasUnverified || balanceAmount <= 0 || isReceiptLocked ? '#94A3B8' : '#FFFFFF',
                           }}>
                             Add Payment
                           </Text>
                         </TouchableOpacity>
-
-                        {withoutGstBalance > 0 && !isReceiptLocked && (
-                          <TouchableOpacity
-                            style={{
-                              height: 46,
-                              paddingHorizontal: 16,
-                              borderRadius: 12,
-                              backgroundColor: hasUnverified ? (isDark ? '#334155' : '#E2E8F0') : '#059669',
-                              flexDirection: 'row',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              gap: 6,
-                            }}
-                            disabled={hasUnverified}
-                            onPress={() => {
-                              router.push({
-                                pathname: '/payment-form',
-                                params: {
-                                  id: app.id,
-                                  quotationId: activeQuoteId,
-                                  isFinalSettlement: 'true',
-                                  remainingBalance: String(withoutGstBalance),
-                                  withGstBalance: String(withGstBalance),
-                                  withoutGstTotal: String(withoutGstTotal),
-                                  clientName: app.customerName || app.name || '',
-                                  mobileNumber: app.customerPhone || app.phone || '',
-                                },
-                              });
-                            }}
-                            activeOpacity={0.8}
-                          >
-                            <Ionicons name="checkmark-done" size={18} color={hasUnverified ? '#94A3B8' : '#FFFFFF'} />
-                            <Text style={{
-                              fontSize: 14,
-                              fontWeight: '700',
-                              color: hasUnverified ? '#94A3B8' : '#FFFFFF',
-                            }}>
-                              Final Settlement
-                            </Text>
-                          </TouchableOpacity>
-                        )}
                       </>
                     )}
                   </View>
+
+                  {/* Proforma Invoice (tax customers only) */}
+                  {isTaxCustomer && (
+                    <TouchableOpacity
+                      style={{
+                        height: 46,
+                        borderRadius: 12,
+                        borderWidth: 1.5,
+                        borderColor: '#2557C7',
+                        backgroundColor: isDark ? '#0F172A' : '#EFF6FF',
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 8,
+                        marginBottom: 18,
+                      }}
+                      onPress={() => router.push({ pathname: '/proforma-invoice', params: { id: app?.id || params.id, quoteId: String(activeQuoteId) } })}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="document-text-outline" size={18} color="#2557C7" />
+                      <Text style={{ fontSize: 14, fontWeight: '700', color: '#2557C7' }}>Proforma Invoice</Text>
+                    </TouchableOpacity>
+                  )}
 
                   {/* Audit History Chain / Recorded Payments */}
                   <View style={{ marginBottom: 10 }}>
@@ -3823,7 +3961,7 @@ export default function CustomerDetailScreen() {
                               <View>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                                   <Text style={{ fontSize: 14, fontWeight: '800', color: isDark ? '#FFFFFF' : '#0F172A' }}>
-                                    Payment {pay.id}
+                                    {getPaymentLabel(pay)}
                                   </Text>
                                   <View style={{
                                     backgroundColor: pay.paymentMethod === 'UPI' ? '#E0F2FE' : (pay.paymentMethod === 'ACCOUNT' ? '#EDE9FE' : '#FEF3C7'),
@@ -4060,7 +4198,67 @@ export default function CustomerDetailScreen() {
 
       </ScrollView>
 
-
+      {/* Multi-Quotation Share Bottom Bar */}
+      {isSelectionMode && (
+        <View style={{
+          position: 'absolute',
+          bottom: Math.max(insets.bottom + 64, 84),
+          left: 16,
+          right: 16,
+          backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+          borderRadius: 18,
+          padding: 14,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          borderWidth: 1,
+          borderColor: isDark ? '#334155' : '#E2E8F0',
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.18,
+          shadowRadius: 12,
+          elevation: 8,
+          zIndex: 100,
+        }}>
+          <View>
+            <RNText style={{ fontSize: 14, fontWeight: '800', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+              {selectedQuotationIds.length > 0 ? `${selectedQuotationIds.length} selected` : 'No selection'}
+            </RNText>
+            <RNText style={{ fontSize: 11, color: isDark ? '#94A3B8' : '#64748B', marginTop: 1 }}>
+              {selectedQuotationIds.length > 0 ? '' : ''}
+            </RNText>
+          </View>
+          <TouchableOpacity
+            onPress={handleShareSelected}
+            disabled={selectedQuotationIds.length === 0 || isSharing}
+            activeOpacity={0.8}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: selectedQuotationIds.length === 0 ? (isDark ? '#334155' : '#E2E8F0') : '#2563EB',
+              paddingVertical: 10,
+              paddingHorizontal: 18,
+              borderRadius: 12,
+              gap: 6,
+              opacity: isSharing ? 0.7 : 1,
+            }}
+          >
+            {isSharing ? (
+              <>
+                <Ionicons name="hourglass-outline" size={16} color="#FFFFFF" />
+                <RNText style={{ fontSize: 13, fontWeight: '700', color: '#FFFFFF' }}>Generating…</RNText>
+              </>
+            ) : (
+              <>
+                <Ionicons name="share-social-outline" size={16} color={selectedQuotationIds.length === 0 ? (isDark ? '#64748B' : '#94A3B8') : '#FFFFFF'} />
+                <RNText style={{ fontSize: 13, fontWeight: '700', color: selectedQuotationIds.length === 0 ? (isDark ? '#64748B' : '#94A3B8') : '#FFFFFF' }}>
+                  Share Selected
+                </RNText>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Category Services Popup Modal */}
       {activeCategoryModal && (
@@ -5933,7 +6131,6 @@ export default function CustomerDetailScreen() {
                       );
 
                       const baseServiceCost = Number(
-                        payView?.pricing?.withoutGstTotal ||
                         payView?.pricing?.subTotal ||
                         payView?.totalPrice ||
                         payView?.totalCost ||
@@ -6031,7 +6228,6 @@ export default function CustomerDetailScreen() {
                 );
 
                 const baseServiceCost = Number(
-                  payView?.pricing?.withoutGstTotal ||
                   payView?.pricing?.subTotal ||
                   payView?.totalPrice ||
                   payView?.totalCost ||
@@ -6396,29 +6592,10 @@ export default function CustomerDetailScreen() {
                           : 0;
                         const finalGstPct = Number(gstPercentVal) || 18;
 
-                        // API v2: Confirm GST settlement first if needed, then generate final receipt & lock
+                        // API v2: GST follows the quotation's tax status, so only generate the receipt & lock
                         if (qId) {
                           try {
-                            if (!payView?.isGstConfirmed) {
-                              const settlementPayload = {
-                                withGst: isWithGstReceipt,
-                                ...(gstVal ? { customerGstNumber: gstVal } : {}),
-                                ...(isWithGstReceipt && finalGstPaidAmt ? {
-                                  amount: finalGstPaidAmt,
-                                  paymentMethod: 'UPI',
-                                  voucher: `GST-${Date.now().toString().slice(-6)}`,
-                                  notes: 'GST settlement upon completion',
-                                } : {}),
-                              };
-                              const settleRes = await paymentRepository.confirmFinalSettlement(qId, settlementPayload);
-                              if (!settleRes?.success) {
-                                await paymentRepository.updatePricingConfig(qId, {
-                                  withGst: isWithGstReceipt,
-                                  ...(isWithGstReceipt ? { gstPercentage: finalGstPct } : {}),
-                                });
-                              }
-                            }
-                            await paymentRepository.generateFinalReceipt(qId, gstVal, isWithGstReceipt);
+                            await paymentRepository.generateFinalReceipt(qId, gstVal);
                             await paymentRepository.toggleReceiptLock(qId, true, 'Full receipt created');
                           } catch (recErr) {
                             console.warn('Final receipt generation/locking error:', recErr?.message);

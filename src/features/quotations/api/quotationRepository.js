@@ -161,7 +161,7 @@ export const quotationRepository = {
           };
         } else if (quotationPayload.length > 1) {
           console.log(`[createQuotation] Batch posting ${quotationPayload.length} quotations...`);
-          const results = await Promise.all(
+          const settled = await Promise.allSettled(
             quotationPayload.map(async (item, idx) => {
               const sanitized = sanitizePayload(item);
               console.log(`[createQuotation] Axios request payload item ${idx + 1}/${quotationPayload.length} right before POST:`, JSON.stringify(sanitized, null, 2));
@@ -169,6 +169,20 @@ export const quotationRepository = {
               return res.data;
             })
           );
+          const failed = settled.filter((r) => r.status === 'rejected');
+          if (failed.length > 0) {
+            const created = settled.length - failed.length;
+            const reason = failed[0].reason;
+            const detail = reason?.response?.data?.message || reason?.response?.data?.error || reason?.message || 'Failed to save quotation';
+            console.warn('Failed to save quotation:', reason?.response?.data || reason?.message);
+            return {
+              success: false,
+              message: created > 0 ? `${created} of ${settled.length} quotations were created. ${detail}` : detail,
+              createdCount: created,
+              error: reason?.response?.data,
+            };
+          }
+          const results = settled.map((r) => r.value);
           const first = results[0];
           return {
             success: true,

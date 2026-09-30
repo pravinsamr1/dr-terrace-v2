@@ -354,9 +354,15 @@ export const clientRepository = {
 
     const subtotal = q.subTotal != null ? Number(q.subTotal) : (q.subtotal != null ? Number(q.subtotal) : (q.amount != null ? Number(q.amount) : (q.payView?.totalPrice != null ? Number(q.payView.totalPrice) : 0)));
     const total = q.grandTotal != null ? Number(q.grandTotal) : (q.total != null ? Number(q.total) : (q.amount != null ? Number(q.amount) : (q.payView?.totalWithGst != null ? Number(q.payView.totalWithGst) : subtotal)));
-    const discount = q.discount != null ? Number(q.discount) : (q.payView?.discountAmount != null ? Number(q.payView.discountAmount) : 0);
+    const discount = q.discountAmount != null ? Number(q.discountAmount) : q.discount != null ? Number(q.discount) : (q.payView?.discountAmount != null ? Number(q.payView.discountAmount) : 0);
     const gstRate = q.gstPercentage != null ? Number(q.gstPercentage) : (q.gstRate != null ? Number(q.gstRate) : (q.payView?.gstPercentage != null ? Number(q.payView.gstPercentage) : 0));
-    const gstAdded = q.gstAdded != null ? Boolean(q.gstAdded) : (q.payView?.withGst !== undefined ? Boolean(q.payView.withGst) : gstRate > 0);
+    // GST is charged whenever there is a GST percentage (independent of the customer's tax state).
+    // Left undefined when the list carries no GST information, so the UI does not guess.
+    const gstAdded = q.pricing?.gst !== undefined
+      ? Boolean(q.pricing.gst)
+      : (q.gstPercentage != null || q.gstRate != null || q.payView?.gstPercentage != null || q.payView?.withGst !== undefined)
+        ? (gstRate > 0 || q.payView?.withGst === true)
+        : undefined;
     const gstAmount = q.gstAmount != null ? Number(q.gstAmount) : (q.payView?.gstAmount != null ? Number(q.payView.gstAmount) : 0);
 
     const finalId = q.quotationId != null ? String(q.quotationId).trim() : (q.id != null ? String(q.id).trim() : String(index + 1));

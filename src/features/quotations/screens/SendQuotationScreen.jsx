@@ -24,7 +24,7 @@ import { sealBase64 } from '../../../shared/constants/SealBase64';
 import { quotationRepository as quotationService } from '../../quotations/api/quotationRepository';
 import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
 
-const generateHTML = (app, quote, isExport = false, fallbackQuoteId = '') => {
+export const generateHTML = (app, quote, isExport = false, fallbackQuoteId = '') => {
   const dateVal = formatDateDDMMYY(quote.quotationDate || quote.date) || formatDateDDMMYY(new Date());
 
   const qId = quote.id || quote.quotationId || quote._id || quote.quoteId || fallbackQuoteId || '';
@@ -73,7 +73,7 @@ const generateHTML = (app, quote, isExport = false, fallbackQuoteId = '') => {
         spec: s.description || s.spec || '',
         area: s.area,
         rate: s.rate,
-        subtotal: s.totalPrice != null ? s.totalPrice : ((parseFloat(s.area) || 0) * (parseFloat(s.rate) || 0)),
+        subtotal: s.amount != null ? s.amount : (s.totalPrice != null ? s.totalPrice : Math.round((parseFloat(s.area) || 0) * (parseFloat(s.rate) || 0))),
       };
     })
     : (Array.isArray(quote.servicesList) && quote.servicesList.length > 0
@@ -99,158 +99,27 @@ const generateHTML = (app, quote, isExport = false, fallbackQuoteId = '') => {
 
   let rate = quote.rate || (servicesList && servicesList[0] ? (servicesList[0].rate || servicesList[0][`rate${tKey}`]) : 0);
 
-  // ─── Pricing resolution ───────────────────────────────────────────────────
-  // The backend sends a structured `pricing` object with two branches:
-  //   pricing.withGst    — subTotal → discount → taxableAmount → GST → total
-  //   pricing.withoutGst — subTotal → discount → total (no GST)
-  //
-  // Correct computation order:
-  //   1. subTotal        (gross sum of all services)
-  //   2. − discount      (percentage of subTotal)
-  //   3. = taxableAmount
-  //   4. + GST           (percentage of taxableAmount)
-  //   5. = grandTotal
-  //
-  // We read authoritative values from pricing.* when available, then compute
-  // manually as a fallback using the same order.
+  // ─── Pricing (quotation object, API v2) ──────────────────────────────────
+  // The server calculates every amount; render exactly what it returns.
+  //   pricing.discount is null without a discount and pricing.gst is null without GST.
+  //   isTaxCustomer only picks the discount order: before tax (tax customer) or after tax (non-tax customer).
+  const isTaxCustomer = typeof quote.isTaxCustomer === 'boolean' ? quote.isTaxCustomer : true;
+  const quotePricing = quote.pricing || {};
+  const gstInfo = quotePricing.gst || null;
+  const discountInfo = quotePricing.discount || null;
 
-  // Determine gross subtotal (undiscounted sum of services)
-  let subTotal = calculatedServicesSubtotal > 0
-    ? calculatedServicesSubtotal
-    : Number(quote.subTotal || quote.subtotal || quote.pricing?.subTotal || quote.totalAmount || quote.amount || quote.total || 0);
+  const subTotal = Math.round(Number(quotePricing.subTotal ?? calculatedServicesSubtotal ?? 0) || 0);
+  const hasGst = Boolean(gstInfo);
+  const hasDiscount = Boolean(discountInfo);
+  const discountPct = Number(discountInfo?.percentage || 0);
+  const discountVal = Number(isTaxCustomer ? discountInfo?.amountForTax : discountInfo?.amountForNonTax) || 0;
+  const gstPct = Number(gstInfo?.percentage || 0);
+  const cgstPct = Number(gstInfo?.cgst?.percentage ?? gstPct / 2);
+  const sgstPct = Number(gstInfo?.sgst?.percentage ?? gstPct / 2);
+  const cgstVal = Number(gstInfo?.cgst?.amount || 0);
+  const sgstVal = Number(gstInfo?.sgst?.amount || 0);
+  const finalTotalRounded = Math.round(Number(quotePricing.grandTotal ?? (subTotal - discountVal + cgstVal + sgstVal)) || 0);
 
-  // Detect which branch is active (WITH_GST or WITHOUT_GST)
-  const selectedPricingType = quote.pricing?.selectedType || '';
-  const pricingWithGst    = quote.pricing?.withGst    || null;
-  const pricingWithoutGst = quote.pricing?.withoutGst || null;
-
-  // Determine whether GST is applicable
-  const hasGst = (() => {
-    if (selectedPricingType === 'WITHOUT_GST') return false;
-    if (selectedPricingType === 'WITH_GST') return true;
-    if (pricingWithGst && Number(pricingWithGst.gst?.amount || pricingWithGst.gst?.percentage || pricingWithGst.gst?.rate || 0) > 0) {
-      return true;
-    }
-    if (quote.gstAdded === true  || quote.gstAdded === false) return Boolean(quote.gstAdded);
-    if (quote.isGst    === true  || quote.isGst    === false) return Boolean(quote.isGst);
-    if (quote.gst === '0%' || quote.gst === '0' || quote.gstRate === 0 || quote.gstPercentage === 0) return false;
-    if (quote.gstAmount != null) return Number(quote.gstAmount) > 0;
-    return false;
-  })();
-
-  // Active pricing branch (prefer backend data)
-  const activePricing = hasGst ? pricingWithGst : pricingWithoutGst;
-
-  // ── Discount ──────────────────────────────────────────────────────────────
-  let discountPct = Number(
-    activePricing?.discount?.percentage ??
-    activePricing?.discount?.rate ??
-    quote.discountPercentage ??
-    quote.discountPercent ??
-    quote.discount_percentage ??
-    quote.discount_percent ??
-    0
-  ) || 0;
-
-  let discountVal = Number(
-    (activePricing?.discount?.amount != null && Number(activePricing.discount.amount) > 0)
-      ? activePricing.discount.amount
-      : (quote.discountAmount != null && Number(quote.discountAmount) > 0)
-          ? quote.discountAmount
-          : (quote.discount != null && Number(quote.discount) > 0)
-              ? quote.discount
-              : (quote.discount_amount != null && Number(quote.discount_amount) > 0)
-                  ? quote.discount_amount
-                  : (discountPct > 0 ? Math.round((subTotal * (discountPct / 100)) * 100) / 100 : 0)
-  );
-
-  // Reconcile percentage ↔ value
-  if (discountPct > 0 && discountVal <= 0) {
-    discountVal = Math.round((subTotal * (discountPct / 100)) * 100) / 100;
-  }
-  if (discountVal > 0 && discountPct <= 0 && subTotal > 0) {
-    discountPct = Math.round((discountVal / subTotal) * 100 * 10) / 10;
-  }
-
-  const hasDiscount = discountPct > 0 || discountVal > 0;
-  if (!hasDiscount) { discountVal = 0; discountPct = 0; }
-
-  // ── Taxable amount (subTotal − discount) ──────────────────────────────────
-  const taxableAmount = Number(
-    activePricing?.taxableAmount != null
-      ? activePricing.taxableAmount
-      : (quote.taxableAmount != null
-          ? quote.taxableAmount
-          : Math.round((subTotal - discountVal) * 100) / 100)
-  );
-
-  // ── GST (applied on taxableAmount) ────────────────────────────────────────
-  const gstPct = hasGst ? Number(
-    activePricing?.gst?.percentage ??
-    activePricing?.gst?.rate ??
-    quote.gstPercentage ??
-    quote.gstPercent ??
-    quote.gstRate ??
-    quote.gst?.gstPercentage ??
-    18
-  ) : 0;
-
-  const cgstPct = hasGst ? Number(
-    activePricing?.cgst?.percentage ??
-    activePricing?.cgst?.rate ??
-    quote.cgstPercentage ??
-    quote.cgstPercent ??
-    (gstPct / 2)
-  ) : 0;
-
-  const sgstPct = hasGst ? Number(
-    activePricing?.sgst?.percentage ??
-    activePricing?.sgst?.rate ??
-    quote.sgstPercentage ??
-    quote.sgstPercent ??
-    (gstPct / 2)
-  ) : 0;
-
-  const totalGstVal = hasGst
-    ? Number(
-        activePricing?.gst?.amount != null
-          ? activePricing.gst.amount
-          : (quote.gstAmount != null
-              ? quote.gstAmount
-              : Math.round((taxableAmount * (gstPct / 100)) * 100) / 100)
-      )
-    : 0;
-
-  const cgstVal = hasGst
-    ? Number(
-        activePricing?.cgst?.amount != null
-          ? activePricing.cgst.amount
-          : (quote.cgstAmount != null
-              ? quote.cgstAmount
-              : Math.round(((taxableAmount * (cgstPct / 100)) || (totalGstVal / 2)) * 100) / 100)
-      )
-    : 0;
-
-  const sgstVal = hasGst
-    ? Number(
-        activePricing?.sgst?.amount != null
-          ? activePricing.sgst.amount
-          : (quote.sgstAmount != null
-              ? quote.sgstAmount
-              : Math.round(((taxableAmount * (sgstPct / 100)) || (totalGstVal - cgstVal)) * 100) / 100)
-      )
-    : 0;
-
-  // ── Grand total (taxableAmount + GST, already computed by backend) ─────────
-  const afterTaxTotal = hasGst
-    ? Math.round((taxableAmount + cgstVal + sgstVal) * 100) / 100
-    : taxableAmount;
-
-  const finalTotalRounded = Math.round(
-    activePricing?.totalAmount != null
-      ? Number(activePricing.totalAmount)
-      : afterTaxTotal
-  );
   const assignedEmpName = quote.employeeName
     || quote.employee?.name
     || quote.assignedEmployeeName
@@ -339,33 +208,46 @@ const generateHTML = (app, quote, isExport = false, fallbackQuoteId = '') => {
     }).join('');
   };
 
+  const buildTotalsRows = () => {
+    const money = (n) => Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const discountRow = { label: `DISCOUNT (${discountPct}%)`, value: `- Rs. ${money(discountVal)}`, color: '#DC2626' };
+    const gstRows = [
+      { label: `CGST ${cgstPct}%`, value: `Rs. ${money(cgstVal)}` },
+      { label: `SGST ${sgstPct}%`, value: `Rs. ${money(sgstVal)}` },
+    ];
+
+    const rows = [{ label: 'SUBTOTAL', value: `Rs. ${money(subTotal)}` }];
+    if (isTaxCustomer) {
+      if (hasDiscount) {
+        rows.push(discountRow);
+        if (hasGst) rows.push({ label: 'TAXABLE AMOUNT', value: `Rs. ${money(subTotal - discountVal)}` });
+      }
+      if (hasGst) rows.push(...gstRows);
+    } else {
+      if (hasGst) rows.push(...gstRows);
+      if (hasDiscount) rows.push(discountRow);
+    }
+    rows.push({ label: 'TOTAL', value: `Rs. ${money(finalTotalRounded)}`, strong: true });
+
+    return rows.map((row, idx) => `
+                <tr>
+                  ${idx === 0 ? `<td colspan="3" rowspan="${rows.length}" style="vertical-align: middle; border: 1.2px solid #000000; border-left: none; padding: ${isExport ? '4px 8px' : '3px 6px'}; font-size: ${isExport ? '11px' : '9.5px'};">
+                    <p style="text-decoration: underline; font-weight: bold; margin-bottom: 2px;">Payment terms:</p>
+                    ${renderPaymentTerms(hasGst)}
+                  </td>` : ''}
+                  <td style="font-weight: ${row.strong ? '800' : 'bold'}; border: 1.2px solid #000000; padding: ${cellPadding}; font-size: ${tableFontSize};">${row.label}</td>
+                  <td style="text-align: right; font-weight: ${row.strong ? '800' : 'bold'}; border: 1.2px solid #000000; border-right: none; ${row.color ? `color: ${row.color}; ` : (row.strong ? 'color: #000000; ' : '')}padding: ${cellPadding}; font-size: ${totalAmountFontSize}; white-space: nowrap;">${row.value}</td>
+                </tr>`).join('');
+  };
+
   const today = new Date();
   today.setDate(today.getDate() + 15);
   const validDateStr = formatDateDDMMYY(today);
 
-  const activePayment = hasGst ? quote.payment?.withGst : quote.payment?.withoutGst;
-
-  const advanceVal = (quote.advancePercent != null && Number(quote.advancePercent) <= 100)
-    ? String(quote.advancePercent)
-    : (activePayment?.advance?.percentage != null
-        ? String(activePayment.advance.percentage)
-        : (quote.paymentTerms?.advance != null && Number(quote.paymentTerms.advance) <= 100
-            ? String(quote.paymentTerms.advance)
-            : '60'));
-  const midVal = (quote.midPercent != null && Number(quote.midPercent) <= 100)
-    ? String(quote.midPercent)
-    : (activePayment?.mid?.percentage != null
-        ? String(activePayment.mid.percentage)
-        : (quote.paymentTerms?.mid != null && Number(quote.paymentTerms.mid) <= 100
-            ? String(quote.paymentTerms.mid)
-            : '30'));
-  const finalVal = (quote.finalPercent != null && Number(quote.finalPercent) <= 100)
-    ? String(quote.finalPercent)
-    : (activePayment?.final?.percentage != null
-        ? String(activePayment.final.percentage)
-        : (quote.paymentTerms?.final != null && Number(quote.paymentTerms.final) <= 100
-            ? String(quote.paymentTerms.final)
-            : '10'));
+  const percentOrDefault = (value, fallback) => (value != null && Number(value) <= 100 ? String(value) : fallback);
+  const advanceVal = percentOrDefault(quote.advancePercent ?? quote.paymentTerms?.advance, '60');
+  const midVal = percentOrDefault(quote.midPercent ?? quote.paymentTerms?.mid, '30');
+  const finalVal = percentOrDefault(quote.finalPercent ?? quote.paymentTerms?.final, '10');
   const workStartText = quote.workCommencement || quote.paymentTerms?.workStart || quote.workStartNote || 'Work can be started 48hrs from the time of payment received';
   const validityText = quote.quoteValidateDate || quote.paymentTerms?.validity || quote.validityText || (`QUOTE VALID TILL ${validDateStr.toUpperCase()}`);
   const negotiationText = quote.negotiation || quote.notes || quote.paymentTerms?.negotiation || quote.negotiationNote || 'PRICE IS NEGOTIABLE FOR IMMEDIATE ORDER';
@@ -388,7 +270,7 @@ const generateHTML = (app, quote, isExport = false, fallbackQuoteId = '') => {
     return `
       <ul style="margin: 0; padding-left: 12px; list-style-type: disc; line-height: 1.3;">
         <li>${workStartText}</li>
-        ${forGst ? `<li>${gstPct}% GST Applicable on above value with Tax Invoice</li>` : ''}
+        ${forGst ? `<li>${gstPct}% GST Applicable on above value${isTaxCustomer ? ' with Tax Invoice' : ''}</li>` : ''}
         <li>${advanceVal}% ${forGst ? '+ TAX ' : ''}Advance for material procurement before start the work</li>
         <li>${midVal}% ${forGst ? '+ TAX ' : ''}After completion of Two coats and Last ${finalVal}% ${forGst ? '+ TAX ' : ''}after completion</li>
       </ul>
@@ -656,57 +538,7 @@ const generateHTML = (app, quote, isExport = false, fallbackQuoteId = '') => {
                     <span class="red-bold">KINDLY NOTE THE PRICE QUOTED FOR NON DILUTED ORIGINAL TOP COATING EXCEPT SEALER COTE</span>
                   </td>
                 </tr>
-                ${hasGst ? `
-                <tr>
-                  <td colspan="3" rowspan="${hasDiscount ? '6' : '4'}" style="vertical-align: middle; border: 1.2px solid #000000; border-left: none; padding: ${isExport ? '4px 8px' : '3px 6px'}; font-size: ${isExport ? '11px' : '9.5px'};">
-                    <p style="text-decoration: underline; font-weight: bold; margin-bottom: 2px;">Payment terms:</p>
-                    ${renderPaymentTerms(true)}
-                  </td>
-                  <td style="font-weight: bold; border: 1.2px solid #000000; padding: ${cellPadding}; font-size: ${tableFontSize};">SUBTOTAL</td>
-                  <td style="text-align: right; font-weight: bold; border: 1.2px solid #000000; border-right: none; padding: ${cellPadding}; font-size: ${totalAmountFontSize}; white-space: nowrap;">Rs. ${subTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                </tr>
-                ${hasDiscount ? `
-                <tr>
-                  <td style="font-weight: bold; border: 1.2px solid #000000; padding: ${cellPadding}; font-size: ${tableFontSize};">DISCOUNT (${discountPct}%)</td>
-                  <td style="text-align: right; font-weight: bold; border: 1.2px solid #000000; border-right: none; color: #DC2626; padding: ${cellPadding}; font-size: ${totalAmountFontSize}; white-space: nowrap;">- Rs. ${discountVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                </tr>
-                <tr>
-                  <td style="font-weight: bold; border: 1.2px solid #000000; padding: ${cellPadding}; font-size: ${tableFontSize};">TAXABLE AMOUNT</td>
-                  <td style="text-align: right; font-weight: bold; border: 1.2px solid #000000; border-right: none; padding: ${cellPadding}; font-size: ${totalAmountFontSize}; white-space: nowrap;">Rs. ${taxableAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                </tr>
-                ` : ''}
-                <tr>
-                  <td style="font-weight: bold; border: 1.2px solid #000000; padding: ${cellPadding}; font-size: ${tableFontSize};">CGST ${cgstPct}%</td>
-                  <td style="text-align: right; font-weight: bold; border: 1.2px solid #000000; border-right: none; padding: ${cellPadding}; font-size: ${totalAmountFontSize}; white-space: nowrap;">Rs. ${cgstVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                </tr>
-                <tr>
-                  <td style="font-weight: bold; border: 1.2px solid #000000; padding: ${cellPadding}; font-size: ${tableFontSize};">SGST ${sgstPct}%</td>
-                  <td style="text-align: right; font-weight: bold; border: 1.2px solid #000000; border-right: none; padding: ${cellPadding}; font-size: ${totalAmountFontSize}; white-space: nowrap;">Rs. ${sgstVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                </tr>
-                <tr>
-                  <td style="font-weight: 800; border: 1.2px solid #000000; padding: ${cellPadding}; font-size: ${tableFontSize};">TOTAL</td>
-                  <td style="text-align: right; font-weight: 800; border: 1.2px solid #000000; border-right: none; color: #000000; padding: ${cellPadding}; font-size: ${totalAmountFontSize}; white-space: nowrap;">Rs. ${finalTotalRounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                </tr>
-                ` : `
-                <tr>
-                  <td colspan="3" rowspan="${hasDiscount ? '3' : '2'}" style="vertical-align: middle; border: 1.2px solid #000000; border-left: none; padding: ${isExport ? '4px 8px' : '3px 6px'}; font-size: ${isExport ? '11px' : '9.5px'};">
-                    <p style="text-decoration: underline; font-weight: bold; margin-bottom: 2px;">Payment terms:</p>
-                    ${renderPaymentTerms(false)}
-                  </td>
-                  <td style="font-weight: bold; border: 1.2px solid #000000; padding: ${cellPadding}; font-size: ${tableFontSize};">SUBTOTAL</td>
-                  <td style="text-align: right; font-weight: bold; border: 1.2px solid #000000; border-right: none; padding: ${cellPadding}; font-size: ${totalAmountFontSize}; white-space: nowrap;">Rs. ${subTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                </tr>
-                ${hasDiscount ? `
-                <tr>
-                  <td style="font-weight: bold; border: 1.2px solid #000000; padding: ${cellPadding}; font-size: ${tableFontSize};">DISCOUNT (${discountPct}%)</td>
-                  <td style="text-align: right; font-weight: bold; border: 1.2px solid #000000; border-right: none; color: #DC2626; padding: ${cellPadding}; font-size: ${totalAmountFontSize}; white-space: nowrap;">- Rs. ${discountVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                </tr>
-                ` : ''}
-                <tr>
-                  <td style="font-weight: 800; border: 1.2px solid #000000; padding: ${cellPadding}; font-size: ${tableFontSize};">TOTAL</td>
-                  <td style="text-align: right; font-weight: 800; border: 1.2px solid #000000; border-right: none; color: #000000; padding: ${cellPadding}; font-size: ${totalAmountFontSize}; white-space: nowrap;">Rs. ${finalTotalRounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                </tr>
-                `}
+                ${buildTotalsRows()}
               </tbody>
             </table>
           </div>

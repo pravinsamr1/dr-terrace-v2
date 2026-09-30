@@ -34,7 +34,7 @@ TextInput.displayName = 'TextInput';
  * 1. Ineligible: Explains why warranty is locked (receipt must be generated first)
  * 2. Eligible & Unconfigured: Allows configuring start date and per-service warranty years
  * 3. Configured: Displays saved configuration, supports editing via PATCH, and generating certificate
- * 4. Generated / Active: Shows official verified warranty card, itemized coverage, and 3-day deletion window for Admins
+ * 4. Generated / Active: Shows official verified warranty card, itemized coverage, and an Admin option to delete and redo it
  */
 export default function WarrantyTab({
   quotationId,
@@ -200,11 +200,11 @@ export default function WarrantyTab({
     );
   };
 
-  // Handle Delete within 3-day window (Admin only)
+  // Handle Delete (Admin only, allowed at any time)
   const handleDeleteWarranty = () => {
     Alert.alert(
       'Delete Warranty Certificate',
-      'Are you sure you want to delete this warranty certificate? This action will reset the warranty back to the editable Configured state. Only permitted within 3 days of creation.',
+      'Are you sure you want to delete this warranty certificate? This action will reset the warranty back to the editable Configured state.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -370,8 +370,6 @@ export default function WarrantyTab({
 
   // 4. Generated State (Active Digital Warranty Certificate)
   if (warranty && !isEditingConfig) {
-    const isDeletable = Boolean(warranty.isDeletable);
-    const deletableUntilStr = warranty.deletableUntil ? formatDateDDMMYY(warranty.deletableUntil) : null;
     const items = warranty.items || [];
 
     return (
@@ -494,41 +492,6 @@ export default function WarrantyTab({
           ))}
         </View>
 
-        {/* 3-Day Deletion Window Notice */}
-        {isDeletable ? (
-          <View style={{
-            backgroundColor: isDark ? 'rgba(245, 158, 11, 0.1)' : '#FFFBEB',
-            borderColor: isDark ? '#78350F' : '#FDE68A',
-            borderWidth: 1,
-            borderRadius: 12,
-            padding: 12,
-            marginBottom: 16,
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 8,
-          }}>
-            <Ionicons name="timer-outline" size={18} color="#D97706" />
-            <Text style={{ flex: 1, fontSize: 12, color: isDark ? '#FBBF24' : '#B45309' }}>
-              Warranty can be deleted/reconfigured by Admin until {deletableUntilStr || '3 days from generation'}.
-            </Text>
-          </View>
-        ) : (
-          <View style={{
-            backgroundColor: isDark ? '#080808' : '#F1F5F9',
-            borderRadius: 10,
-            padding: 10,
-            marginBottom: 16,
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 8,
-          }}>
-            <Ionicons name="lock-closed" size={15} color={isDark ? '#94A3B8' : '#64748B'} />
-            <Text style={{ fontSize: 11, color: isDark ? '#94A3B8' : '#64748B' }}>
-              Permanent Warranty: 3-day deletion window has expired. This certificate is permanently locked.
-            </Text>
-          </View>
-        )}
-
         {/* Action Buttons */}
         <View style={{ gap: 10 }}>
           <TouchableOpacity
@@ -558,8 +521,8 @@ export default function WarrantyTab({
             </Text>
           </TouchableOpacity>
 
-          {/* Admin Deletion Action (Only within 3 days) */}
-          {isDeletable && isAdmin && (
+          {/* Admin Deletion Action */}
+          {isAdmin && (
             <TouchableOpacity
               style={{
                 borderColor: '#EF4444',

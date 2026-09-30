@@ -19,8 +19,10 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from '../../../core/hooks/useColorScheme';
 import { transformStyleForJakarta } from '../../../core/theme/initFonts';
-import { isPastDate } from '../../../core/utils/validation';
+import { isPastDate, isValidGstin } from '../../../core/utils/validation';
 import { formatDateDDMMYY, toApiDateString, parseDateToDateObj } from '../../../core/utils/dateFormat';
+import { calculateQuotationPricing, lineAmount } from '../utils/quotationPricing';
+import { extractValidTillDate } from '../utils/quotationValidity';
 import InnerHeader from '../../../shared/components/InnerHeader';
 import {
   MaterialAlertModal,
@@ -203,21 +205,23 @@ export default function EditQuotationScreen() {
   // Tax & Discount States
   const [gstAdded, setGstAdded] = useState(false);
   const [gstPercent, setGstPercent] = useState('');
+  const [customerGstNumber, setCustomerGstNumber] = useState('');
+  const [savedGstNumber, setSavedGstNumber] = useState('');
+  // Customer type only decides the final document (tax invoice vs cash bill); it never changes GST amounts
+  const [isGstCustomer, setIsGstCustomer] = useState(true);
   const [gstAmount, setGstAmount] = useState(0);
+  // On-site additional services already on the quotation: part of subTotal but not of services[]
+  const [additionalServicesTotal, setAdditionalServicesTotal] = useState(0);
   const [discountPercent, setDiscountPercent] = useState('');
   const [discountAmount, setDiscountAmount] = useState(0);
   const [subtotal, setSubtotal] = useState(0);
   const [total, setTotal] = useState(0);
 
   // Milestone Terms & Clauses
-  const [advancePercent, setAdvancePercent] = useState('60');
-  const [midPercent, setMidPercent] = useState('30');
-  const [finalPercent, setFinalPercent] = useState('10');
   const [validityText, setValidityText] = useState('');
   const [negotiationNote, setNegotiationNote] = useState('PRICE IS NEGOTIABLE FOR IMMEDIATE ORDER');
   const [workStartNote, setWorkStartNote] = useState('Work can be started 48hrs from the time of payment received');
   const [withRegards, setWithRegards] = useState('Mr. SRIRAM');
-  const [warrantyText, setWarrantyText] = useState('');
 
   // Success & Alert Modals
   const [successModal, setSuccessModal] = useState({ visible: false, title: '', message: '', custId: null });
@@ -246,10 +250,11 @@ export default function EditQuotationScreen() {
   }, []);
 
   const currentUserRef = useRef(currentUser);
-  currentUserRef.current = currentUser;
-
   const clientDataRef = useRef(clientData);
-  clientDataRef.current = clientData;
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+    clientDataRef.current = clientData;
+  }, [currentUser, clientData]);
 
   // Fetch Client & Appointment Information (runs at most ONCE per customerId)
   const customerId = params.appointmentId
@@ -299,10 +304,10 @@ export default function EditQuotationScreen() {
         id: existingQuotation.appointmentId || existingQuotation.customerId,
         appointmentId: existingQuotation.appointmentId || existingQuotation.customerId,
         customerId: existingQuotation.customerId || existingQuotation.appointmentId,
-        clientName: existingQuotation.clientName || existingQuotation.customerName || 'Client',
-        customerName: existingQuotation.customerName || existingQuotation.clientName || 'Client',
-        mobileNumber: existingQuotation.mobileNumber || existingQuotation.phone || '',
-        phone: existingQuotation.mobileNumber || existingQuotation.phone || '',
+        clientName: existingQuotation.customer?.name || existingQuotation.clientName || existingQuotation.customerName || 'Client',
+        customerName: existingQuotation.customer?.name || existingQuotation.customerName || existingQuotation.clientName || 'Client',
+        mobileNumber: existingQuotation.customer?.mobile || existingQuotation.mobileNumber || existingQuotation.phone || '',
+        phone: existingQuotation.customer?.mobile || existingQuotation.mobileNumber || existingQuotation.phone || '',
       };
     }
     const cleanId = String(customerId || '').replace(/^DR/i, '').trim();
@@ -636,7 +641,14 @@ export default function EditQuotationScreen() {
         const initialConfig = {};
         let initialArea = q.area ? String(q.area) : '';
 
-        const flatServices = Array.isArray(q.services) ? q.services.flat(Infinity) : [];
+        const allServices = Array.isArray(q.services) ? q.services.flat(Infinity) : [];
+        const isAdditionalLine = (srv) => Boolean(srv && typeof srv === 'object' && srv.isAdditional);
+        setAdditionalServicesTotal(
+          allServices
+            .filter(isAdditionalLine)
+            .reduce((sum, srv) => sum + Math.round(Number(srv.amount ?? srv.totalPrice ?? lineAmount(srv.area, srv.rate)) || 0), 0)
+        );
+        const flatServices = allServices.filter((srv) => !isAdditionalLine(srv));
 
         if (flatServices.length > 0) {
           flatServices.forEach((srv) => {
@@ -688,64 +700,13 @@ export default function EditQuotationScreen() {
         setServicesConfig(initialConfig);
         setSiteArea(initialArea);
 
-        // Pre-fill Terms: Fixed 60 / 30 / 10 by default - not dynamically corrupted
-        let rawAdvP = parseFloat(q.advancePercent != null ? q.advancePercent : q.paymentTerms?.advance);
-        let rawMidP = parseFloat(q.midPercent != null ? q.midPercent : q.paymentTerms?.mid);
-        let rawFinP = parseFloat(q.finalPercent != null ? q.finalPercent : q.paymentTerms?.final);
+        setValidityText(q.paymentTerms?.validity || (q.validTill ? `Quote Valid till ${formatDateDDMMYY(q.validTill)}` : ''));
+        setNegotiationNote(String(q.negotiation ?? q.paymentTerms?.negotiation ?? 'PRICE IS NEGOTIABLE FOR IMMEDIATE ORDER'));
+        setWorkStartNote(String(q.workCommencement ?? q.paymentTerms?.workStart ?? 'Work can be started 48hrs from the time of payment received'));
 
-        if (
-          !isNaN(rawAdvP) &&
-          !isNaN(rawMidP) &&
-          rawAdvP > 0 &&
-          rawMidP > 0 &&
-          rawAdvP + rawMidP < 100
-        ) {
-          // Snap near-default values (e.g. 59 or 61 from rounding) to standard 60 / 30 / 10
-          if (Math.abs(rawAdvP - 60) <= 2 && Math.abs(rawMidP - 30) <= 2) {
-            rawAdvP = 60;
-            rawMidP = 30;
-            rawFinP = 10;
-          } else {
-            rawFinP = Math.max(0, 100 - rawAdvP - rawMidP);
-          }
-          setAdvancePercent(String(rawAdvP));
-          setMidPercent(String(rawMidP));
-          setFinalPercent(String(rawFinP));
-        } else {
-          setAdvancePercent('60');
-          setMidPercent('30');
-          setFinalPercent('10');
-        }
-
-        setValidityText(q.quoteValidateDate || q.paymentTerms?.validity || q.validTill || 'Quote Valid till 30 Days');
-        setNegotiationNote(q.negotiation != null ? String(q.negotiation) : 'PRICE IS NEGOTIABLE FOR IMMEDIATE ORDER');
-        setWorkStartNote(q.workCommencement != null ? String(q.workCommencement) : 'Work can be started 48hrs from the time of payment received');
-
-        const matchedPkgWarranty = (res.packages || []).find((p) => p.packageId === q.packageId || p.packageName === matchedPkgName)?.warranty;
-        setWarrantyText(q.warranty || q.package?.warranty || matchedPkgWarranty || (activeQuoteTier === 'elite' ? '15 Years' : activeQuoteTier === 'premium' ? '10 Years' : '5 Years'));
 
         // Discount
-        const existingDiscountPct = q.discountPercentage != null
-          ? q.discountPercentage
-          : (q.discountPercent != null
-            ? q.discountPercent
-            : (q.discount_percentage != null
-              ? q.discount_percentage
-              : (q.discount_percent != null
-                ? q.discount_percent
-                : '')));
-
-        if (existingDiscountPct !== '' && existingDiscountPct !== null && existingDiscountPct !== undefined) {
-          setDiscountPercent(String(existingDiscountPct));
-        } else if (Number(q.discountAmount || q.discount_amount || (Number(q.discount) > 100 ? q.discount : 0) || 0) > 0 && Number(q.subTotal || q.subtotal || 0) > 0) {
-          const rupeeDisc = Number(q.discountAmount || q.discount_amount || q.discount);
-          const calculatedPct = Math.round((rupeeDisc / Number(q.subTotal || q.subtotal)) * 100);
-          setDiscountPercent(String(calculatedPct));
-        } else if (q.discount != null && Number(q.discount) <= 100 && Number(q.discount) >= 0) {
-          setDiscountPercent(String(q.discount));
-        } else {
-          setDiscountPercent('0');
-        }
+        setDiscountPercent(String(q.pricing?.discount?.percentage ?? q.discountPercentage ?? 0));
 
         // With Regards / Signatory
         const assignedEmpName = q.employeeName
@@ -772,53 +733,13 @@ export default function EditQuotationScreen() {
           setWithRegards(defaultWithRegardsName);
         }
 
-        // GST
-        const selectedType = q.pricing?.selectedType || '';
-        const withGst = q.pricing?.withGst || null;
-
-        const resolveRate = (...candidates) => {
-          for (const c of candidates) {
-            if (c != null) {
-              const num = typeof c === 'number' ? c : parseFloat(String(c).replace('%', ''));
-              if (!isNaN(num) && num > 0) return String(num);
-            }
-          }
-          return '';
-        };
-
-        let isExistingGst = false;
-        if (selectedType === 'WITH_GST') {
-          isExistingGst = true;
-        } else if (selectedType === 'WITHOUT_GST') {
-          isExistingGst = false;
-        } else {
-          isExistingGst = Boolean(
-            q.gstAdded === true ||
-            q.isGst === true ||
-            Number(q.gstAmount || 0) > 0 ||
-            Number(q.gstPercentage || 0) > 0 ||
-            (withGst?.gst?.amount != null && Number(withGst.gst.amount) > 0) ||
-            (typeof q.gst === 'string' && q.gst !== '0%' && q.gst !== '0' && q.gst.trim() !== '')
-          );
-        }
-
-        let gstVal = resolveRate(
-          withGst?.gst?.percentage,
-          withGst?.gst?.rate,
-          withGst?.cgst?.percentage != null ? withGst.cgst.percentage * 2 : null,
-          withGst?.sgst?.percentage != null ? withGst.sgst.percentage * 2 : null,
-          q.gstPercentage,
-          q.gstRate,
-          q.gstPercent,
-          q.gst
-        );
-
-        if (!gstVal) {
-          gstVal = '18';
-        }
-
-        setGstAdded(isExistingGst);
-        setGstPercent(gstVal);
+        // GST is charged whenever the quotation has a GST percentage; isTaxCustomer is the separate tax state
+        const quoteGstPct = Number(q.pricing?.gst?.percentage ?? q.gstPercentage ?? 0) || 0;
+        setGstAdded(quoteGstPct > 0);
+        setGstPercent(quoteGstPct > 0 ? String(quoteGstPct) : '18');
+        setIsGstCustomer(typeof q.isTaxCustomer === 'boolean' ? q.isTaxCustomer : true);
+        setCustomerGstNumber(q.customerGstNumber || '');
+        setSavedGstNumber(q.customerGstNumber || '');
       } else {
         const pvRes = await quotationService.getPageView();
         if (pvRes && pvRes.success) {
@@ -946,31 +867,26 @@ export default function EditQuotationScreen() {
 
   // Calculation Engine
   const handleCalculate = useCallback(() => {
-    let sub = 0;
+    let sub = additionalServicesTotal;
     Object.keys(selectedServicesMap).forEach((sName) => {
       if (selectedServicesMap[sName]) {
         const cfg = servicesConfig[sName] || {};
-        const areaVal = parseFloat(cfg.area || siteArea) || 0;
-        const rate = parseFloat(cfg.rate || 0) || 0;
-        sub += areaVal * rate;
+        sub += lineAmount(cfg.area || siteArea, cfg.rate);
       }
     });
 
     setSubtotal(sub);
 
-    const gstMultiplier = parseFloat(gstPercent) || 0;
-    const taxFactor = gstAdded ? gstMultiplier / 100 : 0;
-    const tax = Math.round(sub * taxFactor);
-    setGstAmount(tax);
-    const baseWithGst = sub + (gstAdded ? tax : 0);
-
-    const discPct = Math.max(0, Math.min(100, parseFloat(discountPercent) || 0));
-    const discAmt = discPct > 0 ? (baseWithGst * discPct) / 100 : 0;
-    setDiscountAmount(discAmt);
-
-    const calculatedTotal = Math.max(0, baseWithGst - discAmt);
-    setTotal(calculatedTotal);
-  }, [siteArea, gstAdded, gstPercent, discountPercent, selectedServicesMap, servicesConfig]);
+    const pricing = calculateQuotationPricing({
+      subTotal: sub,
+      gstPercentage: gstAdded ? gstPercent : 0,
+      discountPercentage: discountPercent,
+      isTaxCustomer: isGstCustomer,
+    });
+    setGstAmount(pricing.gstAmount);
+    setDiscountAmount(pricing.discountAmount);
+    setTotal(pricing.grandTotal);
+  }, [siteArea, gstAdded, gstPercent, discountPercent, isGstCustomer, additionalServicesTotal, selectedServicesMap, servicesConfig]);
 
   useEffect(() => {
     handleCalculate();
@@ -1016,10 +932,24 @@ export default function EditQuotationScreen() {
         showAlert('Validation Error', `Rate for "${sName}" must be a valid positive number.`, 'warning');
         return false;
       }
+      if (cfg.serviceDetailId == null) {
+        showAlert('Validation Error', `"${sName}" is not available in the catalog for this package. Remove it or pick another variation.`, 'warning');
+        return false;
+      }
     }
 
-    if (!validityText?.trim()) {
-      showAlert('Validation Error', 'Quote Validity Date is required.', 'warning');
+    const validTillIso = extractValidTillDate(validityText);
+    if (!validTillIso) {
+      showAlert('Validation Error', 'Quote Validity must contain a valid date, e.g. "Quote Valid till 13-10-26".', 'warning');
+      return false;
+    }
+    if (validTillIso < toApiDateString(quotationDate)) {
+      showAlert('Validation Error', 'Quote Validity date cannot be before the Quotation Date.', 'warning');
+      return false;
+    }
+
+    if (isGstCustomer && customerGstNumber.trim() && !isValidGstin(customerGstNumber)) {
+      showAlert('Validation Error', 'Customer GSTIN is not valid. Expected format: 33AAAAA0000A1Z5.', 'warning');
       return false;
     }
 
@@ -1072,137 +1002,55 @@ export default function EditQuotationScreen() {
       else quoteForId = 1;
     }
 
-    const quotationServicesRequest = activeServices.map((sName, index) => {
+    const quotationServicesRequest = activeServices.map((sName) => {
       const cfg = servicesConfig[sName] || {};
-      const dynService = findServiceInMap(dynamicServicesMap, sName);
-
-      const sAreaVal = parseFloat(cfg.area || siteArea || 0);
-      const sRateVal = parseFloat(cfg.rate || 0);
-      const sSpec = cfg.spec || (Array.isArray(cfg.specs) && cfg.specs.length > 0 ? cfg.specs.join(', ') : 'Standard Waterproofing');
-      const sDetailId = cfg.serviceDetailId != null ? Number(cfg.serviceDetailId) : null;
-      const sSubtitle = cfg.selectedSubtitle || cfg.subtitle || 'Default';
-      const sWarranty = cfg.warranty || selectedPkg?.warranty || warrantyText || (isTierMatch(currentTier, 'economic') ? '5 Years' : '');
+      const description = cfg.spec || (Array.isArray(cfg.specs) ? cfg.specs.filter(Boolean).join(', ') : '');
 
       return {
-        serviceId: Number(dynService?.serviceId || index + 1),
-        serviceDetailId: sDetailId,
-        title: sName,
-        serviceName: sName,
-        subtitle: sSubtitle,
-        tierType: dynService?.tierType || 'MultiTier',
-        description: sSpec,
-        area: sAreaVal,
-        rate: sRateVal,
-        totalPrice: Math.round(sAreaVal * sRateVal),
-        warranty: sWarranty,
+        serviceDetailId: Number(cfg.serviceDetailId),
+        area: parseFloat(cfg.area || siteArea || 0),
+        rate: parseFloat(cfg.rate || 0),
+        ...(description ? { description } : {}),
       };
     });
 
-    let advP = parseFloat(advancePercent ?? 60);
-    let midP = parseFloat(midPercent ?? 30);
-    let finP = parseFloat(finalPercent ?? 10);
-    if (isNaN(advP) || isNaN(midP) || isNaN(finP) || Math.abs((advP + midP + finP) - 100) > 0.5) {
-      advP = 60;
-      midP = 30;
-      finP = 10;
-    }
-    const advanceAmount = Math.round((total * advP) / 100);
-    const midCostAmount = Math.round((total * midP) / 100);
-    const finalAmountVal = Math.round(total - advanceAmount - midCostAmount);
+    // The server recalculates these (on-site additional services included) and rejects the request if they differ
+    const pricing = calculateQuotationPricing({
+      subTotal: additionalServicesTotal + quotationServicesRequest.reduce((sum, line) => sum + lineAmount(line.area, line.rate), 0),
+      gstPercentage: gstAdded ? gstPercent : 0,
+      discountPercentage: discountPercent,
+      isTaxCustomer: isGstCustomer,
+    });
 
-    const empId = Number(existingQuotation?.employeeId || currentUser?.id || currentUser?.employeeId || app?.assignedEmployeeId || app?.employeeId) || 2;
     const appId = Number(existingQuotation?.appointmentId || params.appointmentId || app?.id) || null;
     const custId = Number(existingQuotation?.customerId || params.customerId || params.appointmentId || app?.id) || appId;
-    const nextRevision = (Number(existingQuotation?.revision) || 1) + 1;
-
-    const parsedGst = parseFloat(gstPercent);
-    const editGstRate = !isNaN(parsedGst) ? parsedGst : 18;
-    const editGstAmount = gstAdded ? Math.round(subtotal * (editGstRate / 100)) : 0;
-    const editCgstAmount = Math.round(editGstAmount / 2);
-    const editSgstAmount = editGstAmount - editCgstAmount;
-
-    const gstPayloadFields = gstAdded
-      ? {
-        gstPercentage: editGstRate,
-        gstRate: editGstRate,
-        gstAmount: editGstAmount,
-        cgstPercentage: editGstRate / 2,
-        sgstPercentage: editGstRate / 2,
-        cgstAmount: editCgstAmount,
-        sgstAmount: editSgstAmount,
-        isGst: true,
-        gstAdded: true,
-      }
-      : {
-        gstPercentage: 0,
-        gstRate: 0,
-        gstAmount: 0,
-        cgstPercentage: 0,
-        sgstPercentage: 0,
-        cgstAmount: 0,
-        sgstAmount: 0,
-        isGst: false,
-        gstAdded: false,
-      };
-
-    const baseWithGst = subtotal + (gstAdded ? editGstAmount : 0);
-
-    const discPct = Math.max(0, Math.min(100, parseFloat(discountPercent) || 0));
-    const discAmt = discPct > 0 ? Math.round((baseWithGst * discPct) / 100) : 0;
-    const discountedSubtotal = Math.max(0, baseWithGst - discAmt);
-    const withRegardsVal = withRegards?.trim() || 'Mr. SRIRAM';
-
-    const propNameVal = selectedProp?.name || propertyType || 'House';
-    const pkgNameVal = selectedPkg?.packageName || selectedPkg?.name || (isTierMatch(currentTier, 'economic') ? 'Acrylic Elastomeric Coating' : 'Waterproofing Treatment');
-    const pkgTierVal = selectedPkg?.packages && !isTierMatch(selectedPkg.packages, 'economic')
-      ? selectedPkg.packages
-      : (isTierMatch(currentTier, 'economic') ? 'Economic' : currentTier === 'elite' ? 'Elite' : currentTier === 'premium' ? 'Premium' : 'None');
+    const validTillVal = extractValidTillDate(validityText);
+    const withRegardsVal = (withRegards || '').trim();
+    const negotiationVal = (negotiationNote || '').trim();
+    const workCommencementVal = (workStartNote || '').trim();
 
     const apiPayload = {
-      quotationDate: formatToApiDate(quotationDate),
-      propertyId,
-      propertyName: propNameVal,
-      packageId: quoteForId,
-      quoteFor: quoteForId,
-      packageName: pkgNameVal,
-      packageTier: pkgTierVal,
-      employeeId: empId,
       appointmentId: appId,
-      customerId: custId,
-      withRegards: withRegardsVal,
-      withRegardsName: withRegardsVal,
-      isGst: Boolean(gstAdded),
-      gstAdded: Boolean(gstAdded),
+      propertyId,
+      packageId: quoteForId,
+      quotationDate: formatToApiDate(quotationDate),
+      ...(validTillVal ? { validTill: validTillVal } : {}),
+      isTaxCustomer: isGstCustomer,
+      ...(isGstCustomer
+        ? (customerGstNumber.trim()
+          ? { customerGstNumber: customerGstNumber.trim().toUpperCase() }
+          : (savedGstNumber ? { customer_gst_number: '' } : {}))
+        : {}),
+      ...(withRegardsVal ? { withRegards: withRegardsVal } : {}),
+      ...(negotiationVal ? { negotiation: negotiationVal } : {}),
+      ...(workCommencementVal ? { workCommencement: workCommencementVal } : {}),
       services: quotationServicesRequest,
-      advance: advanceAmount,
-      midCost: midCostAmount,
-      final: finalAmountVal,
-      advancePercent: advP,
-      midPercent: midP,
-      finalPercent: finP,
-      paymentTerms: {
-        advance: advP,
-        mid: midP,
-        final: finP,
-        validity: validityText.trim(),
-        negotiation: negotiationNote?.trim() || null,
-        workStart: workStartNote?.trim() || null,
+      amount: {
+        gstPercentage: pricing.gstPercentage,
+        discountPercentage: pricing.discountPercentage,
+        subTotal: pricing.subTotal,
+        grandTotal: pricing.grandTotal,
       },
-      discount: discPct,
-      discountPercentage: discPct,
-      discountPercent: discPct,
-      discountAmount: discAmt,
-      subTotal: Math.round(subtotal),
-      totalAmount: Math.round(discountedSubtotal),
-      grandTotal: Math.round(total),
-      totalWithGst: Math.round(total),
-      quoteValidateDate: validityText.trim(),
-      negotiation: negotiationNote?.trim() || null,
-      workCommencement: workStartNote?.trim() || null,
-      warranty: warrantyText?.trim() || selectedPkg?.warranty || null,
-      revision: nextRevision,
-      isConfirmed: false,
-      ...gstPayloadFields,
     };
 
     try {
@@ -1215,7 +1063,7 @@ export default function EditQuotationScreen() {
         setSuccessModal({
           visible: true,
           title: 'Quotation Updated! 🎉',
-          message: apiRes.message || `Quotation for ${pkgTierVal} has been updated successfully.`,
+          message: apiRes.message || `Quotation for ${currentTierLabel} has been updated successfully.`,
           custId: custId || appId,
         });
       } else {
@@ -1237,14 +1085,14 @@ export default function EditQuotationScreen() {
     );
   }
 
-  const rawClientName = app?.customerName || app?.clientName || app?.name || existingQuotation?.customerName || existingQuotation?.clientName || '';
+  const rawClientName = app?.customerName || app?.clientName || app?.name || existingQuotation?.customer?.name || existingQuotation?.customerName || existingQuotation?.clientName || '';
   const customerInitial = (() => {
     const cleaned = rawClientName.replace(/^(mr\.|mrs\.|ms\.|dr\.)\s+/i, '').trim();
     return (cleaned || rawClientName).slice(0, 2).toUpperCase() || 'MR';
   })();
   const displayName = rawClientName ? `${rawClientName.trim()}` : `Customer #${customerId || ''}`;
   const displayId = `DR${app?.customerId || app?.appointmentId || app?.id || existingQuotation?.customerId || customerId || ''}`.replace(/^DRDR/i, 'DR');
-  const displayPhone = app?.mobileNumber || app?.phone || existingQuotation?.mobileNumber || existingQuotation?.phone || 'N/A';
+  const displayPhone = app?.mobileNumber || app?.phone || existingQuotation?.customer?.mobile || existingQuotation?.mobileNumber || existingQuotation?.phone || 'N/A';
   const revisionStatus = existingQuotation?.revision ? `Revision #${existingQuotation.revision}` : 'Editing';
 
   const selectedServicesCount = Object.keys(selectedServicesMap).filter((k) => selectedServicesMap[k]).length;
@@ -1547,6 +1395,11 @@ export default function EditQuotationScreen() {
                 Rs. {Math.round(subtotal).toLocaleString()}
               </Text>
             </View>
+            {additionalServicesTotal > 0 && (
+              <Text style={[styles.gstRadioHint, isDark && styles.subtextDark]}>
+                Includes on-site additional services: Rs. {Math.round(additionalServicesTotal).toLocaleString()}
+              </Text>
+            )}
           </View>
 
           {/* Include GST Row */}
@@ -1589,6 +1442,59 @@ export default function EditQuotationScreen() {
                   placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
                 />
                 <Text style={[styles.inputSuffix, isDark && styles.subtextDark]}>%</Text>
+              </View>
+            </View>
+          )}
+
+          {/* Customer type: GST customer or Without GST customer */}
+          <View style={styles.inputGroup}>
+            <Text style={[styles.inputLabel, isDark && styles.labelDark]}>Customer Type</Text>
+            <View style={styles.gstRadioRow}>
+              {[
+                { value: true, label: 'GST Customer' },
+                { value: false, label: 'Without GST Customer' },
+              ].map((opt) => {
+                const selected = isGstCustomer === opt.value;
+                return (
+                  <TouchableOpacity
+                    key={opt.label}
+                    style={[
+                      styles.gstRadioOption,
+                      isDark && styles.gstRadioOptionDark,
+                      selected && (isDark ? styles.gstRadioOptionSelectedDark : styles.gstRadioOptionSelected),
+                    ]}
+                    onPress={() => setIsGstCustomer(opt.value)}
+                    activeOpacity={0.8}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected }}
+                  >
+                    <View style={[styles.gstRadioOuter, selected && styles.gstRadioOuterSelected]}>
+                      {selected && <View style={styles.gstRadioInner} />}
+                    </View>
+                    <Text style={[styles.gstLabelText, isDark && styles.textDark, { flexShrink: 1 }]}>{opt.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={[styles.gstRadioHint, isDark && styles.subtextDark]}>
+              GST Customer gets a tax invoice; Without GST Customer gets a cash bill.
+            </Text>
+          </View>
+
+          {isGstCustomer && (
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, isDark && styles.labelDark]}>Customer GSTIN (optional)</Text>
+              <View style={[styles.inputFieldWrap, isDark && styles.inputFieldWrapDark]}>
+                <TextInput
+                  style={[styles.textInput, isDark && styles.textDark]}
+                  value={customerGstNumber}
+                  onChangeText={(val) => setCustomerGstNumber(val.toUpperCase())}
+                  placeholder="e.g. 33AAAAA0000A1Z5"
+                  placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  maxLength={15}
+                />
               </View>
             </View>
           )}
@@ -1667,7 +1573,7 @@ export default function EditQuotationScreen() {
                 style={[styles.textInput, isDark && styles.textDark]}
                 value={validityText}
                 onChangeText={setValidityText}
-                placeholder="Quote Valid till..."
+                placeholder="Quote Valid till DD-MM-YY"
                 placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
               />
             </View>
@@ -2158,11 +2064,6 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     marginBottom: 8,
   },
-  gstLabelText: {
-    fontSize: 12.5,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
   gstBtn: {
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -2178,6 +2079,62 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  gstLabelText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  gstRadioRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  gstRadioHint: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 6,
+  },
+  gstRadioOption: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    backgroundColor: '#F8FAFC',
+  },
+  gstRadioOptionDark: {
+    borderColor: '#334155',
+    backgroundColor: '#1E293B',
+  },
+  gstRadioOptionSelected: {
+    borderColor: '#2B59A2',
+    backgroundColor: '#EFF6FF',
+  },
+  gstRadioOptionSelectedDark: {
+    borderColor: '#2B59A2',
+    backgroundColor: '#1E3A8A33',
+  },
+  gstRadioOuter: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#94A3B8',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gstRadioOuterSelected: {
+    borderColor: '#2B59A2',
+  },
+  gstRadioInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#2B59A2',
   },
   discountInputRow: {
     flexDirection: 'row',

@@ -88,9 +88,9 @@ export const quotationPaymentRepository = {
    * GET /api/v2/quotation-payments/:id
    *
    * Returns full payment summary including:
-   *   quotationId, clientName, mobileNumber, gstDecision, customerGstNumber,
-   *   pricing { subTotal, withoutGstTotal, withGstTotal },
-   *   progress { totalPaid, withGstBalance, withoutGstBalance, paymentStatus },
+   *   quotationId, clientName, mobileNumber, gstDecision, isTaxCustomer, invoiceType, customerGstNumber,
+   *   pricing { subTotal, discount, gst, grandTotal },
+   *   progress { totalPaid, balanceAmount, paymentStatus },
    *   history []
    */
   getPaymentSummary: async (quotationId) => {
@@ -120,7 +120,7 @@ export const quotationPaymentRepository = {
   /**
    * POST /api/v2/quotation-payments/:id
    *
-   * Records an intermediate payment (deducted from withoutGstBalance).
+   * Records an intermediate payment (checked against progress.balanceAmount, i.e. grandTotal - totalPaid).
    * Proof image is mandatory. Sequential verification guard applies.
    *
    * payload: {
@@ -259,14 +259,13 @@ export const quotationPaymentRepository = {
   /**
    * POST /api/v2/quotation-payments/:id/final
    *
-   * Final settlement. applyGst (boolean) determines GST treatment:
-   *   applyGst = false -> settles withoutGstBalance (gstDecision: OPTED_OUT)
-   *   applyGst = true  -> settles withGstBalance (gstDecision: APPLIED, 18% GST)
+   * Final settlement of the remaining progress.balanceAmount. GST follows the quotation's isGst.
+   * applyGst is optional; if sent and it disagrees with the quotation the request fails with 400.
    *
    * payload: {
    *   amount: number,
    *   paymentMethod: 'UPI' | 'ACCOUNT' | 'CASH',
-   *   applyGst: boolean,
+   *   applyGst?: boolean,
    *   customerGstNumber?: string,
    *   upiId?: string,
    *   accountId?: number,
@@ -305,7 +304,7 @@ export const quotationPaymentRepository = {
    * DELETE /api/v2/quotation-payments/:id/:paymentId
    *
    * Admin-only. Deletes the latest payment and restores quotation balance.
-   * If the deleted payment was the final payment, gstDecision reverts to PENDING.
+   * Deleting the final payment reopens the balance; the customer's GST status is unchanged.
    */
   deletePayment: async (quotationId, paymentId) => {
     if (!quotationId || !paymentId) {

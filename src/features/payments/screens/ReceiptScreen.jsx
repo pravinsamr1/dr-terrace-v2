@@ -54,17 +54,22 @@ const getAdditionalPaymentList = (payView) => {
 const getReceiptData = (app, customerGst, finalReceiptData = null, params = {}, payView = null) => {
   const isFullReceipt = params?.isFullServiceReceipt === 'true';
 
-  // For individual payment/cash receipts, only show the payment amount without GST.
-  // The GST is only shown in the final bill based on user selection when creating the Final Receipt with GST.
+  // Individual payment receipts never show GST. The final bill is a tax invoice for a tax customer
+  // (taxDecision WITH_GST), otherwise a cash bill; the receipt's own taxDecision wins over route params.
   const isGst = Boolean(
     isFullReceipt && (
-      params?.hasGst === 'true' ||
-      finalReceiptData?.withGst ||
-      payView?.withGst
+      finalReceiptData?.taxDecision
+        ? finalReceiptData.taxDecision === 'WITH_GST'
+        : (
+          typeof finalReceiptData?.isTaxCustomer === 'boolean'
+            ? finalReceiptData.isTaxCustomer
+            : (params?.hasGst === 'true' || payView?.isTaxCustomer === true)
+        )
     )
   );
 
-  const docTitle = isGst ? 'TAX INVOICE' : (isFullReceipt ? 'CASH BILL' : 'CASH RECEIPT');
+  // params.docTitle lets a caller reuse this layout under another title (the proforma invoice)
+  const docTitle = params?.docTitle || (isGst ? 'TAX INVOICE' : (isFullReceipt ? 'CASH BILL' : 'CASH RECEIPT'));
 
   // Cash Receipt / Cash Bill show one line referencing the agreed quotation instead of itemised services
   const receiptQuoteId =
@@ -307,7 +312,6 @@ const getReceiptData = (app, customerGst, finalReceiptData = null, params = {}, 
       finalReceiptData?.quotation?.totalAmount ||
       finalReceiptData?.grossSubtotal ||
       finalReceiptData?.originalTotalPrice ||
-      payView?.pricing?.withoutGstTotal ||
       payView?.pricing?.subTotal ||
       payView?.grossSubtotal ||
       payView?.totalPrice ||
@@ -352,26 +356,29 @@ const getReceiptData = (app, customerGst, finalReceiptData = null, params = {}, 
     });
   }
 
-  const subTotal = servicesList.reduce((acc, s) => acc + (s.total || 0), 0) || baseTotal;
+  const linesTotal = servicesList.reduce((acc, s) => acc + (s.total || 0), 0) || baseTotal;
+
+  // A cash bill shows the full amount payable (the server's grandTotal, which includes GST when GST is charged),
+  // not the pre-tax line totals.
+  const serverGrandTotal = isFullReceipt
+    ? Number(finalReceiptData?.grandTotal ?? finalReceiptData?.pricing?.grandTotal)
+    : NaN;
+  const subTotal = !isGst && Number.isFinite(serverGrandTotal) && serverGrandTotal > 0 ? serverGrandTotal : linesTotal;
 
   if (!isGst) {
     servicesList = [{ sNo: 1, name: cashServiceText, measurement: '', rate: '', total: subTotal }];
   }
 
-  const gstPercent = Number(
-    finalReceiptData?.gstPercentage ||
-    payView?.gstPercentage ||
-    app?.gstPercentage ||
-    params?.gstPercent ||
-    18
-  );
+  const gstPercent = finalReceiptData
+    ? (Number(finalReceiptData.gstPercentage ?? finalReceiptData.pricing?.gst?.percentage ?? 0) || 0)
+    : Number(payView?.gstPercentage || payView?.pricing?.gst?.percentage || app?.gstPercentage || params?.gstPercent || 18);
   const cgstRate = gstPercent / 2;
   const sgstRate = gstPercent / 2;
 
   let cgstAmount = 0;
   let sgstAmount = 0;
   if (isGst) {
-    if (finalReceiptData?.cgst && finalReceiptData?.sgst) {
+    if (finalReceiptData?.cgst != null && finalReceiptData?.sgst != null) {
       cgstAmount = Number(finalReceiptData.cgst);
       sgstAmount = Number(finalReceiptData.sgst);
     } else {
@@ -1750,7 +1757,7 @@ export default function ReceiptScreen() {
             setFinalReceiptData(res.data);
           } else {
             paymentRepository
-              .generateFinalReceipt(qId, params.gstNumber, params.hasGst === 'true')
+              .generateFinalReceipt(qId, params.gstNumber)
               .then((genRes) => {
                 if (genRes?.success && genRes.data) {
                   setFinalReceiptData(genRes.data);
@@ -1761,7 +1768,7 @@ export default function ReceiptScreen() {
         })
         .catch(() => {
           paymentRepository
-            .generateFinalReceipt(qId, params.gstNumber, params.hasGst === 'true')
+            .generateFinalReceipt(qId, params.gstNumber)
             .then((genRes) => {
               if (genRes?.success && genRes.data) {
                 setFinalReceiptData(genRes.data);
@@ -1774,7 +1781,6 @@ export default function ReceiptScreen() {
     params.isFullServiceReceipt,
     params.quotationId,
     params.gstNumber,
-    params.hasGst,
     app?.confirmedQuoteId,
     app?.activeQuotationId,
     app?.quotations,
