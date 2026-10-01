@@ -1,19 +1,9 @@
 import React from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import {
-  cacheDirectory,
-  copyAsync,
-  deleteAsync,
-  getInfoAsync,
-  writeAsStringAsync,
-} from 'expo-file-system/legacy';
-import * as Print from 'expo-print';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import * as Sharing from 'expo-sharing';
 import {
   Alert,
   Image,
-  Platform,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -29,6 +19,7 @@ import { warrantyRepository } from '../api/warrantyRepository';
 import { useColorScheme } from '../../../core/hooks/useColorScheme';
 import InnerHeader from '../../../shared/components/InnerHeader';
 import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
+import { createPdfFile, sharePdfFile, toSafeFileName } from '../../../core/utils/pdfShare';
 import { transformStyleForJakarta } from '../../../core/theme/initFonts';
 
 const Text = React.forwardRef((props, ref) => (
@@ -182,7 +173,7 @@ export default function WarrantyLetterScreen() {
       '<span></span>' +
       (siteEngineerCode ? '<span class="meta-r">Site Engineer coad -' + siteEngineerCode + '</span>' : '') +
       '</div><hr class="thin"/>' +
-      '<p>This is to certify that we have done a <b>' + serviceType + '</b> in the below mentioned building if require in future in order to claim the warranty please submit this along with your building leaking pictures.</p>' +
+      '<p>This is to certify that we have done a <b>Waterproofing or Heatproofing or Waterproofing cum Heatproofing </b> in the below mentioned building if require in future in order to claim the warranty please submit this along with your building leaking pictures.</p>' +
       '<p><span class="lbl">Warranty For:</span>&nbsp;&nbsp;<span class="red">' + clientLine + '</span></p>' +
       '<p><span class="lbl">Work Completed:</span> <span class="red">' + serviceType.toUpperCase() + ' COMPLETED ON ' + completedDate + '.</span></p>' +
       warrantyItemsHtml +
@@ -198,52 +189,9 @@ export default function WarrantyLetterScreen() {
       '<div class="fa">Parsn Commercial Complex, #C13, B13, 2nd floor, Kodambakkam High Road, Nungambakkam, Chennai-600006, admin@drterrace.com</div>' +
       '</body></html>';
     try {
-      const isAvailable = await Sharing.isAvailableAsync();
-      if (!isAvailable) {
-        Alert.alert('Sharing Unavailable', 'Sharing is not supported on this device.');
-        return;
-      }
-
-      const { uri, base64 } = await Print.printToFileAsync({ html: htmlContent, base64: true });
-      const cleanClientName = (clientLine || 'Customer').replace(/[^a-zA-Z0-9_-]/g, '_');
-      const targetName = `warranty_letter_${cleanClientName}.pdf`;
-      const targetUri = cacheDirectory ? `${cacheDirectory}${targetName}` : null;
-
-      let shareUri = uri;
-
-      if (targetUri && base64) {
-        try {
-          await writeAsStringAsync(targetUri, base64, { encoding: 'base64' });
-          shareUri = targetUri;
-        } catch (writeErr) {
-          console.warn('writeAsStringAsync failed, attempting copyAsync fallback:', writeErr?.message);
-        }
-      }
-
-      if (shareUri === uri && targetUri && uri) {
-        try {
-          const fileInfo = await getInfoAsync(targetUri);
-          if (fileInfo.exists) {
-            await deleteAsync(targetUri, { idempotent: true });
-          }
-          await copyAsync({
-            from: uri,
-            to: targetUri,
-          });
-          shareUri = targetUri;
-        } catch (copyErr) {
-          console.warn('copyAsync failed, using direct print URI:', copyErr?.message);
-        }
-      }
-
-      const shareOptions = {
-        mimeType: 'application/pdf',
-        dialogTitle: `Share Warranty Letter - ${clientLine || 'Customer'}`,
-      };
-      if (Platform.OS === 'ios') {
-        shareOptions.UTI = 'com.adobe.pdf';
-      }
-      await Sharing.shareAsync(shareUri, shareOptions);
+      const fileName = `warranty_letter_${toSafeFileName(clientLine, 'Customer')}.pdf`;
+      const uri = await createPdfFile({ html: htmlContent, fileName });
+      await sharePdfFile({ uri, title: `Share Warranty Letter - ${clientLine || 'Customer'}` });
     } catch (error) {
       console.error('Error generating PDF', error);
       Alert.alert('Error', 'Failed to generate and share PDF: ' + (error?.message || error));
@@ -303,7 +251,7 @@ export default function WarrantyLetterScreen() {
           {/* Intro */}
           <Text style={styles.body}>
             {'This is to certify that we have done a '}
-            <Text style={[styles.body, { fontWeight: '700', color: '#0F172A'}]}>{serviceType}</Text>
+            <Text style={[styles.body, { fontWeight: '700', color: '#0F172A'}]}>Waterproofing or Heatproofing or Waterproofing cum Heatproofing </Text>
             {' in the below mentioned building if require in future in order to claim the warranty please submit this along with your building leaking pictures.'}
           </Text>
 

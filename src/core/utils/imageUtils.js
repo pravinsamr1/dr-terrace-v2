@@ -112,7 +112,8 @@ function getServerOrigin() {
  * 3. Relative paths (e.g. '/uploads/payments/xyz.png' or 'uploads/payments/xyz.png') -> prepends server origin.
  * 4. LAN / localhost URLs (e.g. 'http://192.168.1.10:9000/uploads/...') when connecting via remote/ngrok ->
  *    rewrites origin to active server origin so the device can access the image.
- * 5. Valid remote full URLs -> returns as-is.
+ * 5. http:// URLs on the API's own host while the API is https -> upgraded to the https origin.
+ * 6. Valid remote full URLs -> returns as-is.
  *
  * @param {string|null|undefined} pathOrUrl
  * @returns {string|null}
@@ -159,6 +160,12 @@ export function resolveProofImageUrl(pathOrUrl) {
 
     // If active origin is remote (not local), and the image URL has a local host, rewrite to remote origin
     if (originUrl && isLocalHost && originUrl.hostname !== parsed.hostname) {
+      return `${origin}${parsed.pathname}${parsed.search}`;
+    }
+
+    // The backend builds these URLs itself and, behind an HTTPS proxy, often writes http:// for its own host.
+    // Installed Android builds block plain http, so use the HTTPS origin the app already talks to.
+    if (originUrl && originUrl.protocol === 'https:' && parsed.protocol === 'http:' && parsed.hostname === originUrl.hostname) {
       return `${origin}${parsed.pathname}${parsed.search}`;
     }
 

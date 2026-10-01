@@ -1,8 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { cacheDirectory, writeAsStringAsync } from 'expo-file-system/legacy';
-import * as Print from 'expo-print';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import * as Sharing from 'expo-sharing';
 import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
@@ -12,13 +9,13 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
-  TurboModuleRegistry,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { useTabBar } from '../../../core/context/TabBarContext';
 import { useColorScheme } from '../../../core/hooks/useColorScheme';
+import { createPdfFile, sharePdfFile, toSafeFileName } from '../../../core/utils/pdfShare';
 import InnerHeader from '../../../shared/components/InnerHeader';
 import { MaterialPageLoader } from '../../../shared/components/material';
 import { quotationRepository } from '../../quotations/api/quotationRepository';
@@ -34,6 +31,10 @@ const toPreviewHtml = (html) =>
       '<meta name="viewport" content="width=794, minimum-scale=0.3, maximum-scale=4, user-scalable=yes" />'
     )
     .replace('</head>', '<style>html, body { background: #E2E8F0; } .invoice-page { margin: 0 auto 12px; }</style></head>');
+
+// A4 at 72dpi
+const A4_WIDTH = 595;
+const A4_HEIGHT = 842;
 
 export default function ProformaInvoiceScreen() {
   const router = useRouter();
@@ -114,46 +115,37 @@ export default function ProformaInvoiceScreen() {
     return () => subscription.remove();
   }, [handleBack]);
 
-  const getPdfUri = async () => {
-    const { uri, base64 } = await Print.printToFileAsync({ html: invoice.html, base64: true });
-    const cleanClientName = invoice.clientName.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const targetUri = cacheDirectory ? `${cacheDirectory}${cleanClientName}_Proforma_${invoice.invoiceNo}.pdf` : null;
-    if (targetUri && base64) {
-      try {
-        await writeAsStringAsync(targetUri, base64, { encoding: 'base64' });
-        return targetUri;
-      } catch (writeErr) {
-        console.warn('Proforma PDF write failed, using the generated file:', writeErr?.message);
-      }
+  // One PDF per share, written to the app cache under a fixed name (a repeat share replaces it)
+  const preparePdf = async () => {
+    if (!invoice?.html) {
+      throw new Error('Invoice HTML is not available.');
     }
-    return uri;
+    const fileName = `${toSafeFileName(invoice.clientName, 'Customer')}_Proforma_${toSafeFileName(invoice.invoiceNo, 'Invoice')}.pdf`;
+    const shareUri = await createPdfFile({ html: invoice.html, fileName, width: A4_WIDTH, height: A4_HEIGHT });
+    return { shareUri, fileName };
   };
 
   const handleSharePDF = async () => {
     if (!invoice || isSharing) return;
     try {
       setIsSharing(true);
-      const isAvailable = await Sharing.isAvailableAsync();
-      if (!isAvailable) {
-        Alert.alert('Sharing Unavailable', 'Sharing is not supported on this device.');
-        return;
-      }
-      const fileUri = await getPdfUri();
-      try {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'application/pdf',
-          dialogTitle: `Share Proforma Invoice - ${invoice.invoiceNo}`,
-          UTI: 'com.adobe.pdf',
-        });
-      } catch (shareErr) {
-        // expo-sharing can refuse a file path on some Android devices; react-native-share reads it through its own provider
-        console.warn('Proforma share via expo-sharing failed:', fileUri, shareErr?.message);
-        if (!TurboModuleRegistry.get('RNShare')) throw shareErr;
-        const Share = require('react-native-share').default;
-        await Share.open({ url: fileUri, type: 'application/pdf', failOnCancel: false });
-      }
+      const { shareUri } = await preparePdf();
+      await sharePdfFile({ uri: shareUri, title: `Share Proforma Invoice - ${invoice.invoiceNo}` });
     } catch (error) {
-      Alert.alert('Error', 'Failed to share the proforma invoice: ' + (error?.message || error));
+      Alert.alert('Error', `Failed to share the proforma invoice:\n${error?.message || String(error)}`);
+    } finally {
+      setIsSharing(false);
+    }
+  };
+
+  const handleSendWhatsApp = async () => {
+    if (!invoice || isSharing) return;
+    try {
+      setIsSharing(true);
+      const { shareUri } = await preparePdf();
+      await sharePdfFile({ uri: shareUri, title: `Send Proforma Invoice - ${invoice.invoiceNo} via WhatsApp` });
+    } catch (error) {
+      Alert.alert('Error', `Failed to share the proforma invoice:\n${error?.message || String(error)}`);
     } finally {
       setIsSharing(false);
     }
@@ -200,17 +192,19 @@ export default function ProformaInvoiceScreen() {
 
       {/* Bottom Action Controls */}
       {!isLoading && !loadError && (
-        <View style={{
-          paddingHorizontal: 16,
-          paddingTop: 14,
-          backgroundColor: isDark ? '#1C1C1C' : '#FFFFFF',
-          borderTopWidth: 1,
-          borderColor: isDark ? '#334155' : '#E2E8F0',
-          paddingBottom: Math.max(insets.bottom, 16) + 85,
-          flexDirection: 'row',
-          gap: 12,
-          zIndex: 1000,
-        }}>
+        <View
+          style={{
+            paddingHorizontal: 16,
+            paddingTop: 14,
+            backgroundColor: isDark ? '#1C1C1C' : '#FFFFFF',
+            borderTopWidth: 1,
+            borderColor: isDark ? '#334155' : '#E2E8F0',
+            paddingBottom: Math.max(insets.bottom, 16) + 85,
+            flexDirection: 'row',
+            gap: 12,
+            zIndex: 1000,
+          }}
+        >
           <TouchableOpacity
             style={{
               flex: 1.2,
@@ -222,7 +216,7 @@ export default function ProformaInvoiceScreen() {
               alignItems: 'center',
               opacity: isSharing ? 0.7 : 1,
             }}
-            onPress={handleSharePDF}
+            onPress={handleSendWhatsApp}
             disabled={isSharing}
             activeOpacity={0.85}
           >

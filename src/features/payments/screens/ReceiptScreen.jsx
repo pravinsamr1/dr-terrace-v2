@@ -1,19 +1,9 @@
 import React from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import * as Print from 'expo-print';
 import { useLocalSearchParams } from 'expo-router';
-import * as Sharing from 'expo-sharing';
-import {
-  cacheDirectory,
-  copyAsync,
-  deleteAsync,
-  getInfoAsync,
-  writeAsStringAsync,
-} from 'expo-file-system/legacy';
 import {
   Alert,
   Image,
-  Platform,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -28,6 +18,7 @@ import { appointmentRepository } from '../../appointments/api/appointmentReposit
 import { clientRepository } from '../../clients/api/clientRepository';
 import { paymentRepository } from '../api/paymentRepository';
 import { useTabBarScroll } from '../../../core/context/TabBarContext';
+import { createPdfFile, sharePdfFile, toSafeFileName } from '../../../core/utils/pdfShare';
 import { useColorScheme } from '../../../core/hooks/useColorScheme';
 import InnerHeader from '../../../shared/components/InnerHeader';
 import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
@@ -1816,58 +1807,18 @@ export default function ReceiptScreen() {
 
   const getPdfUri = async () => {
     const htmlContent = generateTaxInvoiceHTML(app, customerGst, finalReceiptData, params, payView);
-    const { uri, base64 } = await Print.printToFileAsync({ html: htmlContent, base64: true });
-    const cleanClientName = (clientName || 'Customer').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const cleanDocTitle = (docTitle || 'Receipt').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const targetName = `${cleanDocTitle}_${cleanClientName}.pdf`;
-    const targetUri = cacheDirectory ? `${cacheDirectory}${targetName}` : null;
-
-    if (targetUri && base64) {
-      try {
-        await writeAsStringAsync(targetUri, base64, { encoding: 'base64' });
-        return targetUri;
-      } catch (writeErr) {
-        console.warn('writeAsStringAsync failed, attempting copyAsync fallback:', writeErr?.message);
-      }
-    }
-
-    if (targetUri && uri) {
-      try {
-        const fileInfo = await getInfoAsync(targetUri);
-        if (fileInfo.exists) {
-          await deleteAsync(targetUri, { idempotent: true });
-        }
-        await copyAsync({
-          from: uri,
-          to: targetUri,
-        });
-        return targetUri;
-      } catch (copyErr) {
-        console.warn('copyAsync failed, using direct print URI:', copyErr?.message);
-      }
-    }
-
-    return uri;
+    const cleanClientName = toSafeFileName(clientName, 'Customer');
+    const cleanDocTitle = toSafeFileName(docTitle, 'Receipt');
+    const fileName = `${cleanDocTitle}_${cleanClientName}.pdf`;
+    const uri = await createPdfFile({ html: htmlContent, fileName });
+    return { uri, fileName };
   };
 
   // PDF Action Handlers
   const handleShare = async () => {
     try {
-      const isAvailable = await Sharing.isAvailableAsync();
-      if (!isAvailable) {
-        Alert.alert('Sharing Unavailable', 'Sharing is not supported on this device.');
-        return;
-      }
-
-      const namedUri = await getPdfUri();
-      const shareOptions = {
-        mimeType: 'application/pdf',
-        dialogTitle: `Share ${docTitle} - ${clientName}`,
-      };
-      if (Platform.OS === 'ios') {
-        shareOptions.UTI = 'com.adobe.pdf';
-      }
-      await Sharing.shareAsync(namedUri, shareOptions);
+      const { uri } = await getPdfUri();
+      await sharePdfFile({ uri, title: `Share ${docTitle} - ${clientName}` });
     } catch (error) {
       Alert.alert('Error', 'Failed to share receipt PDF: ' + error.message);
     }
@@ -1875,21 +1826,8 @@ export default function ReceiptScreen() {
 
   const handleWhatsApp = async () => {
     try {
-      const isAvailable = await Sharing.isAvailableAsync();
-      if (!isAvailable) {
-        Alert.alert('Sharing Unavailable', 'Sharing is not supported on this device.');
-        return;
-      }
-
-      const namedUri = await getPdfUri();
-      const shareOptions = {
-        mimeType: 'application/pdf',
-        dialogTitle: `Send ${docTitle} to ${clientName} via WhatsApp`,
-      };
-      if (Platform.OS === 'ios') {
-        shareOptions.UTI = 'com.adobe.pdf';
-      }
-      await Sharing.shareAsync(namedUri, shareOptions);
+      const { uri } = await getPdfUri();
+      await sharePdfFile({ uri, title: `Send ${docTitle} to ${clientName} via WhatsApp` });
     } catch (error) {
       Alert.alert('Error', 'Failed to share receipt via WhatsApp: ' + error.message);
     }

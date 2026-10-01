@@ -37,10 +37,9 @@ import { transformStyleForJakarta } from '../../../core/theme/initFonts';
 import { isPastDate } from '../../../core/utils/validation';
 import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
 import { resolveProofImageUrl } from '../../../core/utils/imageUtils';
-import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import PdfThumbnail from 'react-native-pdf-thumbnail';
-import { cacheDirectory, copyAsync, deleteAsync, downloadAsync, getInfoAsync, writeAsStringAsync } from 'expo-file-system/legacy';
+import { cacheDirectory, deleteAsync, downloadAsync } from 'expo-file-system/legacy';
+import { createPdfFile, sharePdfFile, toSafeFileName } from '../../../core/utils/pdfShare';
 import { generateTaxInvoiceHTML } from '../../payments/screens/ReceiptScreen';
 import { generateHTML as generateQuotationHTML } from '../../quotations/screens/SendQuotationScreen';
 
@@ -1165,30 +1164,10 @@ export default function CustomerDetailScreen() {
         '';
 
       const html = generateTaxInvoiceHTML(app, customerGst, null, receiptParams, payView);
-      const { uri } = await Print.printToFileAsync({ html });
       const invoiceNo = pay.receiptNumber || pay.voucher || `DRT${pay.id}`;
-      const safeInvoiceName = String(invoiceNo).replace(/[^a-zA-Z0-9_-]/g, '_');
-      const safeClientName = String(app?.customerName || app?.name || 'Customer').replace(/[^a-zA-Z0-9_-]/g, '_');
-      const namedUri = `${cacheDirectory}Receipt_${safeInvoiceName}_${safeClientName}.pdf`;
-
-      try {
-        await copyAsync({ from: uri, to: namedUri });
-      } catch (_e) {
-        // fallback to uri if copy fails
-      }
-
-      const shareUri = namedUri || uri;
-      const isAvailable = await Sharing.isAvailableAsync();
-      if (!isAvailable) {
-        Alert.alert('Sharing Unavailable', 'Sharing is not supported on this device.');
-        return;
-      }
-
-      await Sharing.shareAsync(shareUri, {
-        mimeType: 'application/pdf',
-        dialogTitle: `Share Payment Receipt - ${invoiceNo}`,
-        UTI: Platform.OS === 'ios' ? 'com.adobe.pdf' : undefined,
-      });
+      const fileName = `Receipt_${toSafeFileName(invoiceNo, 'Receipt')}_${toSafeFileName(app?.customerName || app?.name, 'Customer')}.pdf`;
+      const uri = await createPdfFile({ html, fileName });
+      await sharePdfFile({ uri, title: `Share Payment Receipt - ${invoiceNo}` });
     } catch (err) {
       Alert.alert('Error', 'Failed to share receipt: ' + err.message);
     } finally {
@@ -1212,16 +1191,38 @@ export default function CustomerDetailScreen() {
         return;
       }
 
+      // File type comes from the link (ignoring any ?query) and is confirmed by the server's response below
+      const urlPath = resolvedUrl.split(/[?#]/)[0].toLowerCase();
+      const urlExt = ['.pdf', '.png', '.webp', '.jpeg', '.jpg'].find((e) => urlPath.endsWith(e)) || '.jpg';
       let shareUri = resolvedUrl;
+      let responseType = '';
       if (resolvedUrl.startsWith('http://') || resolvedUrl.startsWith('https://')) {
-        const ext = resolvedUrl.toLowerCase().endsWith('.pdf') ? '.pdf' : '.jpg';
-        const localTarget = `${cacheDirectory}PaymentProof_${pay.id}${ext}`;
+        const localTarget = `${cacheDirectory}PaymentProof_${pay.id}${urlExt}`;
         const downloadResult = await downloadAsync(resolvedUrl, localTarget);
+        responseType = String(downloadResult.mimeType || '').toLowerCase();
+        // downloadAsync does not throw on HTTP errors, so an error page would otherwise be shared as the proof
+        if (downloadResult.status < 200 || downloadResult.status >= 300 || responseType.startsWith('text/') || responseType.includes('json')) {
+          await deleteAsync(localTarget, { idempotent: true });
+          throw new Error(
+            downloadResult.status >= 200 && downloadResult.status < 300
+              ? 'The server did not return a document.'
+              : `The document could not be downloaded (HTTP ${downloadResult.status}).`
+          );
+        }
         shareUri = downloadResult.uri;
       }
 
+      const isPdf = responseType ? responseType.includes('pdf') : urlExt === '.pdf';
+      const mimeType = isPdf
+        ? 'application/pdf'
+        : responseType.startsWith('image/')
+          ? responseType
+          : ({ '.png': 'image/png', '.webp': 'image/webp' }[urlExt] || 'image/jpeg');
+
       await Sharing.shareAsync(shareUri, {
+        mimeType,
         dialogTitle: `Payment Proof - ${getPaymentLabel(pay)}`,
+        UTI: isPdf ? 'com.adobe.pdf' : undefined,
       });
     } catch (err) {
       Alert.alert('Error', 'Failed to share proof document: ' + err.message);
@@ -1302,7 +1303,7 @@ export default function CustomerDetailScreen() {
 
       // Unique per-batch filenames so two revisions of one tier don't overwrite each other in the cache
       const baseNames = responses.map(({ quotation: q }) => {
-        const clientName = String(q.customer?.name || q.clientName || q.customerName || 'Customer').replace(/[^a-zA-Z0-9_-]/g, '_');
+        const clientName = toSafeFileName(q.customer?.name || q.clientName || q.customerName, 'Customer');
         const rawTier = String(q.package?.tier || q.package?.name || q.packageName || '').toUpperCase();
         let tier = 'Economy';
         if (rawTier.includes('PREMIUM') || rawTier.includes('MID')) tier = 'Premium';
@@ -1329,39 +1330,13 @@ export default function CustomerDetailScreen() {
             propertyType: q.propertyType || q.property?.name,
           };
           const html = generateQuotationHTML(a, q, true, String(q.id || q.quotationId || selectedQuotationIds[idx]));
-          const { uri, base64 } = await Print.printToFileAsync({ html, base64: true });
-
-          const targetUri = cacheDirectory ? `${cacheDirectory}${fileNames[idx]}` : null;
-          if (targetUri && base64) {
-            try {
-              const existing = await getInfoAsync(targetUri);
-              if (existing.exists) await deleteAsync(targetUri, { idempotent: true });
-              await writeAsStringAsync(targetUri, base64, { encoding: 'base64' });
-              return targetUri;
-            } catch (_) {
-              return uri;
-            }
-          }
-          return uri;
+          return createPdfFile({ html, fileName: fileNames[idx] });
         })
       );
 
-      // Android WhatsApp shows no PDF thumbnail, so send a page-1 image ahead of each PDF; a failed preview is skipped
-      const shareUris = Platform.OS === 'android'
-        ? (await Promise.all(pdfUris.map(async (pdfUri) => {
-            try {
-              const { uri: previewUri } = await PdfThumbnail.generate(pdfUri, 0, 85);
-              return [previewUri, pdfUri];
-            } catch (previewErr) {
-              console.warn('Quotation preview image failed:', previewErr?.message);
-              return [pdfUri];
-            }
-          }))).flat()
-        : pdfUris;
-
-      // expo-sharing takes one file only; a lone file uses the single-file intent (as View PDF), several share together
+      // Share PDFs only — injecting a thumbnail image ahead of each PDF causes WhatsApp to treat the share as photos
       const result = await Share.open({
-        ...(shareUris.length === 1 ? { url: shareUris[0] } : { urls: shareUris }),
+        ...(pdfUris.length === 1 ? { url: pdfUris[0] } : { urls: pdfUris }),
         type: 'application/pdf',
         title: 'Share Quotations',
         failOnCancel: false,

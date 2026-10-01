@@ -10,14 +10,14 @@
 
 // ── API v2 Base URL ───────────────────────────────────────────────────────────
 export const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL || 'https://amusement-easter-praising.ngrok-free.dev/api/v2';
+  // process.env.EXPO_PUBLIC_API_URL || 'https://amusement-easter-praising.ngrok-free.dev/api/v2';
   // process.env.EXPO_PUBLIC_API_URL || 'https://drterrace.pravinsam.in/api/v2';
-  // process.env.EXPO_PUBLIC_API_URL || 'https://nexacrm.in/api/v2';
+  process.env.EXPO_PUBLIC_API_URL || 'https://nexacrm.in/api/v2';
   
   // Legacy v1 base (kept for employee image URL construction only)
-  export const API_V1_BASE_URL = 'https://amusement-easter-praising.ngrok-free.dev';
+  // export const API_V1_BASE_URL = 'https://amusement-easter-praising.ngrok-free.dev';
   // export const API_V1_BASE_URL = 'https://drterrace.pravinsam.in';
-// export const API_V1_BASE_URL = 'https://nexacrm.in';
+export const API_V1_BASE_URL = 'https://nexacrm.in';
 
 export const API_ENDPOINTS = {
   // Auth (unified — same endpoint for Admin & Field Employee)

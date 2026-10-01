@@ -28,6 +28,7 @@ import * as Haptics from 'expo-haptics';
 import * as WebBrowser from 'expo-web-browser';
 import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
 import { resolveProofImageUrl, getProofFilename } from '../../../core/utils/imageUtils';
+import ProofImagePreview from '../components/ProofImagePreview';
 import VerifyPaymentModal from '../components/VerifyPaymentModal';
 import {
   MaterialAlertModal,
@@ -53,6 +54,8 @@ export default function PaymentVerificationScreen() {
 
   const [copiedField, setCopiedField] = useState(null);
   const [showImageModal, setShowImageModal] = useState(false);
+  const [failedProofUri, setFailedProofUri] = useState(null);
+  const [loadedProofUri, setLoadedProofUri] = useState(null);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [isDeletingPayment, setIsDeletingPayment] = useState(false);
 
@@ -672,20 +675,24 @@ export default function PaymentVerificationScreen() {
   const canVerify = verification.canVerify !== false;
   const blockingPaymentId = verification.blockingPaymentId || null;
 
-  // Proof resolution: use proof.proofImageUrl as primary, fallback to proof.proofImage (Section 8)
+  // Proof resolution (Section 8). The stored relative path (proofImage) comes first: it is resolved against the API
+  // origin the app is really connected to. The server-built proofImageUrl can carry the wrong scheme or host on a live
+  // server, so it is the fallback.
   const rawProofUri =
-    proof.proofImageUrl ||
-    verifyData?.proofImageUrl ||
-    payment.proofImageUrl ||
     proof.proofImage ||
     verifyData?.proofImage ||
     payment.proofImage ||
-    matchedPay?.proofImageUrl ||
     matchedPay?.proofImage ||
+    proof.proofImageUrl ||
+    verifyData?.proofImageUrl ||
+    payment.proofImageUrl ||
+    matchedPay?.proofImageUrl ||
     params.proofImage ||
     params.docUri ||
     '';
   const docUri = resolveProofImageUrl(rawProofUri);
+  const proofPreviewFailed = Boolean(docUri) && failedProofUri === docUri;
+  const proofPreviewLoading = Boolean(docUri) && !proofPreviewFailed && loadedProofUri !== docUri;
   const docName = getProofFilename(rawProofUri, 'Payment_Proof.jpg');
   const fileType = proof.fileType || (rawProofUri?.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
   const isPdf = Boolean(fileType?.toLowerCase().includes('pdf') || rawProofUri?.toLowerCase().endsWith('.pdf'));
@@ -723,7 +730,8 @@ export default function PaymentVerificationScreen() {
 
   const handleOpenDocument = async () => {
     if (!docUri) return;
-    if (isPdf) {
+    // A PDF, or an image the app could not load itself, opens in the browser
+    if (isPdf || proofPreviewFailed) {
       try {
         await WebBrowser.openBrowserAsync(docUri);
       } catch {
@@ -1788,39 +1796,43 @@ export default function PaymentVerificationScreen() {
 
               {!isPdf && (
                 <TouchableOpacity
-                  onPress={() => setShowImageModal(true)}
+                  onPress={handleOpenDocument}
                   activeOpacity={0.85}
                   style={{
                     marginBottom: 12,
                     borderRadius: 12,
                     overflow: 'hidden',
-                    backgroundColor: '#F1F5F9',
+                    backgroundColor: isDark ? '#1E293B' : '#F1F5F9',
                     borderWidth: 1,
                     borderColor: isDark ? '#334155' : '#E2E8F0',
                   }}
                 >
-                  <Image
-                    source={{ uri: docUri }}
-                    style={{ width: '100%', height: 200 }}
-                    resizeMode="cover"
+                  <ProofImagePreview
+                    key={docUri}
+                    uri={docUri}
+                    isDark={isDark}
+                    onLoaded={() => setLoadedProofUri(docUri)}
+                    onFailed={() => setFailedProofUri(docUri)}
                   />
-                  <View
-                    style={{
-                      position: 'absolute',
-                      bottom: 8,
-                      right: 8,
-                      backgroundColor: 'rgba(0,0,0,0.7)',
-                      paddingHorizontal: 8,
-                      paddingVertical: 4,
-                      borderRadius: 6,
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 4,
-                    }}
-                  >
-                    <Ionicons name="expand-outline" size={12} color="#FFFFFF" />
-                    <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '700' }}>Tap to Enlarge</Text>
-                  </View>
+                  {!proofPreviewLoading && !proofPreviewFailed && (
+                    <View
+                      style={{
+                        position: 'absolute',
+                        bottom: 8,
+                        right: 8,
+                        backgroundColor: 'rgba(0,0,0,0.7)',
+                        paddingHorizontal: 8,
+                        paddingVertical: 4,
+                        borderRadius: 6,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 4,
+                      }}
+                    >
+                      <Ionicons name="expand-outline" size={12} color="#FFFFFF" />
+                      <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '700' }}>Tap to Enlarge</Text>
+                    </View>
+                  )}
                 </TouchableOpacity>
               )}
 
@@ -1988,6 +2000,7 @@ export default function PaymentVerificationScreen() {
               source={{ uri: docUri }}
               style={styles.fullPreviewImage}
               resizeMode="contain"
+              resizeMethod="resize"
             />
           )}
           <View style={styles.previewCaptionBox}>

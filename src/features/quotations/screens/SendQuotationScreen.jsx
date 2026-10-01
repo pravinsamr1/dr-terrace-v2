@@ -1,8 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { cacheDirectory, copyAsync, deleteAsync, getInfoAsync, writeAsStringAsync } from 'expo-file-system/legacy';
-import * as Print from 'expo-print';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import * as Sharing from 'expo-sharing';
 import React, { useCallback, useState } from 'react';
 import {
   Alert,
@@ -23,6 +20,7 @@ import { logoBase64 } from '../../../shared/constants/LogoBase64';
 import { sealBase64 } from '../../../shared/constants/SealBase64';
 import { quotationRepository as quotationService } from '../../quotations/api/quotationRepository';
 import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
+import { createPdfFile, sharePdfFile, toSafeFileName } from '../../../core/utils/pdfShare';
 
 export const generateHTML = (app, quote, isExport = false, fallbackQuoteId = '') => {
   const dateVal = formatDateDDMMYY(quote.quotationDate || quote.date) || formatDateDDMMYY(new Date());
@@ -687,48 +685,17 @@ export default function SendQuotationScreen() {
 
   const getPdfUri = async () => {
     const exportHtml = generateHTML(app, quote, true, quoteId);
-    const { uri, base64 } = await Print.printToFileAsync({ html: exportHtml, base64: true });
-    const cleanClientName = (clientFullName || 'Customer').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const cleanTier = quotationTier.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const targetName = `${cleanClientName}_${cleanTier}_quotation.pdf`;
-    const targetUri = cacheDirectory ? `${cacheDirectory}${targetName}` : null;
-
-    if (targetUri && base64) {
-      try {
-        await writeAsStringAsync(targetUri, base64, { encoding: 'base64' });
-        return targetUri;
-      } catch (writeErr) {
-        console.warn('writeAsStringAsync failed, attempting copyAsync fallback:', writeErr?.message);
-      }
-    }
-
-    if (targetUri) {
-      try {
-        const fileInfo = await getInfoAsync(targetUri);
-        if (fileInfo.exists) {
-          await deleteAsync(targetUri, { idempotent: true });
-        }
-        await copyAsync({
-          from: uri,
-          to: targetUri,
-        });
-        return targetUri;
-      } catch (copyErr) {
-        console.warn('copyAsync failed, using direct print URI:', copyErr?.message);
-      }
-    }
-
-    return uri;
+    const cleanClientName = toSafeFileName(clientFullName, 'Customer');
+    const cleanTier = toSafeFileName(quotationTier, 'Economy');
+    const fileName = `${cleanClientName}_${cleanTier}_quotation.pdf`;
+    const uri = await createPdfFile({ html: exportHtml, fileName });
+    return { uri, fileName };
   };
 
   const handleSharePDF = async () => {
     try {
-      const namedUri = await getPdfUri();
-      await Sharing.shareAsync(namedUri, {
-        mimeType: 'application/pdf',
-        dialogTitle: `Share ${clientFullName}_${quotationTier}_quotation.pdf`,
-        UTI: 'com.adobe.pdf',
-      });
+      const { uri } = await getPdfUri();
+      await sharePdfFile({ uri, title: `Share ${clientFullName}_${quotationTier}_quotation.pdf` });
     } catch (error) {
       Alert.alert('Error', `Failed to share PDF: ` + error.message);
     }
@@ -736,19 +703,11 @@ export default function SendQuotationScreen() {
 
   const handleWhatsApp = async () => {
     try {
-      const isAvailable = await Sharing.isAvailableAsync();
-      if (!isAvailable) {
-        Alert.alert('Sharing Unavailable', 'Sharing is not supported on this device.');
-        return;
-      }
-
-      const namedUri = await getPdfUri();
+      const { uri } = await getPdfUri();
       const customerName = app.clientName || app.customerName || 'Customer';
-
-      await Sharing.shareAsync(namedUri, {
-        mimeType: 'application/pdf',
-        dialogTitle: `Send ${clientFullName}_${quotationTier}_quotation.pdf to ${customerName} via WhatsApp`,
-        UTI: 'com.adobe.pdf',
+      await sharePdfFile({
+        uri,
+        title: `Send ${clientFullName}_${quotationTier}_quotation.pdf to ${customerName} via WhatsApp`,
       });
     } catch (error) {
       Alert.alert('Error', `Failed to send via WhatsApp: ${error.message}`);

@@ -13,7 +13,7 @@ export const PROFORMA_DOC_TITLE = 'PROFORMA INVOICE';
 
 const cleanQuotationId = (quotation) => String(quotation?.id ?? quotation?.quotationId ?? '').replace(/^DRT-?/i, '');
 
-export const getProformaInvoiceNumber = (quotation) => `PI-${cleanQuotationId(quotation)}`;
+export const getProformaInvoiceNumber = (quotation) => `DRT-PI-${cleanQuotationId(quotation)}`;
 
 const serviceTitle = (svc) => {
   const title = String(svc?.title || svc?.serviceName || '').trim().replace(/:$/, '');
