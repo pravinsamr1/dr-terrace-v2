@@ -35,6 +35,9 @@ TextInput.displayName = 'TextInput';
  * 2. Eligible & Unconfigured: Allows configuring start date and per-service warranty years
  * 3. Configured: Displays saved configuration, supports editing via PATCH, and generating certificate
  * 4. Generated / Active: Shows official verified warranty card, itemized coverage, and an Admin option to delete and redo it
+ *
+ * Only an Admin (isAdmin) can configure, edit, generate or delete a warranty. A Field Employee sees the same
+ * information read-only.
  */
 export default function WarrantyTab({
   quotationId,
@@ -125,6 +128,7 @@ export default function WarrantyTab({
 
   // Handle Save (Create or Update)
   const handleSaveConfig = async () => {
+    if (!isAdmin) return;
     const activeServicesList = config?.services?.length ? config.services : availableServices;
     if (!activeServicesList || activeServicesList.length === 0) {
       Alert.alert('No Services', 'No services found to configure warranty for.');
@@ -179,6 +183,7 @@ export default function WarrantyTab({
 
   // Handle Generate
   const handleGenerateWarranty = () => {
+    if (!isAdmin) return;
     Alert.alert(
       'Generate Warranty Certificate',
       'This will snapshot the current configuration into an official immutable warranty record with specific start and end dates. Proceed?',
@@ -202,6 +207,7 @@ export default function WarrantyTab({
 
   // Handle Delete (Admin only, allowed at any time)
   const handleDeleteWarranty = () => {
+    if (!isAdmin) return;
     Alert.alert(
       'Delete Warranty Certificate',
       'Are you sure you want to delete this warranty certificate? This action will reset the warranty back to the editable Configured state.',
@@ -638,7 +644,27 @@ export default function WarrantyTab({
           ))}
         </View>
 
-        {/* Action Buttons */}
+        {/* Field employees can only view the configuration */}
+        {!isAdmin && (
+          <View style={{
+            flexDirection: 'row',
+            alignItems: 'flex-start',
+            gap: 10,
+            backgroundColor: isDark ? '#080808' : '#F8FAFC',
+            borderWidth: 1,
+            borderColor: isDark ? '#334155' : '#E2E8F0',
+            borderRadius: 14,
+            padding: 14,
+          }}>
+            <Ionicons name="eye-outline" size={18} color={isDark ? '#94A3B8' : '#64748B'} style={{ marginTop: 1 }} />
+            <Text style={{ flex: 1, fontSize: 13, color: isDark ? '#CBD5E1' : '#475569', lineHeight: 18 }}>
+              View only. An admin will generate the official warranty certificate.
+            </Text>
+          </View>
+        )}
+
+        {/* Action Buttons (Admin only) */}
+        {isAdmin && (
         <View style={{ gap: 10 }}>
           <TouchableOpacity
             style={{
@@ -689,6 +715,59 @@ export default function WarrantyTab({
               Edit Warranty Configuration
             </Text>
           </TouchableOpacity>
+        </View>
+        )}
+      </View>
+    );
+  }
+
+  // 2a. Not configured yet, viewed by a Field Employee: nothing to configure, read-only notice
+  if (!isAdmin) {
+    return (
+      <View style={{
+        width: '100%',
+        backgroundColor: isDark ? '#1C1C1C' : '#FFFFFF',
+        borderRadius: 20,
+        padding: 20,
+        borderWidth: 1,
+        borderColor: isDark ? '#334155' : '#E2E8F0',
+        marginBottom: 20,
+      }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+          <View style={{
+            width: 44,
+            height: 44,
+            borderRadius: 14,
+            backgroundColor: isDark ? 'rgba(79, 70, 229, 0.18)' : '#EEF2FF',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}>
+            <Ionicons name="shield-outline" size={22} color="#4F46E5" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 16, fontWeight: '800', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+              Warranty Not Configured Yet
+            </Text>
+            <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', marginTop: 1 }}>
+              Receipt: {eligibility?.receiptNumber || 'Locked Receipt'}
+            </Text>
+          </View>
+        </View>
+
+        <View style={{
+          flexDirection: 'row',
+          alignItems: 'flex-start',
+          gap: 10,
+          backgroundColor: isDark ? '#080808' : '#F8FAFC',
+          borderWidth: 1,
+          borderColor: isDark ? '#334155' : '#E2E8F0',
+          borderRadius: 14,
+          padding: 14,
+        }}>
+          <Ionicons name="eye-outline" size={18} color={isDark ? '#94A3B8' : '#64748B'} style={{ marginTop: 1 }} />
+          <Text style={{ flex: 1, fontSize: 13, color: isDark ? '#CBD5E1' : '#475569', lineHeight: 18 }}>
+            View only. An admin will configure and generate the warranty. It will appear here once it is ready.
+          </Text>
         </View>
       </View>
     );

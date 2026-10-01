@@ -12,6 +12,7 @@
     "test:health": "node scripts/test-health.js",
     "test:login": "node scripts/test-login.js",
     "test:v2": "node scripts/test-v2-api.js",
+    "check:whatsapp": "node scripts/check-whatsapp-setup.js",
     "postinstall": "patch-package"
   },
   "dependencies": {

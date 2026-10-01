@@ -16,8 +16,9 @@ import { WebView } from 'react-native-webview';
 import { useTabBar } from '../../../core/context/TabBarContext';
 import { useColorScheme } from '../../../core/hooks/useColorScheme';
 import { createPdfFile, sharePdfFile, toSafeFileName } from '../../../core/utils/pdfShare';
+import { sendDocumentOnWhatsApp } from '../../whatsapp/utils/sendDocumentOnWhatsApp';
 import InnerHeader from '../../../shared/components/InnerHeader';
-import { MaterialPageLoader } from '../../../shared/components/material';
+import { MaterialOverlayLoader, MaterialPageLoader } from '../../../shared/components/material';
 import { quotationRepository } from '../../quotations/api/quotationRepository';
 import { PROFORMA_DOC_TITLE, buildProformaReceiptData, getProformaInvoiceNumber } from '../utils/proformaInvoice';
 import { generateTaxInvoiceHTML } from './ReceiptScreen';
@@ -48,6 +49,7 @@ export default function ProformaInvoiceScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [isSharing, setIsSharing] = useState(false);
+  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
 
   React.useEffect(() => {
     setTabBarVisible(false);
@@ -81,6 +83,7 @@ export default function ProformaInvoiceScreen() {
           html,
           invoiceNo: getProformaInvoiceNumber(quotation),
           clientName: String(quotation.customer?.name || 'Customer').trim(),
+          phone: quotation.customer?.mobile || quotation.mobileNumber || quotation.phone,
         };
       } catch (err) {
         nextError = err?.message || 'Could not load the proforma invoice.';
@@ -142,8 +145,23 @@ export default function ProformaInvoiceScreen() {
     if (!invoice || isSharing) return;
     try {
       setIsSharing(true);
-      const { shareUri } = await preparePdf();
-      await sharePdfFile({ uri: shareUri, title: `Send Proforma Invoice - ${invoice.invoiceNo} via WhatsApp` });
+      // Sends from the business WhatsApp number when WhatsApp Business is set up; otherwise opens the share sheet
+      await sendDocumentOnWhatsApp({
+        documentType: 'receipt',
+        documentLabel: 'proforma invoice',
+        customerName: invoice.clientName,
+        phone: invoice.phone,
+        bodyParams: [invoice.clientName, 'proforma invoice', invoice.invoiceNo],
+        onBusyChange: setIsSendingWhatsApp,
+        buildPdf: async () => {
+          const { shareUri, fileName } = await preparePdf();
+          return { uri: shareUri, fileName };
+        },
+        fallbackShare: async () => {
+          const { shareUri } = await preparePdf();
+          await sharePdfFile({ uri: shareUri, title: `Send Proforma Invoice - ${invoice.invoiceNo} via WhatsApp` });
+        },
+      });
     } catch (error) {
       Alert.alert('Error', `Failed to share the proforma invoice:\n${error?.message || String(error)}`);
     } finally {
@@ -250,6 +268,11 @@ export default function ProformaInvoiceScreen() {
           </TouchableOpacity>
         </View>
       )}
+      <MaterialOverlayLoader
+        visible={isSendingWhatsApp}
+        title="Sending on WhatsApp..."
+        subtitle="Preparing the PDF and sending it to the customer"
+      />
     </View>
   );
 }

@@ -19,8 +19,10 @@ import { clientRepository } from '../../clients/api/clientRepository';
 import { paymentRepository } from '../api/paymentRepository';
 import { useTabBarScroll } from '../../../core/context/TabBarContext';
 import { createPdfFile, sharePdfFile, toSafeFileName } from '../../../core/utils/pdfShare';
+import { sendDocumentOnWhatsApp } from '../../whatsapp/utils/sendDocumentOnWhatsApp';
 import { useColorScheme } from '../../../core/hooks/useColorScheme';
 import InnerHeader from '../../../shared/components/InnerHeader';
+import { MaterialOverlayLoader } from '../../../shared/components/material';
 import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
 
 const formatSqft = (val) => {
@@ -1692,6 +1694,7 @@ export default function ReceiptScreen() {
   const [app, setApp] = React.useState(null);
   const [finalReceiptData, setFinalReceiptData] = React.useState(null);
   const [payView, setPayView] = React.useState(null);
+  const [isSendingWhatsApp, setIsSendingWhatsApp] = React.useState(false);
 
   React.useEffect(() => {
     if (!params.id) return;
@@ -1824,10 +1827,30 @@ export default function ReceiptScreen() {
     }
   };
 
+  // Sends from the business WhatsApp number when WhatsApp Business is set up; otherwise opens the share sheet
   const handleWhatsApp = async () => {
     try {
-      const { uri } = await getPdfUri();
-      await sharePdfFile({ uri, title: `Send ${docTitle} to ${clientName} via WhatsApp` });
+      const documentLabel = String(docTitle || 'receipt').toLowerCase();
+      await sendDocumentOnWhatsApp({
+        documentType: 'receipt',
+        documentLabel,
+        customerName: clientName,
+        phone:
+          finalReceiptData?.customer?.mobileNumber ||
+          payView?.customer?.mobileNumber ||
+          payView?.customer?.mobile ||
+          app?.mobileNumber ||
+          app?.clientPhone ||
+          app?.phone ||
+          app?.mobile,
+        bodyParams: [clientName, documentLabel, invoiceNo],
+        buildPdf: getPdfUri,
+        onBusyChange: setIsSendingWhatsApp,
+        fallbackShare: async () => {
+          const { uri } = await getPdfUri();
+          await sharePdfFile({ uri, title: `Send ${docTitle} to ${clientName} via WhatsApp` });
+        },
+      });
     } catch (error) {
       Alert.alert('Error', 'Failed to share receipt via WhatsApp: ' + error.message);
     }
@@ -2079,6 +2102,11 @@ export default function ReceiptScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
+      <MaterialOverlayLoader
+        visible={isSendingWhatsApp}
+        title="Sending on WhatsApp..."
+        subtitle="Preparing the PDF and sending it to the customer"
+      />
     </View>
   );
 }

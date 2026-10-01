@@ -15,12 +15,14 @@ import { WebView } from 'react-native-webview';
 import { useTabBar } from '../../../core/context/TabBarContext';
 import { useColorScheme } from '../../../core/hooks/useColorScheme';
 import InnerHeader from '../../../shared/components/InnerHeader';
-import { MaterialPageLoader } from '../../../shared/components/material';
+import { MaterialOverlayLoader, MaterialPageLoader } from '../../../shared/components/material';
 import { logoBase64 } from '../../../shared/constants/LogoBase64';
 import { sealBase64 } from '../../../shared/constants/SealBase64';
 import { quotationRepository as quotationService } from '../../quotations/api/quotationRepository';
 import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
-import { createPdfFile, sharePdfFile, toSafeFileName } from '../../../core/utils/pdfShare';
+import { createPdfFile, sharePdfFile, shareToWhatsApp, toSafeFileName } from '../../../core/utils/pdfShare';
+import { sendDocumentOnWhatsApp } from '../../whatsapp/utils/sendDocumentOnWhatsApp';
+import { isWhatsAppBusinessConfigured } from '../../whatsapp/config/whatsappBusinessConfig';
 
 export const generateHTML = (app, quote, isExport = false, fallbackQuoteId = '') => {
   const dateVal = formatDateDDMMYY(quote.quotationDate || quote.date) || formatDateDDMMYY(new Date());
@@ -602,6 +604,7 @@ export default function SendQuotationScreen() {
   const [quote, setQuote] = useState({});
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
 
   React.useEffect(() => {
     setTabBarVisible(false);
@@ -701,18 +704,38 @@ export default function SendQuotationScreen() {
     }
   };
 
-  const handleWhatsApp = async () => {
+  // Sends from the business WhatsApp number when WhatsApp Business is set up; otherwise opens the share sheet.
+  // withoutTemplate: send the PDF as a plain document instead of the approved template (24-hour window only).
+  const sendQuotationOnWhatsApp = async ({ withoutTemplate = false } = {}) => {
     try {
-      const { uri } = await getPdfUri();
       const customerName = app.clientName || app.customerName || 'Customer';
-      await sharePdfFile({
-        uri,
-        title: `Send ${clientFullName}_${quotationTier}_quotation.pdf to ${customerName} via WhatsApp`,
+      const rawQuoteNo = String(quote.id || quote.quotationId || quoteId || '');
+      const quoteNo = rawQuoteNo && !rawQuoteNo.startsWith('DRT-') ? `DRT-${rawQuoteNo}` : rawQuoteNo;
+      await sendDocumentOnWhatsApp({
+        documentType: 'quotation',
+        documentLabel: 'quotation',
+        customerName,
+        phone: app.mobileNumber || app.phone || quote.customer?.mobile,
+        bodyParams: [customerName, quoteNo],
+        withoutTemplate,
+        caption: `Quotation${quoteNo ? ` ${quoteNo}` : ''} from Dr. Terrace Water Proofing`,
+        buildPdf: getPdfUri,
+        onBusyChange: setIsSendingWhatsApp,
+        fallbackShare: async () => {
+          const { uri } = await getPdfUri();
+          await shareToWhatsApp({
+            uri,
+            title: `Send ${clientFullName}_${quotationTier}_quotation.pdf to ${customerName} via WhatsApp`,
+          });
+        },
       });
     } catch (error) {
       Alert.alert('Error', `Failed to send via WhatsApp: ${error.message}`);
     }
   };
+
+  const handleWhatsApp = () => sendQuotationOnWhatsApp();
+  const handleShareWithoutTemplate = () => sendQuotationOnWhatsApp({ withoutTemplate: true });
 
   const handleBack = useCallback(() => {
     if (router.canGoBack()) {
@@ -787,10 +810,10 @@ export default function SendQuotationScreen() {
         borderTopWidth: 1,
         borderColor: isDark ? '#334155' : '#E2E8F0',
         paddingBottom: Math.max(insets.bottom, 16) + 85,
-        flexDirection: 'row',
-        gap: 12,
+        gap: 10,
         zIndex: 1000,
       }}>
+        <View style={{ flexDirection: 'row', gap: 12 }}>
         {/* WhatsApp Button */}
         <TouchableOpacity
           style={{
@@ -830,7 +853,36 @@ export default function SendQuotationScreen() {
             Share PDF
           </Text>
         </TouchableOpacity>
+        </View>
+
+        {/* WhatsApp Business: send the PDF as a plain document, without a template (shown only when set up) */}
+        {isWhatsAppBusinessConfigured() && (
+          <TouchableOpacity
+            style={{
+              borderWidth: 1.5,
+              borderColor: '#25D366',
+              backgroundColor: isDark ? '#0F172A' : '#F0FDF4',
+              paddingVertical: 12,
+              borderRadius: 12,
+              flexDirection: 'row',
+              justifyContent: 'center',
+              alignItems: 'center',
+            }}
+            onPress={handleShareWithoutTemplate}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="document-attach-outline" size={18} color={isDark ? '#4ADE80' : '#15803D'} style={{ marginRight: 8 }} />
+            <Text style={{ color: isDark ? '#4ADE80' : '#15803D', fontSize: 14, fontWeight: '700' }}>
+              Share without Template
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
+      <MaterialOverlayLoader
+        visible={isSendingWhatsApp}
+        title="Sending on WhatsApp..."
+        subtitle="Preparing the PDF and sending it to the customer"
+      />
     </View>
   );
 }

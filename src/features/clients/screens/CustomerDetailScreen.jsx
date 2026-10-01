@@ -27,7 +27,7 @@ import { useColorScheme } from '../../../core/hooks/useColorScheme';
 import InnerHeader from '../../../shared/components/InnerHeader';
 import { MaterialAlertModal, MaterialDeleteModal, MaterialDetailSkeleton, MaterialOverlayLoader, MaterialPageLoader, MaterialSuccessModal } from '../../../shared/components/material';
 import { appointmentRepository as appointmentService } from '../../appointments/api/appointmentRepository';
-import { authRepository } from '../../auth/api/authRepository';
+import { authRepository, isAdminRole } from '../../auth/api/authRepository';
 import { clientRepository as clientService } from '../../clients/api/clientRepository';
 import { quotationRepository } from '../../quotations/api/quotationRepository';
 import { paymentRepository } from '../../payments/api/paymentRepository';
@@ -4162,7 +4162,9 @@ export default function CustomerDetailScreen() {
               }
               app={app}
               payView={payView}
-              isAdmin={isAdminOrMaster}
+              // Stricter than isAdminOrMaster (which is true until the user loads): only a loaded admin may
+              // configure / generate / delete the warranty; field employees get the view-only tab
+              isAdmin={Boolean(currentUser) && (currentUser.isAdmin === true || isAdminRole(currentUser.role))}
               onNavigatePaymentTab={() => setActiveTabSection('payment')}
             />
           </View>

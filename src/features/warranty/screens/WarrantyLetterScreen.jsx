@@ -18,8 +18,11 @@ import { clientRepository } from '../../clients/api/clientRepository';
 import { warrantyRepository } from '../api/warrantyRepository';
 import { useColorScheme } from '../../../core/hooks/useColorScheme';
 import InnerHeader from '../../../shared/components/InnerHeader';
+import { MaterialOverlayLoader } from '../../../shared/components/material';
 import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
 import { createPdfFile, sharePdfFile, toSafeFileName } from '../../../core/utils/pdfShare';
+import { sendDocumentOnWhatsApp } from '../../whatsapp/utils/sendDocumentOnWhatsApp';
+import { isWhatsAppBusinessConfigured } from '../../whatsapp/config/whatsappBusinessConfig';
 import { transformStyleForJakarta } from '../../../core/theme/initFonts';
 
 const Text = React.forwardRef((props, ref) => (
@@ -37,6 +40,7 @@ export default function WarrantyLetterScreen() {
   const [appointment, setAppointment] = React.useState(null);
   const [officialWarranty, setOfficialWarranty] = React.useState(null);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [isSendingWhatsApp, setIsSendingWhatsApp] = React.useState(false);
 
   React.useEffect(() => {
     async function loadData() {
@@ -142,7 +146,8 @@ export default function WarrantyLetterScreen() {
           String(validYears).toUpperCase() + ' FOR ' + serviceType.toUpperCase() +
           ' FROM THE DATE OF WORK COMPLETION.</span></p>';
 
-  const generateAndSharePDF = async () => {
+  // Builds the warranty letter PDF in the app cache
+  const createWarrantyPdf = async () => {
     const htmlContent =
       '<html><head>' +
       '<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">' +
@@ -188,13 +193,37 @@ export default function WarrantyLetterScreen() {
       '<div class="fb">Dr.Terrace Water Proofing</div>' +
       '<div class="fa">Parsn Commercial Complex, #C13, B13, 2nd floor, Kodambakkam High Road, Nungambakkam, Chennai-600006, admin@drterrace.com</div>' +
       '</body></html>';
+    const fileName = `warranty_letter_${toSafeFileName(clientLine, 'Customer')}.pdf`;
+    const uri = await createPdfFile({ html: htmlContent, fileName });
+    return { uri, fileName };
+  };
+
+  const generateAndSharePDF = async () => {
     try {
-      const fileName = `warranty_letter_${toSafeFileName(clientLine, 'Customer')}.pdf`;
-      const uri = await createPdfFile({ html: htmlContent, fileName });
+      const { uri } = await createWarrantyPdf();
       await sharePdfFile({ uri, title: `Share Warranty Letter - ${clientLine || 'Customer'}` });
     } catch (error) {
       console.error('Error generating PDF', error);
       Alert.alert('Error', 'Failed to generate and share PDF: ' + (error?.message || error));
+    }
+  };
+
+  // Sends the warranty letter from the business WhatsApp number (shown only when WhatsApp Business is set up)
+  const sendOnWhatsAppBusiness = async () => {
+    try {
+      const customerName = appointment?.clientName || 'Customer';
+      await sendDocumentOnWhatsApp({
+        documentType: 'warranty',
+        documentLabel: 'warranty letter',
+        customerName,
+        phone: mobile,
+        bodyParams: [customerName],
+        buildPdf: createWarrantyPdf,
+        onBusyChange: setIsSendingWhatsApp,
+        fallbackShare: generateAndSharePDF,
+      });
+    } catch (error) {
+      Alert.alert('Error', 'Failed to send the warranty letter: ' + (error?.message || error));
     }
   };
 
@@ -207,9 +236,16 @@ export default function WarrantyLetterScreen() {
         paddingTop={insets.top}
         isDark={isDark}
         right={
-          <TouchableOpacity onPress={generateAndSharePDF} activeOpacity={0.7}>
-            <Ionicons name="share-social-outline" size={22} color="#FFFFFF" />
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+            {isWhatsAppBusinessConfigured() && (
+              <TouchableOpacity onPress={sendOnWhatsAppBusiness} activeOpacity={0.7}>
+                <Ionicons name="logo-whatsapp" size={22} color="#FFFFFF" />
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity onPress={generateAndSharePDF} activeOpacity={0.7}>
+              <Ionicons name="share-social-outline" size={22} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
         }
       />
 
@@ -343,6 +379,11 @@ export default function WarrantyLetterScreen() {
 
         </View>
       </ScrollView>
+      <MaterialOverlayLoader
+        visible={isSendingWhatsApp}
+        title="Sending on WhatsApp..."
+        subtitle="Preparing the PDF and sending it to the customer"
+      />
     </View>
   );
 }
