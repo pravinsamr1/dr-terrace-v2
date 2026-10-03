@@ -17,12 +17,11 @@ import { useColorScheme } from '../../../core/hooks/useColorScheme';
 import InnerHeader from '../../../shared/components/InnerHeader';
 import { MaterialOverlayLoader, MaterialPageLoader } from '../../../shared/components/material';
 import { logoBase64 } from '../../../shared/constants/LogoBase64';
+import { plusJakartaSansFontCss } from '../../../shared/constants/PlusJakartaSansFontCss';
 import { sealBase64 } from '../../../shared/constants/SealBase64';
 import { quotationRepository as quotationService } from '../../quotations/api/quotationRepository';
 import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
 import { createPdfFile, sharePdfFile, shareToWhatsApp, toSafeFileName } from '../../../core/utils/pdfShare';
-import { sendDocumentOnWhatsApp } from '../../whatsapp/utils/sendDocumentOnWhatsApp';
-import { isWhatsAppBusinessConfigured } from '../../whatsapp/config/whatsappBusinessConfig';
 
 export const generateHTML = (app, quote, isExport = false, fallbackQuoteId = '') => {
   const dateVal = formatDateDDMMYY(quote.quotationDate || quote.date) || formatDateDDMMYY(new Date());
@@ -256,6 +255,9 @@ export const generateHTML = (app, quote, isExport = false, fallbackQuoteId = '')
   const officeAddress = contact.officeAddress || contact.address || '2nd floor, C13, B13, Parsn commercial complex, Kodambakkam High Rd, Nungambakkam, Chennai - 600 034';
   const mobileNumber = contact.mobileNumber || contact.mobile || contact.phone || '+91 99621 19311';
   const landlineNumber = contact.landlineNumber || contact.landline || '044-45000776';
+  // Vector icons instead of the 📞 / ☎️ emoji: an emoji makes the print engine embed a Type 3 colour-emoji font in the PDF
+  const phoneIconSvg = '<svg width="1.2em" height="1.2em" viewBox="0 0 24 24" style="vertical-align:-0.2em;" fill="#37474F"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>';
+  const landlineIconSvg = '<svg width="1.2em" height="1.2em" viewBox="0 0 24 24" style="vertical-align:-0.2em;" fill="#D32F2F"><path d="M3 9.5C3 7.6 6.6 6 12 6s9 1.6 9 3.5V11h-5.2V9.7c0-.4-.3-.7-.7-.8-1.9-.3-4.1-.3-6.2 0-.4.1-.7.4-.7.8V11H3V9.5zM4 12.5h16c1.1 0 2 .9 2 2V19c0 .6-.4 1-1 1H3c-.6 0-1-.4-1-1v-4.5c0-1.1.9-2 2-2zm8 1.8a2.1 2.1 0 100 4.2 2.1 2.1 0 000-4.2z" fill-rule="evenodd"/></svg>';
   const emailAddress = contact.emailAddress || contact.email || 'admin@drterrace.com';
 
   const renderPaymentTerms = (forGst = false) => {
@@ -287,7 +289,7 @@ export const generateHTML = (app, quote, isExport = false, fallbackQuoteId = '')
       <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+        <style>${plusJakartaSansFontCss}</style>
         <style>
           @page { size: A4 portrait; margin: ${pageMargin}; }
           * { box-sizing: border-box; }
@@ -559,7 +561,7 @@ export const generateHTML = (app, quote, isExport = false, fallbackQuoteId = '')
                 <div>With Regards,</div>
                 <div style="margin-top: 1px; color: #0F172A;">${withRegardsText}</div>
                 <div style="font-size: ${isExport ? '11px' : '9.5px'}; color: #334155;">Technical Team</div>
-                <div style="font-size: ${isExport ? '10.5px' : '9px'}; color: #334155; margin-top: 2px;">📞 ${mobileNumber} ${landlineNumber ? `| ☎️ ${landlineNumber}` : ''}</div>
+                <div style="font-size: ${isExport ? '10.5px' : '9px'}; color: #334155; margin-top: 2px;">${phoneIconSvg} ${mobileNumber} ${landlineNumber ? `| ${landlineIconSvg} ${landlineNumber}` : ''}</div>
               </div>
 
               <!-- Right: Official Stamp & Authorized Signature Block -->
@@ -605,6 +607,8 @@ export default function SendQuotationScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
+  const [isSharingPdf, setIsSharingPdf] = useState(false);
+  const isSharingInProgressRef = React.useRef(false);
 
   React.useEffect(() => {
     setTabBarVisible(false);
@@ -685,9 +689,13 @@ export default function SendQuotationScreen() {
   // Only generate HTML once real API data is loaded — never from empty/default state
   const isDataReady = !isLoading && !loadError && !!(quote.id || quote.quotationId || quoteId);
   const previewHtml = isDataReady ? generateHTML(app, quote, false, quoteId) : null;
+  if (isDataReady && previewHtml) {
+    console.log('[PDF] HTML generated');
+  }
 
   const getPdfUri = async () => {
     const exportHtml = generateHTML(app, quote, true, quoteId);
+    console.log('[PDF] HTML generated');
     const cleanClientName = toSafeFileName(clientFullName, 'Customer');
     const cleanTier = toSafeFileName(quotationTier, 'Economy');
     const fileName = `${cleanClientName}_${cleanTier}_quotation.pdf`;
@@ -696,46 +704,48 @@ export default function SendQuotationScreen() {
   };
 
   const handleSharePDF = async () => {
+    if (isSharingInProgressRef.current) return;
+    isSharingInProgressRef.current = true;
+    setIsSharingPdf(true);
+    const targetQuoteId = quote?.id || quote?.quotationId || quoteId || id;
+    console.log('[PDF] SHARE REQUEST START', new Date().toISOString());
+    console.log('[PDF] GENERATE FUNCTION CALLED', targetQuoteId);
     try {
+      console.log('[PDF] share/open started');
       const { uri } = await getPdfUri();
       await sharePdfFile({ uri, title: `Share ${clientFullName}_${quotationTier}_quotation.pdf` });
     } catch (error) {
       Alert.alert('Error', `Failed to share PDF: ` + error.message);
+    } finally {
+      isSharingInProgressRef.current = false;
+      setIsSharingPdf(false);
     }
   };
 
-  // Sends from the business WhatsApp number when WhatsApp Business is set up; otherwise opens the share sheet.
-  // withoutTemplate: send the PDF as a plain document instead of the approved template (24-hour window only).
-  const sendQuotationOnWhatsApp = async ({ withoutTemplate = false } = {}) => {
+  // Opens the device WhatsApp app directly with the quotation PDF attached.
+  const handleWhatsApp = async () => {
+    if (isSharingInProgressRef.current) return;
+    isSharingInProgressRef.current = true;
+    setIsSendingWhatsApp(true);
+    const targetQuoteId = quote?.id || quote?.quotationId || quoteId || id;
+    console.log('[PDF] SHARE REQUEST START', new Date().toISOString());
+    console.log('[PDF] GENERATE FUNCTION CALLED', targetQuoteId);
     try {
+      console.log('[PDF] share/open started');
       const customerName = app.clientName || app.customerName || 'Customer';
-      const rawQuoteNo = String(quote.id || quote.quotationId || quoteId || '');
-      const quoteNo = rawQuoteNo && !rawQuoteNo.startsWith('DRT-') ? `DRT-${rawQuoteNo}` : rawQuoteNo;
-      await sendDocumentOnWhatsApp({
-        documentType: 'quotation',
-        documentLabel: 'quotation',
-        customerName,
+      const { uri } = await getPdfUri();
+      await shareToWhatsApp({
+        uri,
+        title: `Send Quotation to ${customerName} via WhatsApp`,
         phone: app.mobileNumber || app.phone || quote.customer?.mobile,
-        bodyParams: [customerName, quoteNo],
-        withoutTemplate,
-        caption: `Quotation${quoteNo ? ` ${quoteNo}` : ''} from Dr. Terrace Water Proofing`,
-        buildPdf: getPdfUri,
-        onBusyChange: setIsSendingWhatsApp,
-        fallbackShare: async () => {
-          const { uri } = await getPdfUri();
-          await shareToWhatsApp({
-            uri,
-            title: `Send ${clientFullName}_${quotationTier}_quotation.pdf to ${customerName} via WhatsApp`,
-          });
-        },
       });
     } catch (error) {
-      Alert.alert('Error', `Failed to send via WhatsApp: ${error.message}`);
+      Alert.alert('Error', `Failed to open WhatsApp: ${error.message}`);
+    } finally {
+      isSharingInProgressRef.current = false;
+      setIsSendingWhatsApp(false);
     }
   };
-
-  const handleWhatsApp = () => sendQuotationOnWhatsApp();
-  const handleShareWithoutTemplate = () => sendQuotationOnWhatsApp({ withoutTemplate: true });
 
   const handleBack = useCallback(() => {
     if (router.canGoBack()) {
@@ -824,9 +834,11 @@ export default function SendQuotationScreen() {
             flexDirection: 'row',
             justifyContent: 'center',
             alignItems: 'center',
+            opacity: (isSendingWhatsApp || isSharingPdf) ? 0.6 : 1,
           }}
           onPress={handleWhatsApp}
           activeOpacity={0.85}
+          disabled={isSendingWhatsApp || isSharingPdf}
         >
           <Ionicons name="logo-whatsapp" size={22} color="#FFFFFF" style={{ marginRight: 8 }} />
           <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '800' }}>
@@ -844,9 +856,11 @@ export default function SendQuotationScreen() {
             flexDirection: 'row',
             justifyContent: 'center',
             alignItems: 'center',
+            opacity: (isSendingWhatsApp || isSharingPdf) ? 0.6 : 1,
           }}
           onPress={handleSharePDF}
           activeOpacity={0.85}
+          disabled={isSendingWhatsApp || isSharingPdf}
         >
           <Ionicons name="share-social-outline" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
           <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '700' }}>
@@ -855,33 +869,12 @@ export default function SendQuotationScreen() {
         </TouchableOpacity>
         </View>
 
-        {/* WhatsApp Business: send the PDF as a plain document, without a template (shown only when set up) */}
-        {isWhatsAppBusinessConfigured() && (
-          <TouchableOpacity
-            style={{
-              borderWidth: 1.5,
-              borderColor: '#25D366',
-              backgroundColor: isDark ? '#0F172A' : '#F0FDF4',
-              paddingVertical: 12,
-              borderRadius: 12,
-              flexDirection: 'row',
-              justifyContent: 'center',
-              alignItems: 'center',
-            }}
-            onPress={handleShareWithoutTemplate}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="document-attach-outline" size={18} color={isDark ? '#4ADE80' : '#15803D'} style={{ marginRight: 8 }} />
-            <Text style={{ color: isDark ? '#4ADE80' : '#15803D', fontSize: 14, fontWeight: '700' }}>
-              Share without Template
-            </Text>
-          </TouchableOpacity>
-        )}
+
       </View>
       <MaterialOverlayLoader
-        visible={isSendingWhatsApp}
-        title="Sending on WhatsApp..."
-        subtitle="Preparing the PDF and sending it to the customer"
+        visible={isSendingWhatsApp || isSharingPdf}
+        title={isSendingWhatsApp ? 'Sending on WhatsApp...' : 'Preparing PDF...'}
+        subtitle={isSendingWhatsApp ? 'Preparing the PDF and sending it to the customer' : 'Preparing the PDF and opening share'}
       />
     </View>
   );

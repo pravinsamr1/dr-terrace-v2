@@ -22,7 +22,15 @@ const serviceTitle = (svc) => {
   return title ? `${title} (${sub})` : sub;
 };
 
-export const buildProformaReceiptData = (quotation) => {
+export const buildProformaReceiptData = (
+  quotation,
+  poNumber = null,
+  bankDetails = null,
+  terms = null,
+  quotationTermsHtml = null,
+  invoiceNumber = null,
+  invoiceDate = null
+) => {
   const q = quotation || {};
   const pricing = q.pricing || {};
   const customer = q.customer || {};
@@ -58,8 +66,8 @@ export const buildProformaReceiptData = (quotation) => {
   }));
 
   return {
-    receiptNumber: getProformaInvoiceNumber(q),
-    receiptDate: new Date().toISOString(),
+    receiptNumber: invoiceNumber || getProformaInvoiceNumber(q),
+    receiptDate: invoiceDate ? new Date(invoiceDate).toISOString() : new Date().toISOString(),
     quotationId: Number(cleanQuotationId(q)) || cleanQuotationId(q),
     customer: {
       name: customer.name,
@@ -75,5 +83,10 @@ export const buildProformaReceiptData = (quotation) => {
     sgst: Number(gst?.sgst?.amount || 0),
     grandTotal: Number(pricing.grandTotal || 0),
     services,
+    ...(poNumber ? { poNumber: String(poNumber).trim() } : {}),
+    ...(bankDetails ? { proformaBankDetails: bankDetails } : {}),
+    ...(terms ? { proformaTerms: String(terms).trim() } : {}),
+    ...(quotationTermsHtml ? { proformaQuotationHtml: String(quotationTermsHtml) } : {}),
   };
 };
+

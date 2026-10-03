@@ -98,3 +98,10 @@ ehthumbs.db
 *.swp
 *.swo
 *~
+
+# Firebase / Google service account keys (private keys: never commit; upload them to Expo with `eas credentials`)
+google-services.json
+GoogleService-Info.plist
+push-notification.json
+*-firebase-adminsdk-*.json
+*service-account*.json

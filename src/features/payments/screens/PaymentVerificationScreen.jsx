@@ -23,6 +23,7 @@ import { clientRepository } from '../../clients/api/clientRepository';
 import { authRepository, isAdminRole } from '../../auth/api/authRepository';
 import { paymentRepository } from '../api/paymentRepository';
 import { quotationPaymentRepository } from '../api/quotationPaymentRepository';
+import { quotationRepository } from '../../quotations/api/quotationRepository';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import * as WebBrowser from 'expo-web-browser';
@@ -77,20 +78,64 @@ export default function PaymentVerificationScreen() {
 
   // Load appointment / client details
   useEffect(() => {
-    if (!params.id) return;
-    const cleanId = String(params.id).replace(/^DR/i, '').trim();
-    appointmentRepository.getAppointmentById(cleanId).then((res) => {
-      if (res?.success && res.appointment) {
-        setClient(res.appointment);
-      } else {
-        clientRepository.getClientById(cleanId).then((cRes) => {
-          if (cRes?.success && (cRes.client || cRes.data)) {
-            setClient(cRes.client || cRes.data);
-          }
-        });
-      }
-    });
-  }, [params.id]);
+    let isMounted = true;
+    const targetAppId =
+      params.id ||
+      params.appointmentId ||
+      verifyData?.appointmentId ||
+      verifyData?.quotation?.appointmentId ||
+      verifyData?.quotation?.appointment?.id;
+
+    if (targetAppId) {
+      const cleanId = String(targetAppId).replace(/^DR/i, '').trim();
+      appointmentRepository.getAppointmentById(cleanId).then((res) => {
+        if (!isMounted) return;
+        if (res?.success && res.appointment) {
+          setClient(res.appointment);
+        } else {
+          clientRepository.getClientById(cleanId).then((cRes) => {
+            if (!isMounted) return;
+            if (cRes?.success && (cRes.client || cRes.data)) {
+              setClient(cRes.client || cRes.data);
+            }
+          });
+        }
+      });
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    // Fallback: if no appointment ID is passed, resolve via quotationId
+    const qId = params.quotationId || verifyData?.quotation?.quotationId;
+    if (qId && !client) {
+      quotationRepository.getQuotationById(qId).then((res) => {
+        if (!isMounted) return;
+        const quote = res?.quotation;
+        const aptId = quote?.appointmentId ?? quote?.appointment?.id;
+        if (aptId) {
+          const cleanId = String(aptId).replace(/^DR/i, '').trim();
+          appointmentRepository.getAppointmentById(cleanId).then((aRes) => {
+            if (!isMounted) return;
+            if (aRes?.success && aRes.appointment) {
+              setClient(aRes.appointment);
+            } else {
+              clientRepository.getClientById(cleanId).then((cRes) => {
+                if (!isMounted) return;
+                if (cRes?.success && (cRes.client || cRes.data)) {
+                  setClient(cRes.client || cRes.data);
+                }
+              });
+            }
+          });
+        }
+      });
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [params.id, params.appointmentId, params.quotationId, verifyData, client]);
 
   const quotationId =
     params.quotationId ||
@@ -770,7 +815,13 @@ export default function PaymentVerificationScreen() {
 
   const confirmApprovePayment = async (notesParam) => {
     const finalNotes = notesParam || verificationNotes || 'Amount credited and verified';
-    const appId = client?.id || params.id;
+    const appId =
+      client?.id ||
+      params.appointmentId ||
+      params.id ||
+      verifyData?.appointmentId ||
+      verifyData?.quotation?.appointmentId ||
+      verifyData?.quotation?.appointment?.id;
     const quoteId =
       quotation.quotationId ||
       quotationContext?.quotationId ||
@@ -897,7 +948,13 @@ export default function PaymentVerificationScreen() {
   };
 
   const confirmDeletePayment = async () => {
-    const appId = client?.id || params.id;
+    const appId =
+      client?.id ||
+      params.appointmentId ||
+      params.id ||
+      verifyData?.appointmentId ||
+      verifyData?.quotation?.appointmentId ||
+      verifyData?.quotation?.appointment?.id;
     const quoteId =
       params.quotationId ||
       verifyData?.quotation?.quotationId ||
@@ -1867,31 +1924,49 @@ export default function PaymentVerificationScreen() {
 
       {/* Fixed Bottom Action Bar */}
       <View style={[styles.bottomBar, isDark && styles.bottomBarDark, { paddingBottom: Math.max(insets.bottom + 8, 16) }]}>
-        <TouchableOpacity
-          style={[styles.deleteBtn, isDark && styles.deleteBtnDark]}
-          onPress={handleDeleteClick}
-          disabled={isDeletingPayment || isSubmittingApprove}
-          activeOpacity={0.8}
-        >
-          {isDeletingPayment ? (
-            <ActivityIndicator size="small" color="#DC2626" />
-          ) : (
-            <>
-              <Ionicons name="trash-outline" size={18} color="#DC2626" style={{ marginRight: 6 }} />
-              <Text style={styles.deleteBtnText}>Delete</Text>
-            </>
-          )}
-        </TouchableOpacity>
+        {!isVerified && (
+          <TouchableOpacity
+            style={[styles.deleteBtn, isDark && styles.deleteBtnDark]}
+            onPress={handleDeleteClick}
+            disabled={isDeletingPayment || isSubmittingApprove}
+            activeOpacity={0.8}
+          >
+            {isDeletingPayment ? (
+              <ActivityIndicator size="small" color="#DC2626" />
+            ) : (
+              <>
+                <Ionicons name="trash-outline" size={18} color="#DC2626" style={{ marginRight: 6 }} />
+                <Text style={styles.deleteBtnText}>Delete</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        )}
 
         {isVerified ? (
           <TouchableOpacity
             style={[styles.approveBtn, { backgroundColor: '#1E488F' }]}
-            onPress={() => {
-              const appId = client?.id || params.id;
-              router.replace({
-                pathname: '/customer-detail',
-                params: { id: appId, initialTab: 'payments' },
-              });
+            onPress={async () => {
+              let appId =
+                client?.id ||
+                params.appointmentId ||
+                params.id ||
+                verifyData?.appointmentId ||
+                verifyData?.quotation?.appointmentId ||
+                verifyData?.quotation?.appointment?.id;
+
+              if (!appId && quotationId) {
+                const res = await quotationRepository.getQuotationById(quotationId);
+                appId = res?.quotation?.appointmentId ?? res?.quotation?.appointment?.id;
+              }
+
+              if (appId) {
+                router.replace({
+                  pathname: '/customer-detail',
+                  params: { id: String(appId), initialTab: 'payments' },
+                });
+              } else {
+                router.back();
+              }
             }}
             activeOpacity={0.85}
           >
@@ -1949,12 +2024,30 @@ export default function PaymentVerificationScreen() {
         message={successData.message}
         badgeText={successData.badge}
         buttonText="View Customer Detail"
-        onClose={() => {
+        onClose={async () => {
           setSuccessModalVisible(false);
-          router.replace({
-            pathname: '/customer-detail',
-            params: { id: successData.appId, initialTab: 'payments' },
-          });
+          let appId =
+            successData.appId ||
+            client?.id ||
+            params.appointmentId ||
+            params.id ||
+            verifyData?.appointmentId ||
+            verifyData?.quotation?.appointmentId ||
+            verifyData?.quotation?.appointment?.id;
+
+          if (!appId && quotationId) {
+            const res = await quotationRepository.getQuotationById(quotationId);
+            appId = res?.quotation?.appointmentId ?? res?.quotation?.appointment?.id;
+          }
+
+          if (appId) {
+            router.replace({
+              pathname: '/customer-detail',
+              params: { id: String(appId), initialTab: 'payments' },
+            });
+          } else {
+            router.back();
+          }
         }}
       />
 

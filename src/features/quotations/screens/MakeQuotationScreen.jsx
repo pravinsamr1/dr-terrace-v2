@@ -259,7 +259,15 @@ export default function MakeQuotationScreen() {
   const [gstPercent, setGstPercent] = useState('18');
   const [customerGstNumber, setCustomerGstNumber] = useState('');
   // Customer type only decides the final document (tax invoice vs cash bill); it never changes GST amounts
-  const [isGstCustomer, setIsGstCustomer] = useState(true);
+  const [isGstCustomer, setIsGstCustomer] = useState(() => {
+    if (params.isGstCustomer !== undefined) {
+      return params.isGstCustomer === 'true' || params.isGstCustomer === true;
+    }
+    if (params.isTaxCustomer !== undefined) {
+      return params.isTaxCustomer === 'true' || params.isTaxCustomer === true;
+    }
+    return false;
+  });
   const [discountPercent, setDiscountPercent] = useState('');
   const [discountAmount, setDiscountAmount] = useState(0);
   const [subtotal, setSubtotal] = useState(0);

@@ -1,6 +1,10 @@
 import { Tabs } from 'expo-router';
+import { usePushNotifications } from '../../src/features/notifications/hooks/usePushNotifications';
 
 export default function TabLayout() {
+  // Registers this phone for push notifications (logged-in users only) and handles notification taps
+  usePushNotifications();
+
   return (
     <Tabs
       backBehavior="history"

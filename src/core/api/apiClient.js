@@ -21,7 +21,6 @@ const apiClient = axios.create({
   proxy: false,
   adapter: "fetch",
   headers: {
-    'Content-Type': 'application/json',
     Accept: 'application/json',
   },
 });
@@ -40,6 +39,9 @@ apiClient.interceptors.request.use(
     } catch (_err) {
       // Ignore token read error and proceed
     }
+
+    const method = (config.method || 'GET').toUpperCase();
+    const hasData = config.data !== undefined && config.data !== null;
 
     // If request data is FormData, remove Content-Type and bypass Axios fetch.js serialization
     const isMultipart =
@@ -133,6 +135,20 @@ apiClient.interceptors.request.use(
           xhr.send(cfg.data);
         });
       };
+    } else if (['GET', 'HEAD'].includes(method) || (!hasData && method === 'DELETE')) {
+      // Do not send Content-Type on GET / HEAD or bodyless DELETE requests
+      if (config.headers?.delete) {
+        config.headers.delete('Content-Type');
+        config.headers.delete('content-type');
+      }
+      if (config.headers) {
+        delete config.headers['Content-Type'];
+        delete config.headers['content-type'];
+      }
+    } else if (hasData && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+      if (!config.headers['Content-Type'] && !config.headers['content-type']) {
+        config.headers['Content-Type'] = 'application/json';
+      }
     }
 
     console.log(`[Axios Request] ${(config.method || 'GET').toUpperCase()} ${(config.baseURL || '') + (config.url || '')}`, {
@@ -465,6 +481,8 @@ export const ApiV2 = {
       apiClient.get(`/quotations/${quotationId}/warranty`),
     deleteWarranty: (quotationId) =>
       apiClient.delete(`/quotations/${quotationId}/warranty`),
+    verifyWarranty: (quotationId, data) =>
+      apiClient.post(`/quotations/${quotationId}/warranty/verify`, data),
   },
 
   health: {

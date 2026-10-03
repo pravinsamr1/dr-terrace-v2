@@ -8,37 +8,38 @@ This document provides complete integration specifications, architecture contrac
 
 1. [What's New in API v2](#1-whats-new-in-api-v2)
 2. [Architecture & Base URLs](#2-architecture--base-urls)
-3. [2-Tier Role-Based Access Control (RBAC)](#3-2-tier-role-based-access-control-rbac)
-4. [Authentication & Profile Flow](#4-authentication--profile-flow)
-5. [Complete REST API v2 Endpoints Reference](#5-complete-rest-api-v2-endpoints-reference)
+3. [Authentication & Profile Flow](#3-authentication--profile-flow)
+4. [Complete REST API v2 Endpoints Reference](#4-complete-rest-api-v2-endpoints-reference)
    - [Authentication](#authentication)
    - [Appointments (Unified)](#appointments)
    - [Quotations (Unified)](#quotations)
-     - [11. Confirm Quotation](#11-confirm-quotation-idconfirm)
-     - [12. Unlock Quotation](#12-unlock-quotation-idunlock)
-     - [13. Add Service from Existing Master Data](#13-add-service-from-existing-master-data-idservices)
+     - [Pricing rules](#pricing-rules)
+     - [2. Create Quotation](#2-create-quotation)
+     - [4. The quotation object](#4-get-quotation-details-the-quotation-object)
+     - [9. Confirm Quotation](#9-confirm-quotation-idconfirm)
+     - [10. Unlock Quotation](#10-unlock-quotation-idunlock)
+     - [12. Quotation Errors](#12-quotation-errors)
+   - [Proforma Invoice (Tax Customers Only)](#proforma-invoice-tax-customers-only)
    - [Quotation Payments & Direct Settlement (New Flow)](#quotation-payments--direct-settlement-new-simplified-flow)
      - [1. Get Payment Summary & History](#1-get-payment-summary--history)
-     - [2. Record Intermediate Payment (Without GST)](#2-record-intermediate-payment-deducted-from-without-gst-total)
+     - [2. Record Intermediate Payment (Grand Total)](#2-record-intermediate-payment-checked-against-the-grand-total)
      - [3. Admin Verify Payment](#3-admin-verify-payment)
-     - [4. Final Settlement Payment (Decide GST)](#4-final-settlement-payment-decide-gst)
+     - [4. Settling The Balance](#4-settling-the-balance)
      - [5. Rollback / Delete Payment (Admin Only)](#5-rollback--delete-latest-payment-admin-only)
    - [Payments & Blockchain Ledger (Unified)](#payments--blockchain-ledger-unified)
      - [1. Get Payment State / Pay-View](#1-get-payment-state--pay-view)
      - [2. Record Base Service Payment](#2-record-service-payment-base-scope)
-     - [3. Add Variation Service](#3-add-additional-variation-service)
-     - [4. Record Additional Service Payment](#4-record-additional-service-payment)
-     - [5. Final Settlement & Deferred GST](#5-confirm-final-settlement--deferred-gst)
-     - [6. Dynamic Pricing Configuration (GST & Discount)](#6-dynamic-pricing-configuration-gst--discount-toggles)
-     - [7. Verify Blockchain Ledger Integrity](#7-verify-blockchain-ledger-integrity)
-     - [8. Admin Verify Payment](#8-admin-verify-payment)
-     - [9. Single Payment Verification View](#9-single-payment-verification-view)
-     - [10. Record GST Clearance Payment](#10-record-gst-clearance-payment)
-     - [11. Generate Final Official Receipt](#11-generate-final-official-receipt)
-     - [12. Admin Toggle Receipt Lock](#12-admin-toggle-receipt-lock)
-     - [13. Receipt Numbering Settings & Dynamic Series](#13-receipt-numbering-settings--dynamic-series)
-     - [14. Delete Payment & Auto-Cleanup Rules](#14-delete-payment--auto-cleanup-rules)
-     - [15. Clean Up Orphaned Payment Proof Images (Admin Only)](#15-clean-up-orphaned-payment-proof-images-admin-only)
+     - [3. Final Settlement](#3-confirm-final-settlement)
+     - [4. Dynamic Pricing Configuration (GST & Discount)](#4-dynamic-pricing-configuration-gst--discount-toggles)
+     - [5. Verify Blockchain Ledger Integrity](#5-verify-blockchain-ledger-integrity)
+     - [6. Admin Verify Payment](#6-admin-verify-payment)
+     - [7. Single Payment Verification View](#7-single-payment-verification-view)
+     - [8. Record GST Clearance Payment](#8-record-gst-clearance-payment)
+     - [9. Generate Final Official Receipt](#9-generate-final-official-receipt)
+     - [10. Admin Toggle Receipt Lock](#10-admin-toggle-receipt-lock)
+     - [11. Receipt Numbering Settings & Dynamic Series](#11-receipt-numbering-settings--dynamic-series)
+     - [12. Delete Payment & Auto-Cleanup Rules](#12-delete-payment--auto-cleanup-rules)
+     - [13. Clean Up Orphaned Payment Proof Images (Admin Only)](#13-clean-up-orphaned-payment-proof-images-admin-only)
    - [Warranty (Unified)](#warranty-unified)
      - [1. Check Warranty Eligibility](#1-check-warranty-eligibility)
      - [2. Get Warranty Config / Available Services](#2-get-warranty-config--available-services)
@@ -46,10 +47,12 @@ This document provides complete integration specifications, architecture contrac
      - [4. Update Warranty Config](#4-update-warranty-config)
      - [5. Generate Warranty](#5-generate-warranty)
      - [6. Get Warranty](#6-get-warranty)
-     - [7. Delete Warranty (3-Day Window)](#7-delete-warranty-3-day-window)
+     - [7. Delete Warranty](#7-delete-warranty)
+     - [8. Verify Warranty (Master Admin)](#8-verify-warranty-master-admin-only)
    - [Clients / Customers (Unified)](#clients--customers-unified)
    - [Appointment Schedules (Unified)](#appointment-schedules-unified)
    - [Company & Employee Policies (Unified)](#company--employee-policies-unified)
+   - [Push Notifications](#push-notifications)
    - [System Health](#system-health)
    - [Home View Dashboard](#home-view-dashboard)
    - [Master Data & Dropdowns (Unified)](#master-data--dropdowns-unified)
@@ -59,7 +62,7 @@ This document provides complete integration specifications, architecture contrac
      - [4. Active Employees / Staff List](#4-active-employees--staff-list-get-apiv2employees)
      - [5. Bank Account Details](#5-bank-account-details-unified)
      - [6. Staff Management & Photo Upload](#6-staff-management--photo-upload-admin-only)
-6. [Ready-to-Use Client Code Examples](#6-ready-to-use-client-code-examples)
+5. [Ready-to-Use Client Code Examples](#5-ready-to-use-client-code-examples)
    - [A. TypeScript / Axios Client with Interceptors](#a-typescript--axios-client-with-interceptors)
    - [B. React / Next.js Custom Hook](#b-react--nextjs-custom-hook)
    - [C. Flutter / Dart Mobile Service (Dio)](#c-flutter--dart-mobile-service)
@@ -77,10 +80,10 @@ This document provides complete integration specifications, architecture contrac
 | **Confirm Quotation**   | **Enabled for Field Employees** (for their assigned visits)             |
 | **Reassign Technician** | Dedicated `PATCH /api/v2/appointments/:id/assign` (Admin only)          |
 | **Check-in Attendance** | Standardized `POST /api/v2/appointments/:id/checkin`                    |
-| **Direct Settlement**   | Dedicated `/api/v2/quotation-payments/:id` flow with without-GST intermediate payments and final GST decision |
+| **Direct Settlement**   | Dedicated `/api/v2/quotation-payments/:id` flow: payments against the quotation's grand total; GST (tax invoice vs cash bill) set on the quotation |
 | **Response Format**     | Standard `{ statusCode: 200, success: true, data: ..., meta: { ... } }` |
 | **Client Screen Loading** | **1 Single Unified Request**: `GET /api/v2/clients/:id` bundles profile, packages, quotations, and active payment summary |
-| **Post-Sale Warranty**  | New **Warranty module**: configure per-service warranty years after final receipt lock, with 3-day deletion window |
+| **Post-Sale Warranty**  | New **Warranty module**: configure per-service warranty years after final receipt lock. Anyone (master admin, office employee, field employee) can configure and generate it; the **master admin verifies** it, and only then can office employees and field employees view and send it. Admin can delete and redo a warranty until it is verified |
 | **Bank Accounts**       | Full company account management via `/api/v2/account-details` with primary account toggle |
 | **Storage Lifecycle**   | Automated disk unlinking on payment deletion & admin orphaned receipt cleanup (`/api/v2/payments/cleanup-orphaned-images`) |
 
@@ -119,32 +122,9 @@ This document provides complete integration specifications, architecture contrac
 | **Live / Production**     | `https://api.drterrace.com` | `https://api.drterrace.com/api/v2` |
 ---
 
-## 3. 2-Tier Role-Based Access Control (RBAC)
+## 3. Authentication & Profile Flow
 
-API v2 defines two core operational roles:
-
-1. **`ADMIN`**: Super Administrator & Office Administrator. Full oversight, staff dispatching, and system management.
-2. **`FIELD_EMPLOYEE`**: Field Technicians & On-site staff. Autonomous on-site lead capture, site check-ins, drafting, and confirming quotes for their assigned visits.
-
-### Capability Matrix
-
-| Capability / Action            |               `ADMIN`                |            `FIELD_EMPLOYEE`            |
-| :----------------------------- | :----------------------------------: | :------------------------------------: |
-| **Login**                      | Username/Password or Mobile/Password |        Mobile Number / Password        |
-| **View Appointments**          |          All company visits          | **Only** appointments assigned to them |
-| **Book New Appointment**       |   Book & assign to any technician    |  **Enabled** (auto-assigned to self)   |
-| **Reassign Technician**        |             **Allowed**              |           **403 Forbidden**            |
-| **Site Check-in (Attendance)** |       Allowed (admin override)       |     **Allowed** (GPS + timestamp)      |
-| **View Quotations**            |        All company quotations        |  **Only** quotations for their visits  |
-| **Draft Quotations**           |               Allowed                |     **Allowed** (for their visits)     |
-| **Confirm Quotation**          |               Allowed                |     **Allowed** (for their visits)     |
-| **Home View Dashboard**        |     Company-wide upcoming/missed     |    **Scoped** to their daily visits    |
-
----
-
-## 4. Authentication & Profile Flow
-
-### 4.1 Login
+### 3.1 Login
 
 Both Admin and Field Employees log in through the same endpoint.
 
@@ -189,11 +169,11 @@ Content-Type: application/json
 > [!TIP]
 > **Uniform Envelope**: 100% of API v2 endpoints return their core response payload under the `data` property (`res.data`) and include `statusCode` (`200` or `201`). Convenience top-level keys (`res.token`, `res.user`, `res.appointments`, etc.) are also preserved for non-breaking compatibility.
 >
-> For root Admin logins (`admin`/`admin`), `user.id` is `0` and `user.role` is `"ADMIN"`.
+> For the root account (`ADMIN_USERNAME` from the server environment), `user.id` is `0` and `user.role` is `"MASTER_ADMIN"` (the one master admin, configured in `.env`). Office employees log in as `ADMIN` and technicians as `FIELD_EMPLOYEE`.
 
 ---
 
-### 4.2 Get Current User Profile
+### 3.2 Get Current User Profile
 
 Validates token and returns current user permissions and role.
 
@@ -214,6 +194,7 @@ Authorization: Bearer <jwt_token>
     "name": "Karthik Raja",
     "role": "FIELD_EMPLOYEE",
     "isAdmin": false,
+    "isMasterAdmin": false,
     "isFieldEmployee": true
   },
   "user": {
@@ -222,14 +203,17 @@ Authorization: Bearer <jwt_token>
     "name": "Karthik Raja",
     "role": "FIELD_EMPLOYEE",
     "isAdmin": false,
+    "isMasterAdmin": false,
     "isFieldEmployee": true
   }
 }
 ```
 
+`isAdmin` is `true` for both `ADMIN` and `MASTER_ADMIN`; `isMasterAdmin` is `true` only for `MASTER_ADMIN`.
+
 ---
 
-## 5. Complete REST API v2 Endpoints Reference
+## 4. Complete REST API v2 Endpoints Reference
 
 ### Appointments
 
@@ -542,15 +526,56 @@ Authorization: Bearer <jwt_token>
 
 ### Quotations
 
+Every quotation endpoint returns the same **quotation object** (§4). The quotation keeps one tax state,
+`isTaxCustomer`, and the server calculates every amount.
+
+#### Pricing rules
+
+All amounts are whole rupees, rounded at each step (`Math.round`), so the app can reproduce them exactly.
+
+```
+line amount = round(area × rate)
+subTotal    = sum of line amounts
+
+Tax customer (isTaxCustomer: true) — discount before tax:
+  discount   = round(subTotal × discount% / 100)                  → discount.amountForTax
+  gst        = round((subTotal − discount) × gst% / 100)
+  grandTotal = subTotal − discount + gst
+
+Non-tax customer (isTaxCustomer: false) — discount after tax:
+  gst        = round(subTotal × gst% / 100)
+  discount   = round((subTotal + gst) × discount% / 100)          → discount.amountForNonTax
+  grandTotal = subTotal + gst − discount
+
+cgst = round(gst / 2), sgst = gst − cgst, each at gst% / 2
+```
+
+- **GST applies whenever `gstPercentage > 0`,** for either kind of customer. `isTaxCustomer` doesn't switch GST on
+  or off; it decides the discount order and whether the final receipt is a tax invoice or a cash bill.
+- `pricing.discount` is `null` when there is no discount, and `pricing.gst` is `null` when there is no GST.
+- The response always returns both discount amounts (`amountForTax`, `amountForNonTax`); `grandTotal` uses the one
+  that matches `isTaxCustomer`.
+
+Worked example: 1,000 sqft × ₹53, 10% discount, 18% GST.
+
+| | Tax customer | Non-tax customer |
+|---|---|---|
+| `subTotal` | 53,000 | 53,000 |
+| Discount | `amountForTax` 5,300 (10% of 53,000) | `amountForNonTax` 6,254 (10% of 62,540) |
+| GST 18% | 8,586 (on 47,700) | 9,540 (on 53,000) |
+| `grandTotal` | **56,286** | **56,286** |
+
+---
+
 #### 1. List Quotations (Role-Scoped)
 
 ```http
-GET /api/v2/quotations?page=1&limit=20
+GET /api/v2/quotations?page=1&limit=20&appointmentId=691&employeeId=100
 Authorization: Bearer <jwt_token>
 ```
 
-- **`ADMIN`**: Returns all quotations.
-- **`FIELD_EMPLOYEE`**: Returns quotations for their assigned visits only.
+`appointmentId` and `employeeId` are optional filters (`employeeId` is Admin only). A field employee only sees
+their own quotations.
 
 ##### Response (`200 OK`)
 
@@ -558,39 +583,16 @@ Authorization: Bearer <jwt_token>
 {
   "statusCode": 200,
   "success": true,
-  "meta": {
-    "page": 1,
-    "limit": 20,
-    "totalItems": 15,
-    "totalPages": 1
-  },
-  "data": [
-    {
-      "id": 75,
-      "quotationDate": "2026-09-20",
-      "propertyId": 1,
-      "propertyName": "Residential Terrace",
-      "packageId": 2,
-      "packageName": "Standard Coating",
-      "fieldEmployeeId": 102,
-      "employeeName": "Karthik Raja",
-      "appointmentId": 150,
-      "advance": 10000,
-      "midCost": 20000,
-      "finalAmount": 20000,
-      "grandTotal": 59000,
-      "isConfirmed": true
-    }
-  ],
-  "quotations": [ ... ]
+  "meta": { "page": 1, "limit": 20, "totalItems": 1, "totalPages": 1 },
+  "data": [ { "...": "quotation object (§4)" } ]
 }
 ```
 
 ---
 
-#### 2. Create Quotation Draft
+#### 2. Create Quotation
 
-Enabled for **Both Admin and Field Employees**.
+Enabled for **Admin and Field Employees**.
 
 ```http
 POST /api/v2/quotations
@@ -598,26 +600,41 @@ Authorization: Bearer <jwt_token>
 Content-Type: application/json
 
 {
-  "quotationDate": "2026-09-20",
-  "quoteValidateDate": "2026-10-20",
-  "propertyId": 1,
+  "appointmentId": 691,
+  "propertyId": 2,
   "packageId": 2,
-  "appointmentId": 150,
-  "advance": 10000,
-  "midCost": 20000,
-  "finalAmount": 20000,
-  "discount": 1000,
-  "isGst": true,
+  "quotationDate": "2026-09-29",
+  "validTill": "2026-10-14",
+  "isTaxCustomer": true,
+  "customerGstNumber": "33AAAAA0000A1Z5",
+  "withRegards": "Mr. SRIRAM",
+  "negotiation": "PRICE IS NEGOTIABLE FOR IMMEDIATE ORDER",
+  "workCommencement": "Work can be started 48hrs from the time of payment received",
   "services": [
-    {
-      "serviceId": 1,
-      "description": "Elastomeric Terrace Waterproofing System",
-      "area": 1200,
-      "rate": 45
-    }
-  ]
+    { "serviceDetailId": 2, "area": 1000, "rate": 53, "description": "Terrace (Cement floor) (Four Layer System) ..." }
+  ],
+  "amount": {
+    "gstPercentage": 18,
+    "discountPercentage": 10,
+    "subTotal": 53000,
+    "grandTotal": 56286
+  }
 }
 ```
+
+| Field | Rules |
+|---|---|
+| `appointmentId`, `propertyId`, `packageId` | Required, must exist. The customer comes from the appointment. |
+| `quotationDate` | Required, `YYYY-MM-DD`. |
+| `validTill` | Optional, `YYYY-MM-DD`, on or after `quotationDate`. Defaults to `quotationDate` + 15 days. |
+| `isTaxCustomer` | Required, `true` or `false`. |
+| `customerGstNumber` | Optional string (max 50). Stored as sent; the format isn't checked. |
+| `withRegards`, `negotiation`, `workCommencement` | Optional. `negotiation` and `workCommencement` have defaults. |
+| `services[]` | At least one. `serviceDetailId` must exist and belong to the package's tier (or a tier-less "None" package). `area` > 0, `rate` ≥ 0. `description` overrides the catalog text. Title, subtitle and warranty come from the catalog. |
+| `amount.gstPercentage` | `null` or 0–100. GST applies when > 0. |
+| `amount.discountPercentage` | `null` or 0–100. |
+| `amount.subTotal`, `amount.grandTotal` | Required. The server recalculates both with the rules above and returns `400` if either differs. `amount.grantTotal` is accepted as another name for `grandTotal`. |
+| `employeeId` | Admin only, optional. Defaults to the appointment's assigned employee. A field employee is always themselves. |
 
 ##### Response (`201 Created`)
 
@@ -625,91 +642,52 @@ Content-Type: application/json
 {
   "statusCode": 201,
   "success": true,
-  "message": "Quotation created successfully",
-  "id": 75,
-  "data": {
-    "id": 75,
-    "quotationDate": "2026-09-20",
-    "subTotal": 54000,
-    "gstPercentage": 18,
-    "gstAmount": 9720,
-    "cgstAmount": 4860,
-    "sgstAmount": 4860,
-    "grandTotal": 62720,
-    "isConfirmed": false
+  "message": "Quotation created",
+  "data": { "...": "quotation object (§4)" }
+}
+```
+
+##### Response (`400 Bad Request`) — totals don't match
+
+```json
+{
+  "statusCode": 400,
+  "success": false,
+  "message": "amount.grandTotal (56000) does not match the calculated grand total (56286)",
+  "details": {
+    "expected": {
+      "subTotal": 53000,
+      "grandTotal": 56286,
+      "pricing": { "...": "the server's pricing block" }
+    }
   }
 }
 ```
 
 ---
 
-#### 3. Confirm Quotation
-
-Enabled for **Both Admin and Field Employees**.
-
-When a technician closes the deal on-site with the customer, they confirm the proposal directly:
+#### 3. Update Quotation
 
 ```http
-POST /api/v2/quotations/:id/confirm
+PUT /api/v2/quotations/:id
 Authorization: Bearer <jwt_token>
 Content-Type: application/json
-
-{
-  "isConfirmed": true
-}
 ```
 
-##### Response (`200 OK`)
+The body is the **same as create** and replaces the quotation's lines and settings. The response is the updated
+quotation object with `revision` increased by 1.
 
-```json
-{
-  "statusCode": 200,
-  "success": true,
-  "message": "Quotation confirmed successfully",
-  "data": {
-    "id": 75,
-    "isConfirmed": true,
-    "updatedBy": "Field (Karthik Raja)"
-  }
-}
-```
-
-> [!IMPORTANT]
-> **Automatic Cleanup**: When a quotation is confirmed, all other unconfirmed quotation drafts associated with that same `appointmentId` are **automatically deleted** from the database.
->
-> **Locked Quotation**: Once confirmed, the quotation becomes **locked**. Field employees cannot modify (`PUT`), delete (`DELETE`), or unconfirm it. Only an **Admin** user can unlock it.
+- **Lines are matched by `serviceDetailId`,** so an unchanged line keeps its `id`. Older lines saved without a
+  service detail are matched by their service instead.
+- **A line that has payments can't be removed** (`400`).
+- **Lines already on the quotation skip the tier check** unless `packageId` changes.
+- **Field employee:** only their own quotations, and only while `isConfirmed` is `false`.
+- **Admin:** any quotation.
+- **Locked after the final receipt:** once it has been generated, updates return `400`.
 
 ---
 
-#### 4. Unlock Quotation (Admin Only)
-
-Enabled **ONLY for Admin users** (`403 Forbidden` for Field Employees). Unlocks a confirmed quotation so modifications or revisions can be made:
-
-```http
-POST /api/v2/quotations/:id/unlock
-Authorization: Bearer <admin_jwt_token>
-```
-
-##### Response (`200 OK`)
-
-```json
-{
-  "statusCode": 200,
-  "success": true,
-  "message": "Quotation unlocked successfully",
-  "data": {
-    "id": 75,
-    "isConfirmed": false,
-    "updatedBy": "Admin (System Administrator)"
-  }
-}
-```
-
----
-
-#### 5. Get Quotation Details
-
-Retrieves complete quotation information including customer, property, employee, base services, additional services, pricing splits, and payment terms:
+#### 4. Get Quotation Details (the quotation object)
 
 ```http
 GET /api/v2/quotations/:id
@@ -723,184 +701,101 @@ Authorization: Bearer <jwt_token>
   "statusCode": 200,
   "success": true,
   "data": {
-    "id": 75,
-    "quotationDate": "2026-09-20",
-    "validTill": "2026-10-20",
-    "revision": 2,
-    "isConfirmed": true,
-    "property": { "id": 1, "name": "Residential Terrace" },
-    "package": { "id": 2, "name": "Standard Coating", "tier": "Economic", "warranty": "5 Years" },
+    "id": 1351,
+    "quotationDate": "2026-09-29",
+    "validTill": "2026-10-14",
+    "revision": 1,
+    "isConfirmed": false,
+    "appointmentId": 691,
+
+    "isTaxCustomer": true,
+    "customerGstNumber": "33AAAAA0000A1Z5",
+
     "customer": {
-      "name": "Rajesh Kumar",
-      "mobile": "9876543210",
-      "address": {
-        "doorNo": "12A",
-        "streetName": "Anna Salai",
-        "area": "T Nagar",
-        "city": "Chennai",
-        "state": "Tamil Nadu",
-        "pincode": "600017"
-      }
+      "name": "Mr samm",
+      "mobile": "8925591969",
+      "address": { "doorNo": "gh", "streetName": "avavb", "area": "Avadi", "city": "Chennai", "state": "Tamil Nadu", "pincode": "600054" }
     },
-    "employee": { "id": 102, "name": "Karthik Raja" },
-    "withRegards": "Mr. Ramesh",
+    "property": { "id": 2, "name": "Apartment" },
+    "package": { "id": 2, "name": "Pure Flexible Polyurethane coating", "tier": "Premium", "warranty": "10 Years" },
+    "employee": { "id": 100, "name": "sam" },
+    "withRegards": "Mr. SRIRAM",
 
     "services": [
       {
+        "id": 2051,
         "serviceId": 1,
-        "serviceDetailId": 1,
+        "serviceDetailId": 2,
         "title": "Terrace Waterproofing",
-        "subtitle": null,
-        "description": "Elastomeric Terrace Waterproofing System",
-        "area": 100,
-        "rate": 100,
-        "amount": 10000,
-        "tierType": "SingleTier",
-        "isAdditional": false
-      },
-      {
-        "serviceId": 0,
-        "serviceDetailId": null,
-        "title": "Extra Balcony Waterproofing",
-        "subtitle": "Additional Service",
-        "description": "Variation added on-site",
-        "area": 100,
-        "rate": 50,
-        "amount": 5000,
-        "tierType": "SingleTier",
-        "isAdditional": true,
-        "warranty": "2 Years",
-        "additionalServiceId": 14
+        "subtitle": "Default",
+        "description": "Terrace (Cement floor) (Four Layer System) ...",
+        "area": 1000,
+        "rate": 53,
+        "amount": 53000,
+        "warranty": "10 Years"
       }
     ],
-    "baseServices": [
-      {
-        "serviceId": 1,
-        "serviceDetailId": 1,
-        "title": "Terrace Waterproofing",
-        "subtitle": null,
-        "description": "Elastomeric Terrace Waterproofing System",
-        "area": 100,
-        "rate": 100,
-        "amount": 10000,
-        "tierType": "SingleTier",
-        "isAdditional": false
-      }
-    ],
-    "additionalServices": [
-      {
-        "id": 14,
-        "quotationId": 75,
-        "title": "Extra Balcony Waterproofing",
-        "sqft": 100,
-        "rate": 50,
-        "totalPrice": 5000,
-        "warranty": "2 Years",
-        "notes": "Variation added on-site",
-        "addedBy": "Admin",
-        "createdAt": "2026-09-25T11:45:00.000Z"
-      }
-    ],
-    "hasAdditionalServices": true,
 
     "pricing": {
-      "subTotal": 15000,
-      "selectedType": "WITHOUT_GST",
-      "withoutGst": {
-        "discount": { "percentage": 10, "amount": 1000 },
-        "taxableAmount": 14000,
-        "gstAmount": 0,
-        "totalAmount": 14000
+      "subTotal": 53000,
+      "discount": { "percentage": 10, "amountForTax": 5300, "amountForNonTax": 6254 },
+      "gst": {
+        "percentage": 18,
+        "amount": 8586,
+        "cgst": { "percentage": 9, "amount": 4293 },
+        "sgst": { "percentage": 9, "amount": 4293 }
       },
-      "withGst": {
-        "discount": { "percentage": 10, "amount": 1000 },
-        "taxableAmount": 14000,
-        "gst": { "percentage": 18, "amount": 2520 },
-        "cgst": { "percentage": 9, "amount": 1260 },
-        "sgst": { "percentage": 9, "amount": 1260 },
-        "igst": null,
-        "totalAmount": 16520
-      }
+      "grandTotal": 56286
     },
-    "payment": {
-      "totalPaid": 14000,
-      "balanceAmount": { "withGst": 2520, "withoutGst": 0 },
-      "paymentStatus": "FULLY_PAID"
-    },
+
+    "payment": { "totalPaid": 0, "balanceAmount": 56286, "paymentStatus": "UNPAID" },
+
     "paymentTerms": {
-      "advance": 50,
-      "mid": 40,
-      "final": 10,
-      "validity": "30 Days",
-      "negotiation": "PRICE IS NEGOTIABLE",
-      "workStart": "48hrs from payment"
+      "validity": "Quote Valid till 14-10-26",
+      "negotiation": "PRICE IS NEGOTIABLE FOR IMMEDIATE ORDER",
+      "workStart": "Work can be started 48hrs from the time of payment received"
     }
   }
 }
 ```
 
-> [!TIP]
-> **Frontend Compatibility for Additional Services**:
-> - **Line Items Table / PDF Proposal**: Loop through `quotation.services`. Additional services are already appended as line items with `isAdditional: true`, `subtitle: "Additional Service"`, and their specific `warranty`.
-> - **Dedicated Variation Card / Section**: Use `quotation.additionalServices` to display separate variation cards, chips, or history.
-> - **Only Base Services**: Use `quotation.baseServices` if you need to render the original contract items separately from variations.
-> - `quotation.pricing.subTotal` automatically unifies `baseServices` subtotal + `additionalServices` total.
+- `services` lists every line. A custom line has `serviceId` and `serviceDetailId` of `null`. Only lines migrated from
+  the old on-site additional services look like this; editing the quotation (`PUT`) replaces them with the lines you send
+  (a line that has payments can't be removed, `400`).
+- `package.warranty` is the quotation-level warranty (the one shown on the pdf-view): the warranty stored on the quotation or its package, otherwise the longest warranty among its lines. It is `null` only when no line has a warranty.
+- `payment` counts every recorded payment (milestone and per-service) against `pricing.grandTotal`.
+- `paymentTerms.validity` is a display sentence; `validTill` is the date.
 
 ---
 
-#### 6. View Official Quotation Proposal (PDF Data)
-
-Returns formatted line items (including additional services), sub-totals, GST splits, terms & conditions, and company contact details for rendering or printing:
+#### 5. Quotation PDF (`:id/pdf-view`)
 
 ```http
 GET /api/v2/quotations/:id/pdf-view
 Authorization: Bearer <jwt_token>
 ```
 
-##### Response (`200 OK`)
+Returns the **quotation object** plus `terms` (HTML from terms & conditions) and `companyContact`.
+
+- Render the discount line from `pricing.discount.amountForTax` (tax customer) or `amountForNonTax` (non-tax
+  customer).
+- Render the GST lines (CGST, SGST) only when `pricing.gst` is not `null`.
+- The order of the lines follows the pricing rules: discount then GST for a tax customer, GST then discount
+  otherwise.
 
 ```json
 {
   "statusCode": 200,
   "success": true,
   "data": {
-    "id": 75,
-    "quotationDate": "2026-09-20",
-    "validTill": "2026-10-20",
-    "revision": 2,
-    "services": [
-      {
-        "serviceId": 1,
-        "title": "Terrace Waterproofing",
-        "description": "Elastomeric Terrace Waterproofing System",
-        "area": 100,
-        "rate": 100,
-        "amount": 10000,
-        "isAdditional": false
-      },
-      {
-        "serviceId": 0,
-        "title": "Extra Balcony Waterproofing",
-        "subtitle": "Additional Service",
-        "description": "Variation added on-site",
-        "area": 100,
-        "rate": 50,
-        "amount": 5000,
-        "isAdditional": true,
-        "warranty": "2 Years",
-        "additionalServiceId": 14
-      }
-    ],
-    "baseServices": [ ... ],
-    "additionalServices": [ ... ],
-    "hasAdditionalServices": true,
-    "subTotal": 15000,
-    "pricing": { ... },
-    "terms": "1. 50% advance upon commencement...",
+    "...": "quotation object (§4)",
+    "terms": "<p>1. 50% Advance with Purchase Order, ...</p>",
     "companyContact": {
-      "officeAddress": "Kodambakkam High Rd, Chennai - 600 034",
+      "id": 1,
+      "officeAddress": "Kodambakkam, Chennai - 600024",
       "mobileNumber": "+91 99621 19311",
-      "emailAddress": "admin@drterrace.com"
+      "landlineNumber": "044-45000775",
+      "emailAddress": "info@drterrace.com"
     }
   }
 }
@@ -910,7 +805,8 @@ Authorization: Bearer <jwt_token>
 
 #### 6. Quotation Creation Options (`page-view`)
 
-Returns all active properties, packages, services, and employee options needed to render the Quotation Creator form:
+Returns all properties and the package/service catalog for the quotation form, **grouped by tier**. Use a
+`serviceDetailId` from `subtitles` in `services[]` of the create request.
 
 ```http
 GET /api/v2/quotations/page-view
@@ -925,17 +821,42 @@ Authorization: Bearer <jwt_token>
   "success": true,
   "data": {
     "properties": [{ "id": 1, "name": "Residential" }],
-    "packages": [{ "id": 1, "name": "Standard Coating", "warranty": 5 }],
-    "employees": [{ "id": 102, "name": "Karthik Raja" }]
+    "packages": [
+      {
+        "package": "Economic",
+        "data": [
+          {
+            "id": 1,
+            "packageId": 1,
+            "packageName": "Standard Coating",
+            "warranty": null,
+            "services": [
+              {
+                "serviceId": 1,
+                "serviceName": "Terrace Waterproofing",
+                "tierType": "MultiTier",
+                "subtitles": [
+                  { "serviceDetailId": 1, "subtitle": "Default", "description": "...", "rate": 100, "warranty": "5 Years" }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      { "package": "Premium", "data": [ "..." ] },
+      { "package": "Elite", "data": [ "..." ] },
+      { "package": "None", "data": [ "..." ] }
+    ]
   }
 }
 ```
 
+> [!IMPORTANT]
+> **Tier spelling**: the API always uses **"Economic"** (package rows stored as `"Economy"` are normalised).
+
 ---
 
 #### 7. Quotation Edit View (`:id/edit-view`)
-
-Returns the quotation draft data together with available dropdown choices for on-the-fly modifications:
 
 ```http
 GET /api/v2/quotations/:id/edit-view
@@ -949,58 +870,23 @@ Authorization: Bearer <jwt_token>
   "statusCode": 200,
   "success": true,
   "data": {
-    "quotation": { "id": 75, "advance": 10000, "services": [ ... ] },
-    "properties": [ ... ],
-    "packages": [ ... ]
+    "quotation": { "...": "quotation object (§4)" },
+    "properties": [{ "id": 1, "name": "Residential" }],
+    "packages": [ { "package": "Economic", "data": [ "..." ] } ]
   }
 }
 ```
 
 ---
 
-#### 8. List Quotations by Client / Appointment
+#### 8. Quotations by Client / Appointment
 
 ```http
 GET /api/v2/quotations/client/:appointmentId
 Authorization: Bearer <jwt_token>
 ```
 
-##### Response (`200 OK`)
-
-```json
-{
-  "statusCode": 200,
-  "success": true,
-  "quotations": [{ "id": 75, "grandTotal": 62720, "isConfirmed": true }]
-}
-```
-
----
-
-#### 9. Update Quotation (Draft & Unlocked Quotations)
-
-> [!NOTE]
-> - **Admin**: Can edit quotations at any time, including after payments have started (e.g. after unlocking quotation to adjust terms, pricing, or scope).
-> - **Field Employee**: Can edit assigned quotations as long as they are not locked (`isConfirmed === false`). Once confirmed, only an Admin can unlock the quotation.
-
-> [!TIP]
-> **Automatic Payment & Milestone Synchronization on Quotation Edit**:
-> When a quotation is updated (such as changing service areas, adding/modifying services, updating discount, or adjusting milestone percentages):
-> 1. Milestone amounts (`advance`, `mid_cost`, `final_amount`) on `quotations` are automatically recomputed against the new total using percentage splits (`advance_percentage`, `mid_percentage`, `final_percentage`).
-> 2. `quotation_services` are updated in-place when service payments exist in `quotation_service_payments`, preventing cascade deletion of recorded payment proofs.
-> 3. Existing payment records in `quotation_payments` automatically recalculate `balance_before` and `balance_after` to preserve an unbroken audit chain matching the new quotation grand total.
-> 4. `GET /api/v2/quotation-payments/:id` immediately reflects the updated pricing, paid total, and remaining balance.
-
-```http
-PUT /api/v2/quotations/:id
-Authorization: Bearer <jwt_token>
-Content-Type: application/json
-
-{
-  "advance": 12000,
-  "midCost": 18000
-}
-```
+Quotation summaries for an appointment, grouped by tier. `amount` is the quotation's `grandTotal`.
 
 ##### Response (`200 OK`)
 
@@ -1008,233 +894,214 @@ Content-Type: application/json
 {
   "statusCode": 200,
   "success": true,
-  "message": "Quotation updated successfully",
-  "data": { "id": 75, "advance": 12000 }
+  "data": {
+    "appointmentId": 691,
+    "packages": [
+      {
+        "packageId": 2,
+        "packages": "Premium",
+        "quotations": [
+          {
+            "quotationId": 1351,
+            "packageId": 2,
+            "packageName": "Pure Flexible Polyurethane coating",
+            "quotationTitle": "Pure Flexible Polyurethane coating",
+            "revisionNo": 1,
+            "amount": 56286,
+            "isConfirmed": false,
+            "quotationDate": "2026-09-29"
+          }
+        ]
+      }
+    ]
+  },
+  "appointmentId": 691,
+  "packages": [ "..." ],
+  "quotations": [ "...flat list of the summaries above..." ]
 }
 ```
 
 ---
 
-#### 10. Delete Quotation Draft
+#### 9. Confirm Quotation (`:id/confirm`)
 
-```http
-DELETE /api/v2/quotations/:id
-Authorization: Bearer <jwt_token>
-```
-
-##### Response (`200 OK`)
-
-```json
-{
-  "statusCode": 200,
-  "success": true,
-  "message": "Quotation deleted successfully",
-  "data": { "id": 75 }
-}
-```
-
----
-
-#### 11. Confirm Quotation (`:id/confirm`)
-
-Confirms a quotation draft and locks terms for billing. Enabled for both **Admin** and **Field Employee** (for their assigned visits).
+Enabled for **Admin** and **Field Employee** (their own quotations). Confirming **deletes the appointment's other
+unconfirmed quotations**.
 
 ```http
 POST /api/v2/quotations/:id/confirm
 Authorization: Bearer <jwt_token>
 Content-Type: application/json
 
-{
-  "isConfirmed": true
-}
+{ "isConfirmed": true }
 ```
 
-##### Response (`200 OK`)
-
-```json
-{
-  "statusCode": 200,
-  "success": true,
-  "message": "Quotation confirmed successfully",
-  "data": {
-    "id": 21,
-    "quotationDate": "2026-09-24",
-    "isConfirmed": true,
-    "customer": {
-      "name": "Blockchain Client",
-      "mobile": "9777766666",
-      "address": {
-        "doorNo": "12",
-        "streetName": "Cross Rd",
-        "area": "T Nagar",
-        "city": "Chennai",
-        "state": "TN",
-        "pincode": "600017"
-      }
-    },
-    "pricing": {
-      "subTotal": 708410008,
-      "withoutGst": {
-        "discount": { "percentage": 23, "amount": 162934302 },
-        "totalAmount": 545475706
-      },
-      "withGst": {
-        "discount": { "percentage": 23, "amount": 162934302 },
-        "gst": { "percentage": 18, "amount": 98185627 },
-        "totalAmount": 609054088
-      }
-    },
-    "grandTotal": 545475706
-  }
-}
-```
+Response `data` is the quotation object with `isConfirmed: true`. Only an Admin can send `isConfirmed: false`, and
+not after a payment exists.
 
 ---
 
-#### 12. Unlock Quotation (`:id/unlock`)
+#### 10. Unlock Quotation (`:id/unlock`)
 
-Unlocks a confirmed quotation so that it can be edited or deleted. Enabled **ONLY for Admin**.
-
-> **Note**: Enabled for Admin to unlock confirmed quotations even if payments have started, allowing revisions when necessary.
+**Admin only.** Sets `isConfirmed` back to `false` so the quotation can be edited. Response `data` is the quotation
+object.
 
 ```http
 POST /api/v2/quotations/:id/unlock
 Authorization: Bearer <admin_jwt_token>
 ```
 
-##### Response (`200 OK`)
+---
+
+#### 11. Delete Quotation
+
+```http
+DELETE /api/v2/quotations/:id
+Authorization: Bearer <jwt_token>
+```
+
+Not allowed once a payment exists (`403`). A field employee can only delete their own unconfirmed quotations.
 
 ```json
-{
-  "statusCode": 200,
-  "success": true,
-  "message": "Quotation unlocked successfully",
-  "data": { "id": 21, "isConfirmed": false }
-}
+{ "statusCode": 200, "success": true, "message": "Quotation deleted successfully", "data": { "id": 1351 } }
 ```
 
 ---
 
-#### 13. Add Service from Existing Master Data (`:id/services`)
+#### 12. Quotation Errors
 
-Appends an **existing master-data service** as an additional line item on a confirmed or draft quotation — **without going through the full `PUT` update flow**.
+All errors return `{ statusCode, success: false, message }`. Showing `message` as-is works for each.
 
-**Key differences from free-text additional services:**
-
-| | Free-Text Additional Service (`quotation-payment`) | **Add from Existing (this endpoint)** |
+| Status | Example `message` | When |
 |---|---|---|
-| **Title** | Manually typed | Auto-resolved from `services.name` |
-| **Stored in** | `quotation_additional_services` | `quotation_services` (same table as base services) |
-| **FK to services table** | None | Real `serviceId` FK |
-| **Subtitle / Description** | Manual | Auto-resolved from `service_details` |
-| **Pricing recalculated?** | Yes | Yes |
-| **Requires schema migration?** | — | No |
+| 400 | `isTaxCustomer is required (true or false)` | Missing or not a boolean. |
+| 400 | `quotationDate is required in YYYY-MM-DD format` | Missing or wrong format (`validTill` has the same rule). |
+| 400 | `services must have at least one line` | Empty `services`. |
+| 400 | `services[0].area must be a number greater than 0` | Invalid line values. |
+| 400 | `amount.grandTotal (56000) does not match the calculated grand total (56286)` | App totals differ; `details.expected` has the server's figures. |
+| 400 | `Service detail 11 (Test tier) belongs to a different package tier and cannot be added to this quotation` | Wrong tier. |
+| 400 | `Service line 2051 (Terrace Waterproofing) has payments and can't be removed from the quotation` | Update drops a paid line. |
+| 400 | `Quotation is locked because its final receipt has already been generated.` | Update after the receipt. |
+| 403 | `Quotation is confirmed and locked. Only an admin can unlock it.` | Field employee edits a confirmed quotation. |
+| 404 | `Appointment 999 not found` | Unknown `appointmentId`, `propertyId`, `packageId` or `employeeId`. |
 
-> [!NOTE]
-> Both endpoints are available simultaneously. Use **this endpoint** (`POST :id/services`) when the added scope belongs to an existing service category in the catalog. Use the free-text endpoint (`POST /api/v2/quotation-payment/:id/additional-service`) only for truly ad-hoc line items with no master-data equivalent.
+---
+
+### Proforma Invoice (Tax Customers Only)
+
+A proforma invoice is linked to a quotation and only exists for a **tax customer** (`isTaxCustomer: true`). A
+quotation has at most one. The frontend collects `poNumber`, `bankDetails` and `terms` and sends them in one
+request; the server generates the invoice.
+
+| Rule | |
+|---|---|
+| Who | Admins and master admins generate, change and delete it. A field employee can only **read** the invoice of their own quotations. |
+| `poNumber` | Optional: a string, or `null` / left out. It can be added later with `PATCH`. |
+| `bankDetails` | Required, and must be the **primary bank account**. |
+| `terms` | Required: the payment terms printed on the invoice. |
+| Non-tax customer | `400`: "A proforma invoice can only be raised for a tax customer…". |
+| Number | `PI-<financial year>-<sequence>`, for example `PI-26-27-0001`. |
+| Frozen copy | The quotation is recorded as it was when the invoice was generated, so the invoice does not change if the quotation does. To refresh it, delete the invoice and generate a new one. |
+
+The server does not email or message the customer; the response is the document to show or share.
+
+#### 1. Generate
 
 ```http
-POST /api/v2/quotations/:id/services
-Authorization: Bearer <jwt_token>
+POST /api/v2/quotations/:id/proforma-invoice
+Authorization: Bearer <admin_or_master_admin_jwt>
 Content-Type: application/json
 
 {
-  "serviceId": 3,
-  "serviceDetailId": 7,
-  "area": 450,
-  "rate": 120,
-  "description": "Additional waterproofing for terrace extension"
+  "poNumber": "PO-2026-0042",
+  "bankDetails": {
+    "id": 1,
+    "accountName": "Dr. Terrace Waterproofing",
+    "bankName": "HDFC Bank",
+    "accountNumber": "50200088991122",
+    "ifscCode": "HDFC0000084",
+    "branchName": "Nungambakkam Branch, Chennai"
+  },
+  "terms": "60% advance with the order, 30% on the mid stage and 10% on completion"
 }
 ```
 
-##### Request Body
+| Field | Rules |
+|---|---|
+| `poNumber` | Optional. Text up to 100 characters, or `null`. |
+| `bankDetails` | Required object. `accountName`, `bankName`, `accountNumber` and `ifscCode` are required; `branchName` and `id` are optional. The account number and IFSC code must match the primary bank account (case and spaces are ignored). Get it from the bank account details (the account with `isPrimary: true`). |
+| `terms` | Required text, up to 4000 characters. |
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `serviceId` | `number` | Yes | FK to `services.id` — must exist in master data |
-| `serviceDetailId` | `number` or `null` | Optional | FK to `service_details.id` — must belong to the given `serviceId` |
-| `area` | `number` | Yes | Square footage / area — must be > 0 |
-| `rate` | `number` | Yes | Rate per sqft — must be > 0 |
-| `description` | `string` | Optional | Override description; falls back to `service_details.description` |
-
-##### TypeScript Request Type
-
-```typescript
-// Defined in: src/v2/modules/quotation-payment/v2.quotation-payment.types.ts
-
-type V2AddAdditionalServiceFromExistingDto = {
-  /** FK → services.id (required) */
-  serviceId: number;
-  /** FK → service_details.id (optional) */
-  serviceDetailId?: number | null;
-  /** sqft / area — must be > 0 */
-  area: number;
-  /** price per sqft — must be > 0 */
-  rate: number;
-  /** override description; falls back to service_details.description if omitted */
-  description?: string;
-};
-```
-
-##### Response (`201 Created`)
+A `bankDetails` that is not the primary account returns `400` with the real primary account in
+`details.primaryBank`. If no account is marked primary, mark one first. The invoice stores and prints the primary
+account as it is recorded in the system.
 
 ```json
 {
   "statusCode": 201,
   "success": true,
-  "message": "Service added to quotation successfully",
+  "message": "Proforma invoice generated",
   "data": {
-    "service": {
-      "id": 99,
-      "quotationId": 75,
-      "serviceId": 3,
-      "serviceDetailId": 7,
-      "title": "Terrace Waterproofing",
-      "subtitle": "Standard",
-      "description": "Additional waterproofing for terrace extension",
-      "area": 450,
-      "rate": 120,
-      "amount": 54000,
-      "tierType": "SingleTier"
+    "id": 3,
+    "invoiceNumber": "PI-26-27-0003",
+    "invoiceDate": "2026-10-03",
+    "quotationId": 1351,
+    "poNumber": "PO-2026-0042",
+    "bankDetails": {
+      "id": 1,
+      "accountName": "Dr. Terrace Waterproofing",
+      "bankName": "HDFC Bank",
+      "accountNumber": "50200088991122",
+      "ifscCode": "HDFC0000084",
+      "branchName": "Nungambakkam Branch, Chennai"
     },
-    "quotation": {
-      "id": 75,
-      "revision": 3,
-      "pricing": {
-        "subTotal": 68000,
-        "withGst": { "totalAmount": 74920 },
-        "withoutGst": { "totalAmount": 62920 }
-      },
-      "payment": {
-        "withGst": {
-          "advance": { "percentage": 60, "amount": 44952 },
-          "mid": { "percentage": 30, "amount": 22476 },
-          "final": { "percentage": 10, "amount": 7492 }
-        }
-      }
-    }
+    "terms": "60% advance with the order, 30% on the mid stage and 10% on completion",
+    "quotation": { "...": "quotation object (§4): customer, services, pricing with GST" },
+    "quotationTerms": "<p>1. 50% Advance with Purchase Order, ...</p>",
+    "companyContact": { "officeAddress": "...", "mobileNumber": "...", "landlineNumber": "...", "emailAddress": "..." },
+    "createdBy": "Admin (Suresh)",
+    "createdAt": "2026-10-03T06:10:00.000Z",
+    "updatedAt": "2026-10-03T06:10:00.000Z"
   }
 }
 ```
 
-> [!IMPORTANT]
-> - Quotation `revision` is automatically incremented.
-> - `advance`, `mid_cost`, `final_amount` on the quotation are immediately recalculated using the stored percentage splits.
-> - If there are existing `quotation_payments`, their `balance_before` and `balance_after` audit chain is automatically updated to reflect the new grand total.
-> - The newly inserted service appears in `GET /api/v2/quotations/:id` under both `services` (as `isAdditional: false`) and `baseServices`.
+`409` if the quotation already has an invoice.
 
-> [!TIP]
-> **Field Employee access**: Field Employees can use this endpoint for their assigned quotations, subject to the same ownership check as all other write operations.
+#### 2. Change later
 
-##### Error Responses
+```http
+PATCH /api/v2/quotations/:id/proforma-invoice
+Content-Type: application/json
 
-| Status | Scenario |
+{ "poNumber": "PO-2026-0042" }
+```
+
+Any of `poNumber`, `bankDetails` and `terms` (same rules as above); only the fields you send change. `poNumber: null`
+clears it. Returns the same object as generate.
+
+#### 3. Get
+
+```http
+GET /api/v2/quotations/:id/proforma-invoice
+```
+
+`404` if there is none. Returns the same object as generate.
+
+#### 4. Delete
+
+```http
+DELETE /api/v2/quotations/:id/proforma-invoice
+```
+
+Removes the invoice so a fresh one can be generated.
+
+| Status | When |
 |---|---|
-| `400 Bad Request` | `area` or `rate` is missing or zero |
-| `404 Not Found` | `serviceId` does not exist in the `services` master table |
-| `404 Not Found` | `serviceDetailId` does not exist or does not belong to `serviceId` |
-| `404 Not Found` | Quotation ID not found |
-| `403 Forbidden` | Field Employee attempting to access another technician's quotation |
+| 400 | Non-tax customer; missing or invalid `bankDetails` / `terms` / `poNumber`; `bankDetails` is not the primary account; no primary account set |
+| 403 | A field employee tries to generate, change or delete |
+| 404 | Unknown quotation; no invoice yet; a field employee asks about someone else's quotation |
+| 409 | An invoice already exists for this quotation |
 
 ---
 
@@ -1242,25 +1109,35 @@ type V2AddAdditionalServiceFromExistingDto = {
 
 A dedicated, streamlined quotation payment system (`src/v2/modules/quotation-payment/`) that simplifies client transactions:
 - **No Milestone / Stage Restrictions**: No forced "Advance 60%" or "Mid 30%" classification — payments can be any amount.
-- **Progressive Without-GST Base**: Intermediate payments accumulate against `pricing.withoutGstTotal`.
-- **Final Settlement GST Choice**: When the customer makes the final payment, the admin/client specifies `applyGst: boolean`:
-  - `applyGst = false` $\rightarrow$ Settles remaining `withoutGstBalance`. Quotation remains without GST (`is_gst = false, gst_decision = 'OPTED_OUT'`).
-  - `applyGst = true` $\rightarrow$ Settles remaining `withGstBalance`. Full 18% GST is applied to the quotation (`is_gst = true, gst_percentage = 18.00, gst_decision = 'APPLIED'`).
+- **Payments Against The Grand Total**: Every payment is checked against the quotation's
+  `pricing.grandTotal` (see the pricing rules under **Quotations**). `progress.balanceAmount = grandTotal - totalPaid`
+  is the balance to show and to pay against.
+- **Tax Invoice Or Cash Bill**: The quotation's `isTaxCustomer` decides the receipt: `true` gives a **Tax Invoice**
+  (`DRT ATEG …`, `gstDecision: "APPLIED"`, `invoiceType: "TAX_INVOICE"`); `false` gives a **Cash Bill** (`DRT…`,
+  `"OPTED_OUT"`, `"CASH_BILL"`). GST itself is charged whenever the quotation has a GST percentage.
+- **Changing It**: Edit the quotation (`PUT /api/v2/quotations/:id`) or use `PATCH /api/v2/quotations/:id/pricing-config`
+  (`isTaxCustomer`, `withGst`, `gstPercentage`, `discountPercentage`). Once a receipt has been issued, its tax
+  decision is fixed.
 - **Whole-Number Integers**: All monetary calculations, subtotals, taxes, and balances are rounded whole numbers (`Math.round(...)`).
 - **Sequential Verification Guard**: Next payment cannot be recorded until previous payments are verified by Admin (`isVerified = true`).
 - **Audit History Chain**: Links to `previousPaymentId`, tracking `balanceBefore` and `balanceAfter`.
 
 ```mermaid
 flowchart TD
-    A["Quotation Confirmed\n(withoutGstTotal: 545,475,706\nwithGstTotal: 609,054,088)"] --> B["Payment #1 (UPI: 200,000,000)\nBalance: 345,475,706"]
-    B --> C["Admin Verifies Payment #1\n(isVerified: true)"]
-    C --> D["Payment #2 (ACCOUNT: 127,285,424)\nBalance: 218,190,282"]
-    D --> E["Admin Verifies Payment #2\n(isVerified: true)"]
-    E --> F{"Final Settlement Payment\nDecide applyGst"}
-    F -- "applyGst = false" --> G["Pay remaining without-GST balance:\n218,190,282\n(Quotation stays WITHOUT_GST, gst_decision='OPTED_OUT')"]
-    F -- "applyGst = true" --> H["Pay remaining with-GST balance:\n281,768,664\n(Quotation activates 18% GST, gst_decision='APPLIED')"]
-    G --> I["Status: FULLY_PAID\nUnbroken Audit Chain Maintained"]
-    H --> I
+    Q["Quotation pricing
+grandTotal: 56,286
+isTaxCustomer: true, invoiceType: TAX_INVOICE"] --> B["Payment #1 (UPI: 30,000)
+Balance: 26,286"]
+    B --> C["Admin Verifies Payment #1
+(isVerified: true)"]
+    C --> D["Payment #2 (ACCOUNT: 20,000)
+Balance: 6,286"]
+    D --> E["Admin Verifies Payment #2
+(isVerified: true)"]
+    E --> F["Payment #3 (ACCOUNT: 6,286)
+Balance: 0"]
+    F --> I["Status: FULLY_PAID
+Receipt: Tax Invoice (isTaxCustomer: true)"]
 ```
 
 ---
@@ -1285,31 +1162,38 @@ Authorization: Bearer <jwt_token>
     "propertyName": "House",
     "clientName": "Blockchain Client",
     "mobileNumber": "9777766666",
-    "gstDecision": "PENDING",
-    "customerGstNumber": null,
+    "gstDecision": "APPLIED",
+    "isTaxCustomer": true,
+    "invoiceType": "TAX_INVOICE",
+    "customerGstNumber": "33AAAAA0000A1Z5",
     "pricing": {
-      "subTotal": 708410008,
-      "withoutGstTotal": 545475706,
-      "withGstTotal": 609054088
+      "subTotal": 53000,
+      "discount": { "percentage": 10, "amountForTax": 5300, "amountForNonTax": 6254 },
+      "gst": {
+        "percentage": 18,
+        "amount": 8586,
+        "cgst": { "percentage": 9, "amount": 4293 },
+        "sgst": { "percentage": 9, "amount": 4293 }
+      },
+      "grandTotal": 56286
     },
     "progress": {
-      "totalPaid": 327285424,
-      "withGstBalance": 281768664,
-      "withoutGstBalance": 218190282,
+      "totalPaid": 50000,
+      "balanceAmount": 6286,
       "paymentStatus": "PARTIALLY_PAID"
     },
     "history": [
       {
         "id": 101,
-        "amount": 200000000,
+        "amount": 30000,
         "paymentMethod": "UPI",
         "account": null,
         "upiId": "client@okhdfcbank",
         "voucher": null,
         "referenceNumber": "UPI12345678",
         "paymentDate": "2026-09-24",
-        "balanceBefore": 545475706,
-        "balanceAfter": 345475706,
+        "balanceBefore": 56286,
+        "balanceAfter": 26286,
         "proofImage": "/uploads/payments/proof-1.jpg",
         "notes": "Token payment",
         "isVerified": true,
@@ -1317,13 +1201,11 @@ Authorization: Bearer <jwt_token>
         "verifiedAt": "2026-09-24T05:00:00.000Z",
         "verificationNotes": "Verified in HDFC bank",
         "receivedBy": "Field Employee (John)",
-        "previousPaymentId": null,
-        "isFinalPayment": false,
-        "applyGst": null
+        "previousPaymentId": null
       },
       {
         "id": 102,
-        "amount": 127285424,
+        "amount": 20000,
         "paymentMethod": "ACCOUNT",
         "account": {
           "id": 1,
@@ -1337,8 +1219,8 @@ Authorization: Bearer <jwt_token>
         "voucher": null,
         "referenceNumber": "NEFT987654321",
         "paymentDate": "2026-09-26",
-        "balanceBefore": 345475706,
-        "balanceAfter": 218190282,
+        "balanceBefore": 26286,
+        "balanceAfter": 6286,
         "proofImage": "/uploads/payments/neft.pdf",
         "notes": null,
         "isVerified": true,
@@ -1346,9 +1228,7 @@ Authorization: Bearer <jwt_token>
         "verifiedAt": "2026-09-26T06:30:00.000Z",
         "verificationNotes": null,
         "receivedBy": "Admin (System Administrator)",
-        "previousPaymentId": 101,
-        "isFinalPayment": false,
-        "applyGst": null
+        "previousPaymentId": 101
       }
     ]
   }
@@ -1357,7 +1237,9 @@ Authorization: Bearer <jwt_token>
 
 ---
 
-#### 2. Record Intermediate Payment (Deducted from Without-GST total)
+#### 2. Record Intermediate Payment (Checked Against The Grand Total)
+
+The amount must not exceed `progress.balanceAmount` (`grandTotal - totalPaid`).
 
 ```http
 POST /api/v2/quotation-payments/:id
@@ -1365,7 +1247,7 @@ Authorization: Bearer <jwt_token>
 Content-Type: application/json
 
 {
-  "amount": 200000000,
+  "amount": 30000,
   "paymentMethod": "UPI",
   "upiId": "client@okhdfcbank",
   "referenceNumber": "UPI12345678",
@@ -1385,15 +1267,14 @@ Content-Type: application/json
   "data": {
     "payment": {
       "id": 101,
-      "amount": 200000000,
+      "amount": 30000,
       "paymentMethod": "UPI",
       "account": null,
       "upiId": "client@okhdfcbank",
-      "balanceBefore": 545475706,
-      "balanceAfter": 345475706,
+      "balanceBefore": 56286,
+      "balanceAfter": 26286,
       "previousPaymentId": null,
-      "isVerified": false,
-      "isFinalPayment": false
+      "isVerified": false
     },
     "summary": { ... }
   }
@@ -1437,66 +1318,22 @@ Content-Type: application/json
 
 ---
 
-#### 4. Final Settlement Payment (Decide GST)
+#### 4. Settling The Balance
 
-Settles the quotation balance. Requires `applyGst: boolean`.
+There is no separate final-payment endpoint: `POST /api/v2/quotation-payments/:id/final` (and its
+`/quotations/:id/quotation-payments/final` and `/quotations/:id/payment-plan/final` aliases) has been removed and
+returns `404`.
 
-```http
-POST /api/v2/quotation-payments/:id/final
-Authorization: Bearer <jwt_token>
-Content-Type: application/json
-
-{
-  "amount": 281768664,
-  "paymentMethod": "ACCOUNT",
-  "accountId": 1,
-  "applyGst": true,
-  "customerGstNumber": "33AAAAA0000A1Z5",
-  "referenceNumber": "FINAL-NEFT-999",
-  "paymentDate": "2026-09-28",
-  "notes": "Final settlement with 18% GST applied"
-}
-```
-
-- When `applyGst: false` $\to$ Settle remaining `withoutGstBalance` (e.g. `218190282`). Quotation remains without GST (`gst_decision: 'OPTED_OUT'`).
-- When `applyGst: true` $\to$ Settle remaining `withGstBalance` (e.g. `281768664`). Quotation converts to 18% GST (`gst_decision: 'APPLIED'`, `is_gst: true`).
-
-##### Response (`201 Created`)
-
-```json
-{
-  "statusCode": 201,
-  "success": true,
-  "message": "Final payment settled successfully (GST: APPLIED)",
-  "data": {
-    "payment": {
-      "id": 103,
-      "amount": 281768664,
-      "paymentMethod": "ACCOUNT",
-      "balanceBefore": 281768664,
-      "balanceAfter": 0,
-      "isFinalPayment": true,
-      "applyGst": true
-    },
-    "summary": {
-      "gstDecision": "APPLIED",
-      "customerGstNumber": "33AAAAA0000A1Z5",
-      "progress": {
-        "totalPaid": 609054088,
-        "withGstBalance": 0,
-        "withoutGstBalance": 0,
-        "paymentStatus": "FULLY_PAID"
-      }
-    }
-  }
-}
-```
+- **Last payment:** record it like any other payment (§2) for the remaining `progress.balanceAmount`.
+- **After Admin verifies it:** `paymentStatus` becomes `FULLY_PAID` and the receipt can be generated (§8).
+- **Receipt type** follows the quotation's `isTaxCustomer`: tax invoice or cash bill.
+- **Customer GSTIN:** set it on the quotation, or send `customerGstNumber` when generating the receipt.
 
 ---
 
 #### 5. Rollback / Delete Latest Payment (Admin Only)
 
-Deletes the latest payment in the chain and restores quotation balance. If a final payment is deleted, `gst_decision` reverts back to `PENDING`.
+Deletes the latest payment in the chain and restores the balance. The quotation's `isTaxCustomer` is not changed.
 
 ```http
 DELETE /api/v2/quotation-payments/:id/:paymentId
@@ -1513,91 +1350,13 @@ Authorization: Bearer <admin_jwt_token>
 }
 ```
 
-#### 6. Add Additional Service (`:id/additional-services`)
-
-Adds an on-site variation/additional service directly to a quotation and automatically recalculates and updates the quotation's totals (`advance`, `mid_cost`, `final_amount`, `revision`, `updated_by`). The payment summary immediately reflects the increased `subTotal`, `withoutGstTotal`, and `withGstTotal`.
-
-* **Role**: Admin, Field Employee
-* **Guard**: Quotation must be confirmed. All previous payments must be verified by Admin.
-
-```http
-POST /api/v2/quotation-payments/:id/additional-services
-Authorization: Bearer <jwt_token>
-Content-Type: application/json
-```
-*Aliases: `POST /api/v2/quotations/:id/quotation-payments/additional-services`*
-
-##### Request Body Fields & Validation Rules
-
-| Field | Type | Validation / Requirement | Description |
-| :--- | :--- | :--- | :--- |
-| **`title`** | `string` | **Required**, non-empty string | Name of the additional service (e.g. `"Extra Balcony Waterproofing"`) |
-| **`totalPrice`** | `number` | **Conditional** (positive number $> 0$) | Total price in ₹. Auto-calculated as `sqft * rate` if omitted |
-| **`sqft`** | `number` | **Optional** (non-negative $\ge 0$) | Area in square feet. Defaults to `0` |
-| **`rate`** | `number` | **Optional** (non-negative $\ge 0$) | Rate per sqft in ₹. Defaults to `0` |
-| **`warranty`** | `string` | **Optional** | Warranty period (e.g. `"2 Years"`). Defaults to `"0"` |
-| **`notes`** | `string` | **Optional** (can be omitted / `null`) | Any extra remarks or on-site details. Defaults to `null` |
-
-> [!NOTE]
-> **Notes is 100% Optional**: The form does NOT require `notes`. Omitting `notes` or sending empty `""` / `null` is completely valid.
-> **Price Calculation**: You can either send `totalPrice` directly, or send `sqft` and `rate` (backend computes `totalPrice = sqft * rate`).
-
-##### Example Request: Full Payload
-```json
-{
-  "title": "Extra Balcony Waterproofing",
-  "sqft": 100,
-  "rate": 50,
-  "totalPrice": 5000,
-  "warranty": "2 Years",
-  "notes": "Variation added on-site"
-}
-```
-
-##### Example Request: Minimal Payload (Without `notes`)
-```json
-{
-  "title": "Extra Balcony Waterproofing",
-  "sqft": 100,
-  "rate": 50
-}
-```
-
-##### Response (`201 Created`)
-
-```json
-{
-  "statusCode": 201,
-  "success": true,
-  "message": "Additional service added and quotation updated successfully",
-  "data": {
-    "additionalService": {
-      "id": 1,
-      "quotationId": 265,
-      "title": "Extra Balcony Waterproofing",
-      "sqft": 100,
-      "rate": 50,
-      "totalPrice": 5000,
-      "warranty": "2 Years",
-      "notes": null,
-      "addedBy": "Admin (System Administrator)",
-      "createdAt": "2026-09-25T13:14:00.000Z"
-    },
-    "quotation": { /* complete updated quotation with incremented revision */ },
-    "summary": { /* updated payment summary with recalculated pricing */ }
-  }
-}
-```
-
----
-
-#### 7. Get Payment Verify View (`:id/:paymentId/verify-view`)
+#### 6. Get Payment Verify View (`:id/:paymentId/verify-view`)
 
 Retrieves the complete verification dossier for a specific payment, combining:
-- **Full Payment Details**: `amount`, `paymentMethod`, `account` (bank details), `upiId`, `voucher`, `referenceNumber`, `paymentDate`, `createdAt`, `notes`, `receivedBy`, `balanceBefore`, `balanceAfter`, `isFinalPayment`, `applyGst`, `previousPaymentId`.
+- **Full Payment Details**: `amount`, `paymentMethod`, `account` (bank details), `upiId`, `voucher`, `referenceNumber`, `paymentDate`, `createdAt`, `notes`, `receivedBy`, `balanceBefore`, `balanceAfter`, `previousPaymentId`.
 - **Proof Inspection**: `proofImage`, `proofImageUrl` (fully qualified HTTP URL), `fileType` (`image/png`, `application/pdf`, etc.), and `hasProofImage`.
 - **Sequential Verification Guard**: `canVerify: boolean`, `blockingPaymentId: number | null` (indicating whether earlier payments in the chain block this payment from being verified).
-- **Quotation Financial Context**: `quotationId`, `quotationTitle`, `propertyName`, `clientName`, `mobileNumber`, `siteAddress`, `pricing` (`subTotal`, `withoutGstTotal`, `withGstTotal`), and `progress` (`totalPaid`, `withGstBalance`, `withoutGstBalance`, `paymentStatus`).
+- **Quotation Financial Context**: `quotationId`, `quotationTitle`, `propertyName`, `clientName`, `mobileNumber`, `siteAddress`, `pricing` (the quotation pricing: `subTotal`, `discount`, `gst`, `grandTotal`), and `progress` (`totalPaid`, `balanceAmount`, `paymentStatus`).
 - **Data Shape**: Returns all payment properties at root level, plus nested `proof`, `verification`, `quotation`, and `payment` objects for 100% frontend compatibility.
 
 * **Roles**: Admin, Field Employee
@@ -1635,8 +1394,6 @@ Authorization: Bearer <jwt_token>
     "createdAt": "2026-09-24T10:00:00.000Z",
     "balanceBefore": 50000,
     "balanceAfter": 45000,
-    "isFinalPayment": false,
-    "applyGst": null,
     "previousPaymentId": null,
     "proofImage": "/static/payments/proof-101.png",
     "proofImageUrl": "http://api.drterrace.com/static/payments/proof-101.png",
@@ -1664,17 +1421,22 @@ Authorization: Bearer <jwt_token>
       "clientMobile": "8939497978",
       "siteAddress": "Door 12, Main Street, Anna Nagar, Chennai, Tamil Nadu, 600040",
       "isConfirmed": true,
-      "gstDecision": "PENDING",
-      "customerGstNumber": null,
+      "gstDecision": "APPLIED",
+      "customerGstNumber": "33AAAAA0000A1Z5",
       "pricing": {
         "subTotal": 50000,
-        "withoutGstTotal": 50000,
-        "withGstTotal": 59000
+        "discount": null,
+        "gst": {
+          "percentage": 18,
+          "amount": 9000,
+          "cgst": { "percentage": 9, "amount": 4500 },
+          "sgst": { "percentage": 9, "amount": 4500 }
+        },
+        "grandTotal": 59000
       },
       "progress": {
         "totalPaid": 5000,
-        "withGstBalance": 54000,
-        "withoutGstBalance": 45000,
+        "balanceAmount": 54000,
         "paymentStatus": "PARTIALLY_PAID"
       },
       "totalWithGst": 59000,
@@ -1700,15 +1462,13 @@ Authorization: Bearer <jwt_token>
       "verifiedAt": null,
       "verificationNotes": null,
       "receivedBy": "Field Employee (John)",
-      "previousPaymentId": null,
-      "isFinalPayment": false,
-      "applyGst": null
+      "previousPaymentId": null
     }
   }
 }
 ```
 
-#### 8. Generate & Show Official Final Receipt (Full Receipt View)
+#### 7. Generate & Show Official Final Receipt (Full Receipt View)
 
 Directly view or generate the official final receipt within the `quotation-payments` workflow.
 Once the quotation is fully settled (`progress.paymentStatus === "FULLY_PAID"`) and all payments are verified by Admin, this endpoint compiles and returns the full official receipt (including assigned sequential `receiptNumber`, itemized base and variation services, tax calculations, customer address, and company details) and locks the quotation against further edits.
@@ -1751,8 +1511,7 @@ You can optionally provide a customer GST Number:
     "isReceiptGenerated": true,
     "isReceiptLocked": true,
     "receiptGeneratedAt": "2026-09-25T12:00:00.000Z",
-    "originalTotalPrice": 20000,
-    "additionalAmount": 5000,
+    "originalTotalPrice": 25000,
     "grossSubtotal": 25000,
     "discountPercentage": 0,
     "discountAmount": 0,
@@ -1776,16 +1535,14 @@ You can optionally provide a customer GST Number:
         "sqft": 100,
         "rate": 100,
         "totalPrice": 10000,
-        "isAdditional": false,
         "warranty": "5 Years"
       },
       {
         "id": 2,
-        "title": "Extra Balcony Waterproofing",
+        "title": "Balcony Waterproofing",
         "sqft": 100,
-        "rate": 50,
-        "totalPrice": 5000,
-        "isAdditional": true,
+        "rate": 150,
+        "totalPrice": 15000,
         "warranty": "2 Years"
       }
     ],
@@ -1821,27 +1578,28 @@ You can optionally provide a customer GST Number:
 
 ---
 
-#### 9. Post-Sale Warranty Integration for Quotation Payments
+#### 8. Post-Sale Warranty Integration for Quotation Payments
 
-The new `quotation-payments` architecture is 100% integrated with the Warranty system. Once a quotation is fully paid and verified, clients and field employees can configure and generate official warranty certificates directly using the `/quotation-payments/:id/warranty*` routes.
+The new `quotation-payments` architecture is 100% integrated with the Warranty system. Once a quotation is fully paid and verified, clients and field employees can configure and generate official warranty certificates directly using the `/quotation-payments/:id/warranty*` routes. A generated warranty must then be **verified by the master admin** before office employees and field employees can view or send it (see [Warranty (Unified)](#warranty-unified)).
 
 ##### Warranty Eligibility Criteria
 1. **Fully Paid**: `progress.paymentStatus === "FULLY_PAID"` (all balances cleared either with or without GST).
 2. **All Payments Verified**: Every single payment in the quotation's audit chain has `isVerified: true` (Admin approval).
 3. **Automatic Official Receipt Locking**: If a receipt number has not yet been assigned, configuring or generating the warranty automatically assigns the next official sequential receipt number (e.g. `DRT502` or `DRT ATEG 016/26-27`) and permanently locks it on the quotation (`is_receipt_generated = true, is_receipt_locked = true`).
-4. **Comprehensive Service Scope**: Available services include both original quotation services and all on-site variation services added via `POST /api/v2/quotation-payments/:id/additional-services`.
+4. **Service Scope**: Available services are the quotation's own service lines.
 
 ##### Endpoints Summary
 
 | Method | Endpoint | Description | Roles |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/v2/quotation-payments/:id/warranty-eligibility` | Checks if quotation is eligible to configure warranty | Admin, Field Employee |
-| `GET` | `/api/v2/quotation-payments/:id/warranty-config` | Fetches existing config, or available base + additional services | Admin, Field Employee |
+| `GET` | `/api/v2/quotation-payments/:id/warranty-config` | Fetches existing config, or the quotation's available services | Admin, Field Employee |
 | `POST` | `/api/v2/quotation-payments/:id/warranty-config` | Creates warranty duration configuration per service | Admin, Field Employee |
 | `PATCH` | `/api/v2/quotation-payments/:id/warranty-config` | Updates warranty configuration (before warranty generation) | Admin, Field Employee |
 | `POST` | `/api/v2/quotation-payments/:id/warranty` | Generates final warranty certificate (locks config) | Admin, Field Employee |
-| `GET` | `/api/v2/quotation-payments/:id/warranty` | Retrieves generated warranty certificate with all items | Admin, Field Employee |
-| `DELETE` | `/api/v2/quotation-payments/:id/warranty` | Deletes warranty within 3-day grace window (unlocks config) | Admin Only |
+| `GET` | `/api/v2/quotation-payments/:id/warranty` | Retrieves the generated warranty certificate. Until it is verified, everyone except the master admin gets it **without `items`** (see Warranty (Unified) #6) | Admin, Field Employee |
+| `POST` | `/api/v2/quotation-payments/:id/warranty/verify` | Verifies the warranty so office employees and field employees can view and send it | Master Admin Only |
+| `DELETE` | `/api/v2/quotation-payments/:id/warranty` | Deletes the warranty (unlocks config). A verified warranty can only be deleted by the master admin | Admin Only (Master Admin once verified) |
 
 *(Note: Standard `/api/v2/quotations/:id/warranty*` aliases are also fully supported).*
 
@@ -1849,7 +1607,7 @@ The new `quotation-payments` architecture is 100% integrated with the Warranty s
 
 ### Payments & Blockchain Ledger (Unified)
 
-Dr. Terrace API v2 features an immutable, cryptographic pointer-linked payment ledger. Every payment recorded against a quotation—whether for a base scope service or an on-site variation work order—links directly to the immediately preceding payment block via `previousPaymentId`, anchoring to a Genesis block (`null`) created upon quotation confirmation.
+Dr. Terrace API v2 features an immutable, cryptographic pointer-linked payment ledger. Every payment recorded against a quotation links directly to the immediately preceding payment block via `previousPaymentId`, anchoring to a Genesis block (`null`) created upon quotation confirmation.
 
 ```mermaid
 flowchart LR
@@ -1864,20 +1622,14 @@ flowchart LR
         P3["Payment #3 (ACCOUNT)<br/>id: <b>uuid-3</b><br/>prev: <b>uuid-2</b><br/>amt: ₹10,000<br/><b>⏳ PENDING</b>"]
     end
 
-    subgraph ADD1 ["Additional Service: Parapet Wall (₹10k)"]
-        P4["Payment #4 (UPI)<br/>id: <b>uuid-4</b><br/>prev: <b>uuid-3</b><br/>amt: ₹5,000<br/><b>⏳ PENDING</b>"]
-    end
-
     GENESIS -.-> P1
     P1 --> P2
     P2 --> P3
-    P3 --> P4
 
     style GENESIS fill:#f3e8ff,stroke:#7e22ce,stroke-width:2px
     style P1 fill:#dcfce7,stroke:#15803d,stroke-width:2px
     style P2 fill:#dcfce7,stroke:#15803d,stroke-width:2px
     style P3 fill:#fef3c7,stroke:#b45309,stroke-width:2px
-    style P4 fill:#e0f2fe,stroke:#0369a1,stroke-width:2px
 ```
 
 #### TypeScript Types & Models
@@ -1964,30 +1716,29 @@ type PaymentState = {
   title: string;
   originalTotalPrice: number;      // Undiscounted sum of all base services
   totalPrice: number;              // Net target sum of all base services after discount
-  totalPaid: number;               // Sum of all payments (base + additional + GST)
+  totalPaid: number;               // Sum of all payments (services + GST)
   balanceAmount: number;           // max(0, totalWithGst - totalPaid)
-  services: Service[];             // Base quotation services (pro-rata discounted, can be paid in any order)
-  additionalPayment: Service | null; // On-site variation service (single object or null if none; auto-deleted if payments are empty)
-  additionalAmount: number;        // Auto-sum of additionalPayment.totalPrice (0 if null)
-  grossSubtotal: number;           // originalTotalPrice + additionalAmount
+  services: Service[];             // Quotation service lines (pro-rata discounted, can be paid in any order)
+  grossSubtotal: number;           // Same as originalTotalPrice (sum of the service lines before discount)
   withDiscount: boolean;           // Dynamic toggle: true if discount is active
   isDiscount: boolean;             // Boolean alias for withDiscount
   discountPercentage: number;      // Discount rate % (e.g. 10 for 10%)
-  discountAmount: number;          // Total quotation discount in ₹
-  subtotalAfterDiscount: number;   // grossSubtotal - discountAmount
-  withGst: boolean;                // Dynamic toggle: true if GST is active
+  discountAmount: number;          // Pre-tax discount spread across the lines (quotation pricing.discount.amountForTax)
+  subtotalAfterDiscount: number;   // grossSubtotal - discountAmount (sum of the line totals)
+  isTaxCustomer: boolean;          // Quotation tax state: tax invoice (true) vs cash bill (false)
+  pricing: QuotationPricing;       // The quotation pricing (subTotal, discount, gst, grandTotal): show these figures
+  withGst: boolean;                // GST is charged (the quotation has a GST percentage)
   isGst: boolean;                  // Boolean alias for withGst
-  isGstConfirmed: boolean;         // True once client confirms GST election (With GST / Without GST)
-  gstPercentage: number;           // GST rate % (default: 18.0)
-  gstAmount: number;               // GST computed on subtotalAfterDiscount (0 if withGst is false)
-  totalWithGst: number;            // Final payable total = subtotalAfterDiscount + gstAmount
+  isGstConfirmed: boolean;         // Always true (deprecated)
+  gstPercentage: number;           // GST rate % (0 when no GST)
+  gstAmount: number;               // GST line: totalWithGst - subtotalAfterDiscount (0 if withGst is false)
+  totalWithGst: number;            // pricing.grandTotal: what the customer pays in full
   gstPayment: GstPaymentDetails | null; // Dedicated GST clearance details; null when withGst is false
   gstPayments: PaymentChain[];     // Array of GST payment chains (empty array if withGst is false)
   canMakePayment: boolean;         // True only if confirmed, balance > 0, AND hasUnverifiedPayments === false
-  canAddAdditionalService: boolean; // True only if confirmed AND hasUnverifiedPayments === false
-  allServicesCompleted: boolean;   // True when all base and variation services are fully paid
-  canDecideGst: boolean;           // True only when all services completed AND no unverified payments
-  canGenerateReceipt: boolean;     // True only when fully paid, all verified, and GST decided
+  allServicesCompleted: boolean;   // True when every service line is fully paid
+  canDecideGst: boolean;           // Deprecated, ignore: there is no GST decision to make any more (it can still read true)
+  canGenerateReceipt: boolean;     // True only when fully paid, all verified, and all services completed
   isReceiptGenerated: boolean;     // True once final receipt is generated
   receiptNumber: string | null;    // Official receipt series e.g. "DRT ATEG 016/26-27" or "DRT500"
   receiptGeneratedAt: string | null; // ISO timestamp of receipt generation
@@ -2020,7 +1771,6 @@ type SinglePaymentVerifyStatus = {
 type SinglePaymentVerifyService = {
   serviceId: number;
   serviceTitle: string;
-  isAdditional: boolean;
   sqft?: number;
   rate?: number;
   originalPrice?: number;
@@ -2082,72 +1832,65 @@ type SinglePaymentVerifyViewResponse = {
 1. **Pre-Payment Confirmation Guard**: Payments can only be recorded for confirmed quotations (`isConfirmed: true`). Attempting to record payments on draft proposals returns `400 Bad Request`.
 2. **Post-Payment Immutability Guard**: Once payment recording begins on a quotation, it is permanently locked against modification (`PUT`), deletion (`DELETE`), or unlocking (`POST /unlock`), returning `403 Forbidden`.
 3. **Independent Base Service Payments (Any Order)**: Payments can be recorded against any base quotation service in any order. Preceding services are not required to be completed before making payments on subsequent services.
-4. **Option A — Pro-Rata Service Discount Distribution**:
-   - Each base service line item receives its proportional share of the quotation discount:
-     `service.discountAmount = round2((service.originalPrice * discountPercentage) / 100)`.
+4. **Pro-Rata Service Discount Distribution**:
+   - The quotation's pre-tax discount (`pricing.discount.amountForTax`) is spread across every line in
+     proportion to `originalPrice`, in whole rupees. The shares always add up to the discount exactly.
    - The service's net target payable is `service.totalPrice = service.originalPrice - service.discountAmount`.
    - A service marks as `COMPLETED` as soon as `paidAmount >= totalPrice`.
 5. **Dynamic GST & Discount Toggles**:
-   - Both GST (`withGst` / `isGst`) and Discount (`withDiscount` / `isDiscount`) can be enabled/disabled at quotation creation, during on-site visit via `PATCH /pricing-config`, or during final settlement.
+   - GST is charged when the quotation has a GST percentage; `isTaxCustomer` is the separate tax state (tax invoice vs cash bill, discount order). Both are set on the quotation and can be changed until the final receipt exists via `PATCH /pricing-config` (`withGst` / `gstPercentage` / `isTaxCustomer`). The tax state cannot be changed at final settlement.
+   - Discount (`withDiscount` / `isDiscount`) can be enabled/disabled at quotation creation or via `PATCH /pricing-config`.
    - When enabled, custom rates (`gstPercentage`, `discountPercentage`) can be specified dynamically.
 6. **Warranty Rules**:
    - `warranty: "5 Years"` $\to$ `warrantyYears: 5`, `isWarrantyApplicable: true`.
    - `warranty: "0"` or empty $\to$ `warrantyYears: 0`, `isWarrantyApplicable: false`.
-7. **Additional Variation Services**:
-   - Added directly on-site by field staff or admin via `POST /api/v2/quotations/:id/additional-services`.
-   - Automatically summed into `PaymentState.additionalAmount` and reflected in `totalWithGst`.
-8. **Deferred GST Lifecycle**:
-   - Customer final GST invoice election occurs at project completion via `POST /api/v2/quotations/:id/final-settlement` or `PATCH /pricing-config`.
-9. **Cryptographic Chain Linking**:
+7. **GST Follows The Quotation**:
+   - Whether the receipt is a tax invoice or a cash bill is known from the start: it is the quotation's `isTaxCustomer`. There is no end-of-project GST election.
+   - Totals follow the quotation pricing rules (see **Quotations**). The pre-tax discount is spread across every line, and the GST line is what the grand total adds on top.
+   - For a tax customer the GST line equals `pricing.gst.amount`. For a non-tax customer it also absorbs the difference between the two discounts (₹53,000, 10%, 18%: GST line 8,586, GST 9,540), so show GST from `pricing.gst` and use `gstPayment` as the amount to collect.
+   - `POST /api/v2/quotations/:id/final-settlement` settles the remaining balance. Its `withGst` field is optional and must match the quotation, otherwise the request fails with `400`.
+8. **Cryptographic Chain Linking**:
    - Every payment has a UUID primary key.
    - The first payment is the Genesis block (`previousPaymentId: null`).
-   - Every subsequent payment across base services or variation orders points strictly to the immediately preceding payment block.
-10. **Payment Proof Image Mandatory for All Payments**:
-    - Every payment recorded across the platform (base scope services, on-site variation work orders, GST clearance, or final settlement) **strictly requires a proof image** (`proofImage`).
+   - Every subsequent payment points strictly to the immediately preceding payment block.
+9. **Payment Proof Image Mandatory for All Payments**:
+    - Every payment recorded across the platform (service payments, GST clearance, or final settlement) **strictly requires a proof image** (`proofImage`).
     - Attempting to record any payment without a proof image or with an empty/null image returns `400 Bad Request`: `"Payment proof image is required"`.
     - **Direct file upload (`multipart/form-data`)**: Attach file with field name `proofImage` (or `proof`, `image`, `file`, `receipt`). Saved automatically to `static/payments/<uuid>.<ext>` and stored in PostgreSQL (`proof_image`).
     - **JSON payload (`application/json`)**: Pass `"proofImage": "/static/payments/custom_receipt.png"`.
     - Images are served statically from `/static/payments/*`.
-11. **Admin Payment Verification Guard (Mandatory)**:
+10. **Admin Payment Verification Guard (Mandatory)**:
     - Every payment recorded by field employees defaults to `isVerified: false`.
     - **All previous payments on a quotation must be verified by Admin before any new payment can be made.**
     - If any unverified payments exist, attempting to record a new payment is rejected (`400 Bad Request`: `"Cannot record new payment: Previous payment (${id}) is pending Admin verification. Admin must verify all previous payments before a new payment can be recorded."`).
     - In `PaymentState`, `canMakePayment` is calculated as `quote.isConfirmed && balanceAmount > 0 && !hasUnverifiedPayments`.
-    - In `PaymentState`, `canAddAdditionalService` is calculated as `quote.isConfirmed && !hasUnverifiedPayments`.
     - Only `Role.ADMIN` can verify payments via `POST /api/v2/quotations/:id/payments/:paymentId/verify` (`403 Forbidden` for field employees).
-12. **Condition 1 (No Additional Service without Previous Payment Verified)**:
-    - You cannot add an Additional Service / variation work order (`POST /api/v2/quotations/:id/additional-services`) if any previous payment is pending Admin verification.
-    - Returns `400 Bad Request`: `"Cannot add additional service: Previous payment (${id}) is pending Admin verification. Admin must verify all previous payments before an additional service can be added."`
-13. **Additional Service Payment**:
-    - Once an Additional Service is added (`POST /api/v2/quotations/:id/additional-services`), payments can be recorded on it at any time (`POST /api/v2/quotations/:id/additional-services/:serviceId/payments`), even while base quotation services are still in progress.
-14. **Tax Decision Gate (`canDecideGst`)**:
-    - The client only chooses between **With GST** and **Without GST** once all base and additional services are 100% completed and verified.
-    - `canDecideGst` is `true` only when `allServicesCompleted && !hasUnverifiedPayments`.
-    - Field employees cannot finalize the GST decision while any service remains incomplete.
-15. **Without GST vs With GST Settlement**:
-    - **Without GST (`withGst: false`)**: Balance is ₹0, status transitions to `FULLY_PAID`, and `canGenerateReceipt` unlocks immediately (`receiptStatus: "READY"`).
-    - **With GST (`withGst: true`)**: GST (e.g. 18%) is added to the quotation. Remaining balance equals `gstAmount`. Client/staff records the tax payment via `POST /api/v2/quotations/:id/gst-payment` or `POST /api/v2/quotations/:id/final-settlement`. Final receipt remains **locked** until Admin verifies and approves the tax payment (`receiptStatus: "AWAITING_GST_PAYMENT"` $\to$ `"AWAITING_VERIFICATION"` $\to$ `"READY"`).
-16. **Final Receipt Gatekeeper & Full Receipt Lock (`GET` / `POST /api/v2/quotations/:id/final-receipt`)**:
-    - The official final receipt can be generated **ONLY** when `balanceAmount === 0`, `hasUnverifiedPayments === false`, `isGstConfirmed === true`, and all services are completed.
+11. **No GST Decision Gate**:
+    - There is no With GST / Without GST choice at the end. `canDecideGst` is deprecated: ignore it (it can still read `true`).
+    - `gstStatus` and `receiptStatus` never return `AWAITING_GST_DECISION`.
+    - A final settlement or GST payment that contradicts the quotation's tax status returns `400`; change the status on the quotation (`PATCH /pricing-config`) instead.
+12. **Non-GST vs GST Customer Settlement**:
+    - **No GST (`withGst: false`)**: Balance is the service totals. Once they are paid and verified the status is `FULLY_PAID` and `canGenerateReceipt` unlocks (`receiptStatus: "READY"`).
+    - **With GST (`withGst: true`)**: GST (e.g. 18%) is part of the balance from the start. Once all services are completed the remaining balance equals `gstAmount`. Client/staff records the tax payment via `POST /api/v2/quotations/:id/gst-payment` or `POST /api/v2/quotations/:id/final-settlement`. Final receipt remains **locked** until Admin verifies and approves the tax payment (`receiptStatus: "AWAITING_GST_PAYMENT"` $\to$ `"AWAITING_VERIFICATION"` $\to$ `"READY"`) The receipt is a **tax invoice** (`DRT ATEG 017/26-27`) when `isTaxCustomer` is true and a **cash bill** (`DRT500`) otherwise, with or without GST.
+13. **Final Receipt Gatekeeper & Full Receipt Lock (`GET` / `POST /api/v2/quotations/:id/final-receipt`)**:
+    - The official final receipt can be generated **ONLY** when `balanceAmount === 0`, `hasUnverifiedPayments === false`, and all services are completed.
     - **Persistence & Lock**: Upon generation, `isReceiptGenerated` is set to `true`, and `receiptNumber` (e.g. `REC-120-20260918`) and `receiptGeneratedAt` are permanently stored in the database.
-    - **Full Receipt Lock**: The quotation is immediately locked (`isReceiptLocked: true`, `receiptStatus: "GENERATED"`). Any further attempts to record payments, add variation services, modify pricing, or alter settlement will be rejected with `400 Bad Request`.
+    - **Full Receipt Lock**: The quotation is immediately locked (`isReceiptLocked: true`, `receiptStatus: "GENERATED"`). Any further attempts to record payments, modify pricing, or alter settlement will be rejected with `400 Bad Request`.
     - **Admin Override**: Admin can unlock/lock via `PATCH /api/v2/quotations/:id/receipt-lock`.
-17. **Atomic Payment Failure Rollback ("If Any Payment Fails, Don't Save Any One")**:
-    - **Additional Services**: If creating an additional service with inline payment fails, or if recording payment on an additional variation service with zero recorded payments fails (e.g. invalid voucher, amount exceeds balance, unverified previous payment), the additional service is **immediately deleted and not saved**.
-    - **GST Final Settlement**: When confirming GST final settlement with an inline payment (`POST /api/v2/quotations/:id/final-settlement` with `amount` or `POST /api/v2/quotations/:id/gst-payment`), if the payment fails, the quotation's GST configuration is **rolled back** to its previous unconfirmed state (`is_gst_confirmed = false, is_gst = false`) and not saved.
-18. **Auto-Cleanup on Empty Payments ("If Payments Empty, Delete / Reset")**:
+14. **Atomic Payment Failure Rollback ("If Any Payment Fails, Don't Save Any One")**:
+    - **Final Settlement**: When a final settlement carries an inline payment (`POST /api/v2/quotations/:id/final-settlement` with `amount` or `POST /api/v2/quotations/:id/gst-payment`) and the payment fails, the other settings sent with it (GST percentage, discount, GST number) are **rolled back** and not saved. The quotation's `isTaxCustomer` is never changed by a settlement.
+15. **Auto-Cleanup on Empty Payments ("If Payments Empty, Delete / Reset")**:
     - When a payment is deleted via `DELETE /api/v2/quotations/:id/payments/:paymentId`:
-      - **Additional Services**: If payments on an additional variation service become empty (`0 remaining`), the additional service is **automatically deleted**.
-      - **GST Tax Clearance**: If all payments for GST are deleted (`0 remaining`), GST confirmation is **automatically reset** (`is_gst_confirmed = false, is_gst = false`), `withGst` becomes `false`, and `gstPayment` becomes `null` (GST does not apply).
-19. **Dedicated `gstPayment` Object & Nullability**:
-    - In `PaymentState`, when `withGst` is `false` (or unconfirmed), `gstPayment` is `null` and `gstAmount` is `0` (GST not applied).
+      - **GST Tax Clearance**: If all GST payments are deleted (`0 remaining`), the GST amount becomes unpaid again. GST stays on the quotation: `withGst` stays `true` and `gstPayment` is still populated with `paidAmount: 0`.
+16. **Dedicated `gstPayment` Object & Nullability**:
+    - In `PaymentState`, when `withGst` is `false` (no GST percentage on the quotation), `gstPayment` is `null` and `gstAmount` is `0`. All amounts are whole rupees.
     - Only when `withGst: true` is `gstPayment` populated with line-item details (`id: 0`, `title: "GST Tax Clearance"`, `originalPrice: gstAmount`, `paidAmount`, `balanceAmount`, `cgst`, `sgst`, `payments: []`, etc.).
 
 ---
 
 #### 1. Get Payment State / Pay-View
 
-Returns the complete unified `PaymentState`, including base quotation services, additional variation work orders, chained payments, warranties, and bank account options:
+Returns the complete unified `PaymentState`, including the quotation's service lines, chained payments, warranties, and bank account options:
 
 ```http
 GET /api/v2/quotations/:id/pay-view
@@ -2165,32 +1908,43 @@ Authorization: Bearer <jwt_token>
     "title": "Residential Terrace Waterproofing - #120",
     "originalTotalPrice": 35000,
     "totalPrice": 31500,
-    "totalPaid": 30000,
-    "balanceAmount": 13070,
-    "additionalAmount": 10000,
-    "grossSubtotal": 45000,
+    "totalPaid": 25000,
+    "balanceAmount": 12170,
+    "grossSubtotal": 35000,
     "withDiscount": true,
     "isDiscount": true,
     "discountPercentage": 10,
     "discountAmount": 3500,
-    "subtotalAfterDiscount": 41500,
+    "subtotalAfterDiscount": 31500,
+    "isTaxCustomer": true,
+    "pricing": {
+      "subTotal": 35000,
+      "discount": { "percentage": 10, "amountForTax": 3500, "amountForNonTax": 4130 },
+      "gst": {
+        "percentage": 18,
+        "amount": 5670,
+        "cgst": { "percentage": 9, "amount": 2835 },
+        "sgst": { "percentage": 9, "amount": 2835 }
+      },
+      "grandTotal": 37170
+    },
     "withGst": true,
     "isGst": true,
     "isGstConfirmed": true,
     "gstPercentage": 18,
-    "gstAmount": 7470,
-    "totalWithGst": 48970,
+    "gstAmount": 5670,
+    "totalWithGst": 37170,
     "canMakePayment": true,
-    "canAddAdditionalService": true,
-    "allServicesCompleted": true,
-    "canDecideGst": true,
+    "allServicesCompleted": false,
+    "canDecideGst": false,
     "canGenerateReceipt": false,
     "isReceiptGenerated": false,
     "receiptNumber": null,
     "receiptGeneratedAt": null,
     "isReceiptLocked": false,
-    "gstStatus": "WITH_GST_PAYMENT_PENDING",
-    "receiptStatus": "AWAITING_GST_PAYMENT",
+    "customerGstNumber": "33AAAAA0000A1Z5",
+    "gstStatus": "PENDING_SERVICES",
+    "receiptStatus": "SERVICES_PENDING",
     "hasUnverifiedPayments": false,
     "unverifiedPaymentCount": 0,
     "currentActiveServiceId": 2,
@@ -2266,43 +2020,20 @@ Authorization: Bearer <jwt_token>
         ]
       }
     ],
-    "additionalPayment": {
-      "id": 101,
-      "title": "Parapet Wall Crack Repair & Re-plastering",
-      "sqft": 200,
-      "totalPrice": 10000,
-      "paidAmount": 5000,
-      "balanceAmount": 5000,
-      "paymentType": "UPI",
-      "status": "PENDING",
-      "warranty": "2 Years",
-      "warrantyYears": 2,
-      "isWarrantyApplicable": true,
-      "payments": [
-        {
-          "id": "b7391801-44cd-4e92-9118-8f6194b1e404",
-          "amount": 5000,
-          "previousPaymentId": "f882194a-bc12-42da-95a2-4410e309c303",
-          "paymentMethod": "UPI",
-          "upiId": "client@okaxis",
-          "createdAt": "2026-09-18T13:45:00.000Z"
-        }
-      ]
-    },
     "gstPayment": {
       "id": 0,
       "title": "GST Tax Clearance",
       "sqft": 0,
       "rate": 0,
-      "originalPrice": 7470,
+      "originalPrice": 5670,
       "discountAmount": 0,
-      "totalPrice": 7470,
+      "totalPrice": 5670,
       "paidAmount": 0,
-      "balanceAmount": 7470,
+      "balanceAmount": 5670,
       "gstPercentage": 18,
-      "gstAmount": 7470,
-      "cgst": 3735,
-      "sgst": 3735,
+      "gstAmount": 5670,
+      "cgst": 2835,
+      "sgst": 2835,
       "status": "PENDING",
       "paymentType": "CASH",
       "warranty": "",
@@ -2311,20 +2042,18 @@ Authorization: Bearer <jwt_token>
       "payments": []
     },
     "gstPayments": [],
-    "withGstPayment": {
-      "id": 0,
-      "title": "GST Tax Clearance",
-      "totalPrice": 7470,
-      "paidAmount": 0,
-      "balanceAmount": 7470,
-      "gstPercentage": 18,
-      "gstAmount": 7470,
-      "cgst": 3735,
-      "sgst": 3735,
-      "status": "PENDING",
-      "payments": []
+    "isConfirmed": true,
+    "quotationId": 120,
+    "quotation": {
+      "id": 120,
+      "title": "Residential Terrace Waterproofing - #120",
+      "totalPrice": 31500,
+      "grandTotal": 37170,
+      "isConfirmed": true,
+      "totalPaid": 25000,
+      "balanceAmount": 12170,
+      "paymentStatus": "PARTIALLY_PAID"
     },
-    "withGstPayments": [],
     "accounts": [
       {
         "id": 1,
@@ -2351,15 +2080,12 @@ Authorization: Bearer <jwt_token>
 
 > [!NOTE]
 > **GST Nullability & Default Representation**:
-> - When `withGst: false` (or while GST decision is unconfirmed), `gstPayment` is `null`, `gstPayments: []`, and `gstAmount: 0`. GST does NOT apply.
+> - When `withGst: false` (no GST percentage on the quotation), `gstPayment` is `null`, `gstPayments: []`, and `gstAmount: 0`. `isTaxCustomer` (tax invoice vs cash bill) is separate; `isGstConfirmed` is always `true`.
 > - Only when `withGst: true` is `gstPayment` populated with the dedicated `"GST Tax Clearance"` object and its nested `payments` array.
->
-> **Variation Work Orders (`additionalPayment`)**:
-> - If all recorded payments for an additional variation service are deleted, the variation service is automatically removed from `additionalPayment`.
 
 ---
 
-#### 2. Record Service Payment (Base Scope)
+#### 2. Record Service Payment
 
 Records a payment block for a base service. Payments can be recorded against any service in any order without sequential blocking. Supports both `multipart/form-data` with direct proof image file upload and `application/json`.
 
@@ -2420,128 +2146,12 @@ curl -X POST "http://localhost:9000/api/v2/quotations/120/services/1/payments" \
 
 ---
 
-#### 3. Add Additional Variation Service
+#### 3. Confirm Final Settlement
 
-Creates an on-site variation work order. Automatically added to `additionalPayment` and summed into `additionalAmount`. Supports optional inline payment recording on creation.
-
-> [!NOTE]
-> **Condition 1 Guard**: You cannot add an Additional Service if any previous payment on the quotation is unverified by Admin (`is_verified = false`). Attempting to do so returns `400 Bad Request`. Check `PaymentState.canAddAdditionalService` before showing the "Add Service" action.
->
-> **Atomic Failure Rollback**: If optional payment fields (`amount`, `paymentMethod`, `voucher` / `accountId` / `upiId`) are provided and the payment fails validation or recording, the additional service is **rolled back and NOT saved in the database**.
-
-```http
-POST /api/v2/quotations/:id/additional-services
-Authorization: Bearer <jwt_token>
-Content-Type: application/json
-
-{
-  "title": "Parapet Wall Crack Repair & Re-plastering",
-  "sqft": 200,
-  "rate": 50,
-  "totalPrice": 10000,
-  "warranty": "2 Years",
-  "notes": "Extra crack filling on exterior wall requested by client",
-  "amount": 5000,
-  "paymentMethod": "CASH",
-  "voucher": "VCH-2026-0099"
-}
-```
-
-##### Response (`201 Created`)
-
-```json
-{
-  "statusCode": 201,
-  "success": true,
-  "message": "Additional service created successfully",
-  "data": {
-    "service": {
-      "id": 101,
-      "title": "Parapet Wall Crack Repair & Re-plastering",
-      "sqft": 200,
-      "totalPrice": 10000,
-      "paidAmount": 5000,
-      "balanceAmount": 5000,
-      "paymentType": "CASH",
-      "status": "PENDING",
-      "warranty": "2 Years",
-      "warrantyYears": 2,
-      "isWarrantyApplicable": true,
-      "payments": [ ... ]
-    },
-    "state": { ... }
-  }
-}
-```
-
----
-
-#### 4. Record Additional Service Payment
-
-Records a payment for an on-site variation service, continuing the unified blockchain chain across boundaries. Supports both `multipart/form-data` with direct proof file attachment and `application/json`:
+Called at project handover to settle the remaining balance. `isTaxCustomer` (or the older `withGst` / `isGst`) is optional here and means the tax state; if sent it must match the quotation or the request fails with `400` (`"This quotation is for a tax customer. Change the tax status on the quotation instead of at final settlement."`). Supports optional final payment with proof image via `multipart/form-data` or `application/json`:
 
 > [!NOTE]
-> **Independent Variation Payments**: Additional services can be paid for at any time—you do **NOT** need to wait for base quotation services to be completed first.
->
-> **Atomic Rollback on Failure**: If recording payment on an additional variation service with zero recorded payments fails (e.g. invalid voucher, amount exceeds balance, unverified previous payment), the additional variation service is **automatically deleted** so it is not saved with zero payments.
-
-```http
-POST /api/v2/quotations/:id/additional-services/:serviceId/payments
-Authorization: Bearer <jwt_token>
-```
-
-##### Option A: Direct File Upload (`multipart/form-data`) — Recommended
-```bash
-curl -X POST "http://localhost:9000/api/v2/quotations/120/additional-services/101/payments" \
-  -H "Authorization: Bearer <jwt_token>" \
-  -F "amount=5000" \
-  -F "paymentMethod=CASH" \
-  -F "voucher=VCH-2026-0099" \
-  -F "notes=Collected cash at site for parapet repair" \
-  -F "proofImage=@/path/to/cash_voucher_signed.jpg"
-```
-
-##### Option B: JSON Payload (`application/json`)
-```json
-{
-  "amount": 5000,
-  "paymentMethod": "CASH",
-  "voucher": "VCH-2026-0099",
-  "notes": "Collected cash at site for parapet repair",
-  "proofImage": "/static/payments/cash_voucher_signed.jpg"
-}
-```
-
-##### Response (`201 Created`)
-
-```json
-{
-  "statusCode": 201,
-  "success": true,
-  "message": "Additional service payment recorded in blockchain ledger",
-  "data": {
-    "payment": {
-      "id": "b7391801-44cd-4e92-9118-8f6194b1e404",
-      "amount": 5000,
-      "previousPaymentId": "f882194a-bc12-42da-95a2-4410e309c303",
-      "paymentMethod": "CASH",
-      "voucher": "VCH-2026-0099",
-      "proofImage": "/static/payments/b7391801-44cd-4e92-9118-8f6194b1e404.jpg",
-      "createdAt": "2026-09-18T13:45:00.000Z"
-    },
-    "state": { ... }
-  }
-}
-```
-
----
-
-#### 5. Confirm Final Settlement & Deferred GST
-
-Called at project handover to record customer's official GST election and settle the remaining balance. Supports optional final payment with proof image via `multipart/form-data` or `application/json`:
-
-> [!NOTE]
-> **Atomic Rollback on Payment Failure**: If an `amount` is sent with the final settlement request and recording the payment fails (e.g. invalid voucher, amount exceeds balance, unverified previous payment), the quotation's GST configuration is **rolled back to its pre-call unconfirmed state** (`is_gst_confirmed = false, is_gst = false`) and not saved in the database.
+> **Atomic Rollback on Payment Failure**: If an `amount` is sent with the final settlement request and recording the payment fails (e.g. invalid voucher, amount exceeds balance, unverified previous payment), the other settings sent with it (GST percentage, discount, GST number) are **rolled back** and not saved. The customer's tax status (`isTaxCustomer`) is never changed here; change it with `PATCH /api/v2/quotations/:id/pricing-config`.
 
 ```http
 POST /api/v2/quotations/:id/final-settlement
@@ -2552,8 +2162,8 @@ Authorization: Bearer <jwt_token>
 ```bash
 curl -X POST "http://localhost:9000/api/v2/quotations/120/final-settlement" \
   -H "Authorization: Bearer <jwt_token>" \
-  -F "withGst=true" \
-  -F "amount=23100" \
+  -F "isTaxCustomer=true" \
+  -F "amount=12170" \
   -F "paymentMethod=ACCOUNT" \
   -F "accountId=1" \
   -F "notes=Final settlement upon project completion with 18% GST" \
@@ -2563,8 +2173,8 @@ curl -X POST "http://localhost:9000/api/v2/quotations/120/final-settlement" \
 ##### Option B: JSON Payload (`application/json`)
 ```json
 {
-  "withGst": true,
-  "amount": 23100,
+  "isTaxCustomer": true,
+  "amount": 12170,
   "paymentMethod": "ACCOUNT",
   "accountId": 1,
   "notes": "Final settlement upon project completion with 18% GST",
@@ -2581,28 +2191,39 @@ curl -X POST "http://localhost:9000/api/v2/quotations/120/final-settlement" \
   "message": "Final settlement confirmed",
   "data": {
     "id": 120,
-    "totalPrice": 35000,
-    "additionalAmount": 10000,
+    "totalPrice": 31500,
+    "isTaxCustomer": true,
     "withGst": true,
     "gstPercentage": 18,
-    "totalWithGst": 53100,
-    "totalPaid": 53100,
+    "totalWithGst": 37170,
+    "totalPaid": 37170,
     "balanceAmount": 0,
-    "paymentStatus": "FULLY_PAID"
+    "paymentStatus": "FULLY_PAID",
+    "...": "rest of PaymentState"
   }
 }
 ```
 
 ---
 
-#### 6. Dynamic Pricing Configuration (GST & Discount Toggles)
+#### 4. Dynamic Pricing Configuration (GST & Discount Toggles)
 
-Allows updating GST and Discount settings dynamically during site execution or quotation negotiation. Supports toggling GST (`withGst` / `isGst`) and Discount (`withDiscount` / `isDiscount`), and configuring custom percentage rates (`gstPercentage`, `discountPercentage`).
+Allows updating the quotation's pricing settings during site execution or negotiation:
+
+| Field | Effect |
+|---|---|
+| `isTaxCustomer` | Sets the tax state (discount order, tax invoice vs cash bill). |
+| `gstPercentage` | Sets the GST rate; `0` removes GST. |
+| `withGst` / `isGst` | `true` turns GST on (keeps a saved rate, or 18%), `false` sets it to 0. Ignored when `gstPercentage` is sent. |
+| `discountPercentage` | Sets the discount rate; `0` removes the discount. |
+| `withDiscount` / `isDiscount` | `false` removes the discount (sets the rate to 0). |
+
+The quotation totals and the payment balance chain are recalculated immediately. Not allowed after the final receipt (`400`).
 
 > [!TIP]
 > **Automatic Activation**: If a non-zero `gstPercentage` or `discountPercentage` is sent without explicitly setting the boolean flag, the backend automatically sets `withGst: true` or `withDiscount: true`.
 >
-> **Option A Pro-Rata Recalculation**: Updating the discount percentage automatically recalculates the pro-rata discount for each base service line item, updates `subtotalAfterDiscount`, re-evaluates GST on the discounted base, and recalculates remaining balance and service completion status.
+> **Option A Pro-Rata Recalculation**: Updating the discount percentage automatically recalculates the pro-rata discount for every line, updates `subtotalAfterDiscount`, re-evaluates GST on the discounted base, and recalculates remaining balance and service completion status.
 
 ```http
 PATCH /api/v2/quotations/:id/pricing-config
@@ -2632,19 +2253,30 @@ Content-Type: application/json
     "originalTotalPrice": 35000,
     "totalPrice": 31500,
     "totalPaid": 13500,
-    "balanceAmount": 35470,
-    "additionalAmount": 10000,
-    "grossSubtotal": 45000,
+    "balanceAmount": 23670,
+    "grossSubtotal": 35000,
     "withDiscount": true,
     "isDiscount": true,
     "discountPercentage": 10,
     "discountAmount": 3500,
-    "subtotalAfterDiscount": 41500,
+    "subtotalAfterDiscount": 31500,
+    "isTaxCustomer": true,
+    "pricing": {
+      "subTotal": 35000,
+      "discount": { "percentage": 10, "amountForTax": 3500, "amountForNonTax": 4130 },
+      "gst": {
+        "percentage": 18,
+        "amount": 5670,
+        "cgst": { "percentage": 9, "amount": 2835 },
+        "sgst": { "percentage": 9, "amount": 2835 }
+      },
+      "grandTotal": 37170
+    },
     "withGst": true,
     "isGst": true,
     "gstPercentage": 18,
-    "gstAmount": 7470,
-    "totalWithGst": 48970,
+    "gstAmount": 5670,
+    "totalWithGst": 37170,
     "canMakePayment": true,
     "hasUnverifiedPayments": false,
     "unverifiedPaymentCount": 0,
@@ -2670,7 +2302,7 @@ Content-Type: application/json
 
 ---
 
-#### 7. Verify Blockchain Ledger Integrity
+#### 5. Verify Blockchain Ledger Integrity
 
 Traverses the chronological pointer chain from the Genesis block to the latest block, verifying:
 1. Genesis block has `previousPaymentId: null`.
@@ -2690,10 +2322,10 @@ Authorization: Bearer <jwt_token>
   "success": true,
   "data": {
     "isValid": true,
-    "totalBlocks": 4,
+    "totalBlocks": 3,
     "genesisPaymentId": "e4b2d180-87a3-4f91-b3b0-0b61e204a101",
-    "latestPaymentId": "b7391801-44cd-4e92-9118-8f6194b1e404",
-    "totalAmount": 30000,
+    "latestPaymentId": "f882194a-bc12-42da-95a2-4410e309c303",
+    "totalAmount": 25000,
     "chain": [
       {
         "id": "e4b2d180-87a3-4f91-b3b0-0b61e204a101",
@@ -2701,35 +2333,23 @@ Authorization: Bearer <jwt_token>
         "amount": 10000,
         "paymentMethod": "CASH",
         "serviceTitle": "Surface Preparation & Crack Filling",
-        "isAdditional": false,
         "createdAt": "2026-09-18T10:15:00.000Z"
       },
       {
         "id": "a91c7f42-32de-40c2-9e81-7c50a112b202",
         "previousPaymentId": "e4b2d180-87a3-4f91-b3b0-0b61e204a101",
-        "amount": 5000,
+        "amount": 3500,
         "paymentMethod": "UPI",
         "serviceTitle": "Surface Preparation & Crack Filling",
-        "isAdditional": false,
         "createdAt": "2026-09-18T11:00:00.000Z"
       },
       {
         "id": "f882194a-bc12-42da-95a2-4410e309c303",
         "previousPaymentId": "a91c7f42-32de-40c2-9e81-7c50a112b202",
-        "amount": 10000,
+        "amount": 11500,
         "paymentMethod": "ACCOUNT",
         "serviceTitle": "Primer & Chemical Coating",
-        "isAdditional": false,
         "createdAt": "2026-09-18T12:30:00.000Z"
-      },
-      {
-        "id": "b7391801-44cd-4e92-9118-8f6194b1e404",
-        "previousPaymentId": "f882194a-bc12-42da-95a2-4410e309c303",
-        "amount": 5000,
-        "paymentMethod": "UPI",
-        "serviceTitle": "Parapet Wall Crack Repair & Re-plastering",
-        "isAdditional": true,
-        "createdAt": "2026-09-18T13:45:00.000Z"
       }
     ]
   }
@@ -2738,7 +2358,7 @@ Authorization: Bearer <jwt_token>
 
 ---
 
-#### 8. Admin Verify Payment
+#### 6. Admin Verify Payment
 
 Allows Admin to verify or approve a payment recorded on a quotation. All prior payments must be verified by Admin before any subsequent payment can be recorded.
 
@@ -2799,7 +2419,7 @@ Content-Type: application/json
 
 ---
 
-#### 9. Single Payment Verification View
+#### 7. Single Payment Verification View
 
 Focused on inspecting a single payment by `:paymentId`, returning its uploaded proof image, receipt/voucher details, verification chain status, and quotation/service context.
 
@@ -2847,7 +2467,6 @@ Authorization: Bearer <jwt_token>
     "service": {
       "serviceId": 1,
       "serviceTitle": "Surface Cleaning & Crack Seal",
-      "isAdditional": false,
       "sqft": 1000,
       "rate": 15,
       "originalPrice": 15000,
@@ -2881,9 +2500,9 @@ Authorization: Bearer <jwt_token>
 
 ---
 
-#### 10. Record GST Clearance Payment
+#### 8. Record GST Clearance Payment
 
-Records a payment specifically against the pending GST tax balance after the GST decision has been confirmed (`withGst: true`). Continues the chronological blockchain ledger.
+Records a payment specifically against the pending GST line of a quotation that charges GST (`withGst: true`). Returns `400` when the quotation has no GST. Continues the chronological blockchain ledger.
 
 > [!NOTE]
 > **Preconditions & Guards**:
@@ -2902,7 +2521,7 @@ Authorization: Bearer <jwt_token>
 ```bash
 curl -X POST "http://localhost:9000/api/v2/quotations/120/gst-payment" \
   -H "Authorization: Bearer <jwt_token>" \
-  -F "amount=7470" \
+  -F "amount=5670" \
   -F "paymentMethod=ACCOUNT" \
   -F "accountId=1" \
   -F "notes=Full 18% GST settlement via bank transfer" \
@@ -2912,7 +2531,7 @@ curl -X POST "http://localhost:9000/api/v2/quotations/120/gst-payment" \
 ##### Option B: JSON Payload (`application/json`)
 ```json
 {
-  "amount": 7470,
+  "amount": 5670,
   "paymentMethod": "ACCOUNT",
   "accountId": 1,
   "notes": "Full 18% GST settlement via bank transfer",
@@ -2930,12 +2549,12 @@ curl -X POST "http://localhost:9000/api/v2/quotations/120/gst-payment" \
   "data": {
     "quotationId": 120,
     "title": "Residential Terrace Waterproofing - #120",
-    "totalWithGst": 48970,
-    "totalPaid": 48970,
+    "totalWithGst": 37170,
+    "totalPaid": 37170,
     "balanceAmount": 0,
     "withGst": true,
     "gstPercentage": 18,
-    "gstAmount": 7470,
+    "gstAmount": 5670,
     "hasUnverifiedPayments": true,
     "unverifiedPaymentCount": 1,
     "paymentStatus": "PARTIALLY_PAID",
@@ -2960,31 +2579,23 @@ curl -X POST "http://localhost:9000/api/v2/quotations/120/gst-payment" \
         "status": "COMPLETED"
       }
     ],
-    "additionalPayment": {
-      "id": 101,
-      "title": "Parapet Wall Crack Repair",
-      "totalPrice": 10000,
-      "paidAmount": 10000,
-      "balanceAmount": 0,
-      "status": "COMPLETED"
-    },
     "gstPayment": {
       "id": 0,
       "title": "GST Tax Clearance",
-      "totalPrice": 7470,
-      "paidAmount": 7470,
+      "totalPrice": 5670,
+      "paidAmount": 5670,
       "balanceAmount": 0,
       "gstPercentage": 18,
-      "gstAmount": 7470,
-      "cgst": 3735,
-      "sgst": 3735,
+      "gstAmount": 5670,
+      "cgst": 2835,
+      "sgst": 2835,
       "status": "COMPLETED",
       "paymentType": "ACCOUNT",
       "payments": [
         {
           "id": "c1928374-e82b-42c1-a83d-9f821034bc99",
           "previousPaymentId": "b7391801-44cd-4e92-9118-8f6194b1e404",
-          "amount": 7470,
+          "amount": 5670,
           "paymentMethod": "ACCOUNT",
           "accountId": 1,
           "notes": "Full 18% GST settlement via bank transfer",
@@ -2998,7 +2609,7 @@ curl -X POST "http://localhost:9000/api/v2/quotations/120/gst-payment" \
     "gstPayments": [
       {
         "id": "c1928374-e82b-42c1-a83d-9f821034bc99",
-        "amount": 7470,
+        "amount": 5670,
         "paymentMethod": "ACCOUNT",
         "isVerified": false,
         "isGstPayment": true
@@ -3010,7 +2621,7 @@ curl -X POST "http://localhost:9000/api/v2/quotations/120/gst-payment" \
 
 ---
 
-#### 11. Generate Final Official Receipt (Full Receipt View)
+#### 9. Generate Final Official Receipt (Full Receipt View)
 
 Generates and retrieves the official, fully itemized final receipt for a settled quotation. Once generated, the quotation is **automatically locked** (`isReceiptLocked: true`) to preserve immutable financial audit records.
 
@@ -3019,7 +2630,7 @@ Generates and retrieves the official, fully itemized final receipt for a settled
 > The receipt endpoint will **FAIL** (`400 Bad Request`) unless ALL of the following criteria are met:
 > 1. **Quotation Confirmed**: The quotation must be approved and confirmed (`is_confirmed = true`).
 > 2. **All Services Completed**: Base services and variation orders must be 100% completed (`allServicesCompleted === true`).
-> 3. **GST Decision Confirmed**: GST election must be recorded (`isGstConfirmed === true`).
+> 3. **Tax Status Set**: Always satisfied: it is the quotation's `isTaxCustomer`. The receipt is a tax invoice (`taxDecision: "WITH_GST"`) or a cash bill (`"WITHOUT_GST"`); its amounts (`grossSubtotal`, `discountAmount`, `gstAmount`, `cgst`, `sgst`, `grandTotal`) and the `isTaxCustomer` / `pricing` fields come from the quotation pricing.
 > 4. **Zero Balance**: All dues, including any GST, must be fully paid (`balanceAmount === 0`).
 > 5. **Zero Unverified Payments**: Every single payment block in the blockchain ledger must be verified and approved by Admin (`hasUnverifiedPayments === false`).
 >
@@ -3077,23 +2688,34 @@ You can optionally send `customerGstNumber` (or `customer_gst_number`):
     "customerGstNumber": "33AAAAA0000A1Z5",
     "propertyAddress": "Anna Nagar Villa - 42, 1st Cross, Anna Nagar, Chennai, 600040",
     "taxDecision": "WITH_GST",
+    "isTaxCustomer": true,
+    "pricing": {
+      "subTotal": 35000,
+      "discount": { "percentage": 10, "amountForTax": 3500, "amountForNonTax": 4130 },
+      "gst": {
+        "percentage": 18,
+        "amount": 5670,
+        "cgst": { "percentage": 9, "amount": 2835 },
+        "sgst": { "percentage": 9, "amount": 2835 }
+      },
+      "grandTotal": 37170
+    },
     "isGstConfirmed": true,
     "isReceiptGenerated": true,
     "isReceiptLocked": true,
     "receiptGeneratedAt": "2026-09-18T15:00:00.000Z",
     "originalTotalPrice": 35000,
-    "additionalAmount": 10000,
-    "grossSubtotal": 45000,
+    "grossSubtotal": 35000,
     "discountPercentage": 10,
     "discountAmount": 3500,
-    "subtotalAfterDiscount": 41500,
+    "subtotalAfterDiscount": 31500,
     "withGst": true,
     "gstPercentage": 18,
-    "gstAmount": 7470,
-    "cgst": 3735,
-    "sgst": 3735,
-    "grandTotal": 48970,
-    "totalPaid": 48970,
+    "gstAmount": 5670,
+    "cgst": 2835,
+    "sgst": 2835,
+    "grandTotal": 37170,
+    "totalPaid": 37170,
     "balanceAmount": 0,
     "paymentStatus": "FULLY_PAID",
     "allServicesCompleted": true,
@@ -3106,7 +2728,6 @@ You can optionally send `customerGstNumber` (or `customer_gst_number`):
         "sqft": 1000,
         "rate": 15,
         "totalPrice": 13500,
-        "isAdditional": false,
         "warranty": "5 Years"
       },
       {
@@ -3115,17 +2736,7 @@ You can optionally send `customerGstNumber` (or `customer_gst_number`):
         "sqft": 1000,
         "rate": 20,
         "totalPrice": 18000,
-        "isAdditional": false,
         "warranty": "5 Years"
-      },
-      {
-        "id": 101,
-        "title": "Parapet Wall Crack Repair & Re-plastering",
-        "sqft": 200,
-        "rate": 50,
-        "totalPrice": 10000,
-        "isAdditional": true,
-        "warranty": "2 Years"
       }
     ],
     "payments": [
@@ -3145,7 +2756,7 @@ You can optionally send `customerGstNumber` (or `customer_gst_number`):
       {
         "id": "c1928374-e82b-42c1-a83d-9f821034bc99",
         "previousPaymentId": "b7391801-44cd-4e92-9118-8f6194b1e404",
-        "amount": 7470,
+        "amount": 5670,
         "paymentMethod": "ACCOUNT",
         "notes": "Full 18% GST settlement via NEFT",
         "receivedBy": "Admin Office",
@@ -3160,15 +2771,15 @@ You can optionally send `customerGstNumber` (or `customer_gst_number`):
       "title": "GST Tax Clearance",
       "sqft": 0,
       "rate": 0,
-      "originalPrice": 7470,
+      "originalPrice": 5670,
       "discountAmount": 0,
-      "totalPrice": 7470,
-      "paidAmount": 7470,
+      "totalPrice": 5670,
+      "paidAmount": 5670,
       "balanceAmount": 0,
       "gstPercentage": 18,
-      "gstAmount": 7470,
-      "cgst": 3735,
-      "sgst": 3735,
+      "gstAmount": 5670,
+      "cgst": 2835,
+      "sgst": 2835,
       "status": "COMPLETED",
       "paymentType": "ACCOUNT",
       "warranty": "",
@@ -3178,7 +2789,7 @@ You can optionally send `customerGstNumber` (or `customer_gst_number`):
         {
           "id": "c1928374-e82b-42c1-a83d-9f821034bc99",
           "previousPaymentId": "b7391801-44cd-4e92-9118-8f6194b1e404",
-          "amount": 7470,
+          "amount": 5670,
           "paymentMethod": "ACCOUNT",
           "notes": "Full 18% GST settlement via NEFT",
           "receivedBy": "Admin Office",
@@ -3194,7 +2805,7 @@ You can optionally send `customerGstNumber` (or `customer_gst_number`):
       {
         "id": "c1928374-e82b-42c1-a83d-9f821034bc99",
         "previousPaymentId": "b7391801-44cd-4e92-9118-8f6194b1e404",
-        "amount": 7470,
+        "amount": 5670,
         "paymentMethod": "ACCOUNT",
         "notes": "Full 18% GST settlement via NEFT",
         "receivedBy": "Admin Office",
@@ -3218,9 +2829,9 @@ You can optionally send `customerGstNumber` (or `customer_gst_number`):
 
 ---
 
-#### 12. Admin Toggle Receipt Lock
+#### 10. Admin Toggle Receipt Lock
 
-Allows Admins to manually lock or unlock a quotation after a final receipt has been generated. When locked (`isReceiptLocked: true`), all further payments, additional services, pricing updates, and settlement changes are strictly blocked (`400 Bad Request`). If an emergency correction is required, an Admin can unlock the quotation (`isLocked: false`), make the adjustment, and re-lock it without losing the original `receiptNumber` or `receiptGeneratedAt`.
+Allows Admins to manually lock or unlock a quotation after a final receipt has been generated. When locked (`isReceiptLocked: true`), all further payments, pricing updates, and settlement changes are strictly blocked (`400 Bad Request`). If an emergency correction is required, an Admin can unlock the quotation (`isLocked: false`), make the adjustment, and re-lock it without losing the original `receiptNumber` or `receiptGeneratedAt`.
 
 > [!IMPORTANT]
 > **Admin-Only**: This endpoint requires `Role.ADMIN`. Field employees receive `403 Forbidden`.
@@ -3256,7 +2867,7 @@ Content-Type: application/json
 
 ---
 
-#### 13. Receipt Numbering Settings & Dynamic Series
+#### 11. Receipt Numbering Settings & Dynamic Series
 
 Allows inspecting and configuring receipt prefixes, series codes, and next sequential counter numbers for official final receipts.
 
@@ -3327,7 +2938,7 @@ Content-Type: application/json
 
 ---
 
-#### 14. Delete Payment & Auto-Cleanup Rules
+#### 12. Delete Payment & Auto-Cleanup Rules
 
 Deletes a recorded payment by its ID (`UUID` hex string or milestone integer). Supports both quotation-scoped and global paths.
 
@@ -3353,21 +2964,18 @@ Authorization: Bearer <jwt_token>
 ##### Automated Ledger & State Cleanup Behaviors:
 1. **Blockchain Pointer Repair**:
    - The cryptographic chain links are healed automatically: if payment $P_2$ pointed to $P_1$ and $P_3$ pointed to $P_2$, deleting $P_2$ automatically updates $P_3$'s `previousPaymentId` to point directly to $P_1$.
-2. **Auto-Delete Empty Variation Services ("If Payments Empty, Delete Service")**:
-   - If the deleted payment was for an additional variation service (`additional_service_id IS NOT NULL`), the backend verifies whether any remaining payments exist for that variation.
-   - If payments become empty (`0 remaining`), the additional variation service is **automatically deleted** from `additionalPayment`.
-3. **Auto-Reset Empty GST Tax Clearance ("If GST Payments Empty, Reset GST")**:
-   - If the deleted payment was a GST tax clearance payment (`is_gst_payment = true`), the backend verifies whether any remaining GST payments exist for that quotation.
-   - If GST payments become empty (`0 remaining`), GST confirmation is **automatically reset** (`is_gst_confirmed = false, is_gst = false`), `withGst` reverts to `false`, and `gstPayment` becomes `null` so GST does not apply.
-4. **Receipt Lock Guard**:
+2. **GST Tax Clearance Deleted (GST Status Is Kept)**:
+   - If the deleted payment was a GST tax clearance payment (`is_gst_payment = true`), the GST amount simply becomes unpaid again.
+   - GST stays on the quotation: `withGst` remains `true` and `gstPayment` stays populated with `paidAmount: 0`. GST and the tax state are only changed on the quotation (`PATCH /pricing-config`), never by deleting a payment.
+3. **Receipt Lock Guard**:
    - Payments cannot be deleted if the final receipt has already been generated and locked (`isReceiptLocked === true`). Attempting deletion returns `400 Bad Request`.
-5. **Auto-Delete Related Proof Image File**:
+4. **Auto-Delete Related Proof Image File**:
    - The physical proof image file stored on disk (in `static/payments/` or `uploads/payments/`) associated with the deleted payment is automatically removed to prevent orphaned files and save disk space.
    - If another payment record in the database still references the exact same file path, the file is safely preserved.
 
 ---
 
-#### 15. Clean Up Orphaned Payment Proof Images (Admin Only)
+#### 13. Clean Up Orphaned Payment Proof Images (Admin Only)
 
 Periodically or on-demand purges unlinked proof image files from disk that were uploaded but never completed or linked to an active payment record.
 
@@ -3407,19 +3015,38 @@ Warranty is a **post-receipt** module: it can only be configured and generated f
 
 ```
 Receipt generated & locked  ─▶  ELIGIBLE
-        │  POST /warranty-config
+        │  POST /warranty-config            (anyone: master admin, office employee, field employee)
         ▼
-  CONFIGURED (warranty === null)  ─▶  editable via PATCH /warranty-config
-        │  POST /warranty
+  CONFIGURED (warranty === null)  ─▶  editable via PATCH /warranty-config  (anyone)
+        │  POST /warranty                   (anyone)
         ▼
-  GENERATED (warranty exists)  ─▶  config now locked, no more PATCH
-        │  DELETE /warranty (only within 3 days of generation)
+  GENERATED, NOT VERIFIED (isVerified: false)  ─▶  config now locked, no more PATCH
+        │     Only the master admin can view it. Office employees and field employees
+        │     see that a warranty exists and is waiting, but get no warranty content.
+        │  POST /warranty/verify (master admin only)
+        ▼
+  VERIFIED (isVerified: true)  ─▶  office employees and field employees can now view and send it
+        │  DELETE /warranty (Admin while not verified; only a master admin once verified)
         ▼
   back to CONFIGURED (config preserved & editable again)
 ```
 
+##### Who can do what
+
+"Admin" below is the master admin (`MASTER_ADMIN`); office employees log in as `ADMIN`; technicians as `FIELD_EMPLOYEE`.
+
+| Action | Endpoint | Master admin | Office employee (`ADMIN`) | Field employee |
+| :--- | :--- | :---: | :---: | :---: |
+| Check eligibility, read the config | `GET .../warranty-eligibility`, `GET .../warranty-config` | Yes | Yes | Yes |
+| Configure (create / edit) | `POST` / `PATCH .../warranty-config` | Yes | Yes | Yes |
+| Generate | `POST .../warranty` | Yes | Yes | Yes |
+| **Verify** | `POST .../warranty/verify` | **Yes** | No (`403`) | No (`403`) |
+| View the warranty (full content, letter, PDF) | `GET .../warranty` | Always | **Only once verified** | **Only once verified** |
+| Send / share the warranty | (built from the `GET .../warranty` content) | Always | **Only once verified** | **Only once verified** |
+| Delete | `DELETE .../warranty` | Always | While not verified | No (`403`) |
+
 > [!IMPORTANT]
-> The service list used to build the config form is fetched independently from the quotation's base and additional services (**not** parsed out of the final-receipt response), so every additional service is available to configure — including quotations with more than one additional service.
+> The service list used to build the config form is the quotation's own service lines (**not** parsed out of the final-receipt response).
 >
 > **Compatible with Both Payment Modules**:
 > - **Quotation-Payments Module (Recommended)**: Eligible when `paymentStatus === "FULLY_PAID"` and all payments are verified by Admin (`isVerified = true`). The warranty engine automatically generates and locks the next official sequential receipt number (`DRT...`) on the quotation when configured or generated.
@@ -3464,7 +3091,7 @@ GET /api/v2/quotations/:id/warranty-config
 Authorization: Bearer <jwt_token>
 ```
 
-If no config has been created yet, `config` is `null` and `availableServices` lists every base + additional service on the quotation, each with a suggested pre-fill (`suggestedYears`, parsed from the quotation's own warranty string).
+If no config has been created yet, `config` is `null` and `availableServices` lists every service line on the quotation, each with a suggested pre-fill (`suggestedYears`, parsed from the quotation's own warranty string).
 
 ##### Response (`200 OK`) — no config yet
 ```json
@@ -3474,8 +3101,8 @@ If no config has been created yet, `config` is `null` and `availableServices` li
   "data": null,
   "config": null,
   "availableServices": [
-    { "serviceId": 12, "isAdditional": false, "title": "Terrace Waterproofing", "suggestedYears": 5 },
-    { "serviceId": 7,  "isAdditional": true,  "title": "Balcony Extension",     "suggestedYears": 2 }
+    { "serviceId": 12, "title": "Terrace Waterproofing", "suggestedYears": 5 },
+    { "serviceId": 7,  "title": "Balcony Extension",     "suggestedYears": 2 }
   ]
 }
 ```
@@ -3494,8 +3121,8 @@ If no config has been created yet, `config` is `null` and `availableServices` li
     "createdAt": "2026-09-22T10:00:00.000Z",
     "updatedAt": "2026-09-22T10:00:00.000Z",
     "services": [
-      { "id": 9, "serviceId": 12, "isAdditional": false, "serviceTitle": "Terrace Waterproofing", "years": 5 },
-      { "id": 10, "serviceId": 7, "isAdditional": true, "serviceTitle": "Balcony Extension", "years": 1.5 }
+      { "id": 9, "serviceId": 12, "serviceTitle": "Terrace Waterproofing", "years": 5 },
+      { "id": 10, "serviceId": 7, "serviceTitle": "Balcony Extension", "years": 1.5 }
     ]
   },
   "config": { "...": "same object as above" }
@@ -3514,15 +3141,15 @@ Content-Type: application/json
 {
   "warrantyStartDate": "2026-09-22",
   "services": [
-    { "serviceId": 12, "isAdditional": false, "years": 5 },
-    { "serviceId": 7,  "isAdditional": true,  "years": 1.5 }
+    { "serviceId": 12, "years": 5 },
+    { "serviceId": 7,  "years": 1.5 }
   ]
 }
 ```
 
 > [!IMPORTANT]
 > - Fails `400` if the quotation is not `isEligible` (see #1), if a config already exists (use PATCH instead), or if a warranty has already been generated.
-> - Each `serviceId`/`isAdditional` pair must reference a real service on this quotation — unknown IDs return `404`.
+> - Each `serviceId` must reference a real service line on this quotation — unknown IDs return `404`.
 > - `years` accepts **fractional values** (e.g. `1.5` = 18 months), rounded to 2 decimal places on save. Negative or non-numeric values return `400`.
 
 ##### Response (`201 Created`)
@@ -3548,13 +3175,13 @@ Content-Type: application/json
 {
   "warrantyStartDate": "2026-09-25",
   "services": [
-    { "serviceId": 12, "isAdditional": false, "years": 6 }
+    { "serviceId": 12, "years": 6 }
   ]
 }
 ```
 
 > [!IMPORTANT]
-> Full replace, not a merge — the `services` array you send **replaces** the existing config's service list entirely. Only allowed while `hasWarranty === false`; once a warranty has been generated, this returns `400` (delete the warranty first, within its 3-day window, to unlock editing again).
+> Full replace, not a merge — the `services` array you send **replaces** the existing config's service list entirely. Only allowed while `hasWarranty === false`; once a warranty has been generated, this returns `400` (an Admin must delete the warranty first to unlock editing again).
 
 ##### Response (`200 OK`)
 ```json
@@ -3580,6 +3207,8 @@ Snapshots the current config into an immutable warranty record. **Idempotent**: 
 
 > [!IMPORTANT]
 > Fails `400` if warranty config hasn't been created yet, or if the quotation's receipt was somehow regenerated under a different number since the config was created (reconfigure in that case).
+>
+> Anyone allowed to read the quotation (master admin, office employee, field employee) can generate. The new warranty starts **not verified** (`isVerified: false`). For a caller who is **not the master admin**, the response below is returned **without `items`** (`"items": []`), exactly as in [#6 Get Warranty](#6-get-warranty): the person who generated it cannot view it until the master admin has verified it.
 
 ##### Response (`201 Created`)
 ```json
@@ -3594,15 +3223,19 @@ Snapshots the current config into an immutable warranty record. **Idempotent**: 
     "warrantyStartDate": "2026-09-22",
     "generatedBy": "Admin (Suresh)",
     "generatedAt": "2026-09-22T10:15:00.000Z",
-    "deletableUntil": "2026-09-25T10:15:00.000Z",
+    "isVerified": false,
+    "verifiedBy": null,
+    "verifiedAt": null,
+    "verificationNotes": null,
+    "deletableUntil": null,
     "isDeletable": true,
     "items": [
       {
-        "id": 5, "serviceId": 12, "isAdditional": false, "serviceTitle": "Terrace Waterproofing",
+        "id": 5, "serviceId": 12, "serviceTitle": "Terrace Waterproofing",
         "years": 5, "warrantyStartDate": "2026-09-22", "warrantyEndDate": "2031-09-22"
       },
       {
-        "id": 6, "serviceId": 7, "isAdditional": true, "serviceTitle": "Balcony Extension",
+        "id": 6, "serviceId": 7, "serviceTitle": "Balcony Extension",
         "years": 1.5, "warrantyStartDate": "2026-09-22", "warrantyEndDate": "2028-03-22"
       }
     ]
@@ -3630,9 +3263,40 @@ Authorization: Bearer <jwt_token>
 }
 ```
 
+> [!IMPORTANT]
+> **Verification gate (enforced by the server).** While `isVerified` is `false`:
+> - the **master admin** receives the full warranty (so it can be checked before verifying);
+> - an **office employee or field employee** still gets `200` with `isVerified: false`, so the app can show "waiting for verification", but **`items` is `[]`**. Nothing the warranty letter is built from is returned.
+>
+> Once `isVerified` is `true`, everyone who can read the quotation receives the full warranty. The mobile app builds the warranty letter (PDF) from `items` and hides the letter and the share buttons while `isVerified` is `false`; returning no `items` is what makes that lock real instead of only hidden in the UI.
+
+##### Response (`200 OK`) — not yet verified, requested by an office employee or field employee
+```json
+{
+  "statusCode": 200,
+  "success": true,
+  "data": {
+    "id": 2,
+    "quotationId": 481,
+    "receiptNumber": "DRT ATEG 016/25-26",
+    "warrantyStartDate": "2026-09-22",
+    "generatedBy": "Karthik Raja",
+    "generatedAt": "2026-09-22T10:15:00.000Z",
+    "isVerified": false,
+    "verifiedBy": null,
+    "verifiedAt": null,
+    "verificationNotes": null,
+    "deletableUntil": null,
+    "isDeletable": true,
+    "items": []
+  },
+  "warranty": { "...": "same object" }
+}
+```
+
 ---
 
-#### 7. Delete Warranty (3-Day Window)
+#### 7. Delete Warranty
 
 ```http
 DELETE /api/v2/quotations/:id/warranty
@@ -3640,8 +3304,11 @@ Authorization: Bearer <admin_jwt_token>
 ```
 
 > [!IMPORTANT]
-> **Admin-Only**: Requires `Role.ADMIN`. Field employees receive `403 Forbidden`.
-> Allowed only while `isDeletable === true` (i.e. `now <= deletableUntil`, generated less than 3 days ago). Past that window this returns `400 Bad Request` and the warranty becomes permanent. Deleting clears the warranty back to `null` — the warranty config itself is preserved and becomes editable again via PATCH.
+> **Admin-Only**: Requires `Role.ADMIN` (a master admin qualifies too). Field employees receive `403 Forbidden`.
+> There is no time limit, but a **verified** warranty (`isVerified: true`) can only be deleted by a master admin; an
+> admin gets `403` ("This warranty is verified. Only a master admin can delete it."). `isDeletable` is `false` while
+> verified; `deletableUntil` is always `null`. Deleting clears the warranty back to `null` — the warranty
+> config itself is preserved and becomes editable again via PATCH.
 
 ##### Response (`200 OK`)
 ```json
@@ -3652,12 +3319,59 @@ Authorization: Bearer <admin_jwt_token>
 }
 ```
 
-##### Response (`400 Bad Request`) — window expired
+##### Response (`404 Not Found`) — no warranty generated for this quotation
 ```json
 {
-  "statusCode": 400,
+  "statusCode": 404,
   "success": false,
-  "message": "Cannot delete warranty: the 3-day deletion window has expired. Warranty was generated on 2026-09-18T10:15:00.000Z."
+  "message": "No warranty exists for this quotation"
+}
+```
+
+---
+
+#### 8. Verify Warranty (Master Admin Only)
+
+```http
+POST /api/v2/quotations/:id/warranty/verify
+Authorization: Bearer <master_admin_jwt>
+Content-Type: application/json
+
+{ "isVerified": true, "verificationNotes": "Checked against the final receipt" }
+```
+
+`PATCH` and the `/api/v2/quotation-payments/:id/warranty/verify` path work the same way.
+
+| Field | Rules |
+|---|---|
+| `isVerified` | Optional boolean, default `true`. Send `false` to remove the verification. |
+| `verificationNotes` | Optional text, up to 1000 characters. |
+
+- **Master admin only.** An admin or employee gets `403 Forbidden` ("Master admin access required").
+- `404` if no warranty has been generated for the quotation yet.
+- Verifying a warranty that is already verified changes nothing, so the first verifier and time are kept.
+- A warranty starts **not verified**. Existing warranties were migrated as not verified.
+- `verifiedBy` is `Master Admin (<name>)`. Unverifying clears `verifiedBy` and `verifiedAt`.
+- **After verification**, office employees and field employees receive the full warranty from [#6](#6-get-warranty) and can view and send it. Unverifying (`isVerified: false`) locks it for them again.
+- Verifying sends a `warranty_verified` notification (see [Push Notifications](#push-notifications)).
+
+##### Response (`200 OK`)
+```json
+{
+  "statusCode": 200,
+  "success": true,
+  "message": "Warranty verified",
+  "data": {
+    "id": 2,
+    "quotationId": 481,
+    "isVerified": true,
+    "verifiedBy": "Master Admin (System Administrator)",
+    "verifiedAt": "2026-09-23T09:00:00.000Z",
+    "verificationNotes": "Checked against the final receipt",
+    "isDeletable": false,
+    "items": [ "..." ]
+  },
+  "warranty": { "...": "same object" }
 }
 ```
 
@@ -3790,17 +3504,24 @@ Authorization: Bearer <jwt_token>
       "propertyName": "Apartment",
       "clientName": "Mr Test a",
       "mobileNumber": "2648845464",
-      "gstDecision": "PENDING",
+      "gstDecision": "APPLIED",
+      "isTaxCustomer": true,
+      "invoiceType": "TAX_INVOICE",
       "customerGstNumber": null,
       "pricing": {
         "subTotal": 33362672,
-        "withoutGstTotal": 30026404,
-        "withGstTotal": 35431158
+        "discount": { "percentage": 10, "amountForTax": 3336267, "amountForNonTax": 3936795 },
+        "gst": {
+          "percentage": 18,
+          "amount": 5404753,
+          "cgst": { "percentage": 9, "amount": 2702377 },
+          "sgst": { "percentage": 9, "amount": 2702376 }
+        },
+        "grandTotal": 35431158
       },
       "progress": {
         "totalPaid": 0,
-        "withGstBalance": 35431158,
-        "withoutGstBalance": 30026404,
+        "balanceAmount": 35431158,
         "paymentStatus": "UNPAID"
       },
       "history": []
@@ -3880,17 +3601,24 @@ Authorization: Bearer <jwt_token>
       "propertyName": "Apartment",
       "clientName": "Mr Test a",
       "mobileNumber": "2648845464",
-      "gstDecision": "PENDING",
+      "gstDecision": "APPLIED",
+      "isTaxCustomer": true,
+      "invoiceType": "TAX_INVOICE",
       "customerGstNumber": null,
       "pricing": {
         "subTotal": 33362672,
-        "withoutGstTotal": 30026404,
-        "withGstTotal": 35431158
+        "discount": { "percentage": 10, "amountForTax": 3336267, "amountForNonTax": 3936795 },
+        "gst": {
+          "percentage": 18,
+          "amount": 5404753,
+          "cgst": { "percentage": 9, "amount": 2702377 },
+          "sgst": { "percentage": 9, "amount": 2702376 }
+        },
+        "grandTotal": 35431158
       },
       "progress": {
         "totalPaid": 0,
-        "withGstBalance": 35431158,
-        "withoutGstBalance": 30026404,
+        "balanceAmount": 35431158,
         "paymentStatus": "UNPAID"
       },
       "history": []
@@ -3951,6 +3679,115 @@ Authorization: Bearer <jwt_token>
 - `PUT/PATCH /api/v2/employee-policies/reorder` (Reorder policies sequence: `{ order: [{ id: 1, sequence: 1 }, ...] }`)
 - `PUT /api/v2/employee-policies/:id` (Update policy)
 - `DELETE /api/v2/employee-policies/:id` (Delete policy)
+
+---
+
+### Push Notifications
+
+Expo push notifications plus an in-app inbox. Every endpoint is scoped to the signed-in user (Admin or Field
+Employee). Sending is fire-and-forget: a failed push never affects the request that caused it. Set
+`PUSH_ENABLED=false` on the server to turn pushes and inbox rows off.
+
+| Type | Sent to | When |
+|---|---|---|
+| `appointment_assigned` | The assigned field employee | An appointment is assigned to them |
+| `payment_pending_verification` | Every admin | A payment recorded by an employee needs verification |
+| `payment_verified` | The quotation's field employee | An admin verifies a payment |
+| `warranty_generated` | The master admin | A warranty is generated and **waits for verification** (see below) |
+| `warranty_verified` | The person who generated the warranty and the quotation's field employee | The master admin verifies a warranty (see below) |
+
+The person who triggered a notification never receives it. `data` carries ids only (`appointmentId`, `quotationId`,
+`paymentId`), never personal data. Tapping a notification should open the matching screen; `warranty_generated`
+and `warranty_verified` open that customer's Warranty tab.
+
+**Warranty notification rules**
+
+- `warranty_generated`: sent once, when a new warranty is actually generated (`POST /api/v2/quotations/:id/warranty`
+  or `POST /api/v2/quotation-payments/:id/warranty`), after the transaction commits. It tells the master admin there is
+  a warranty to verify. It is **not** sent to the field employee: they cannot view the warranty until it is verified.
+- `warranty_verified`: sent once, when `POST .../warranty/verify` moves a warranty from not verified to verified, after
+  the transaction commits. Recipients: the person who generated the warranty and the quotation's field employee (once
+  each; never the verifier).
+- Neither is sent for a repeat request (the existing warranty / the already-verified warranty is returned), for a request
+  that lost a race, when saving the warranty configuration, or when a verification is removed.
+- The master admin is the root account (`user.id` `0`) and has no employee row. Device tokens and inbox rows must be
+  storable for `user.id` `0`, otherwise the master admin receives nothing.
+
+```json
+{
+  "type": "warranty_generated",
+  "title": "Warranty awaiting verification",
+  "body": "A warranty certificate was generated and needs your verification.",
+  "data": { "quotationId": 83, "appointmentId": 34 }
+}
+```
+
+```json
+{
+  "type": "warranty_verified",
+  "title": "Warranty verified",
+  "body": "The warranty certificate for your customer is verified. You can now view and send it.",
+  "data": { "quotationId": 83, "appointmentId": 34 }
+}
+```
+
+#### Register / remove a device
+
+```http
+POST /api/v2/notifications/device-token
+Authorization: Bearer <jwt_token>
+Content-Type: application/json
+
+{ "token": "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]", "platform": "android" }
+```
+
+Returns `{ "statusCode": 200, "success": true, "message": "Device registered" }`. A token belongs to one user at a
+time: registering it again moves it. A value that isn't an Expo push token returns `400`.
+
+```http
+DELETE /api/v2/notifications/device-token
+Content-Type: application/json
+
+{ "token": "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]" }
+```
+
+Removes only the caller's own token (`"Device unregistered"`).
+
+#### Inbox
+
+```http
+GET /api/v2/notifications?page=1&limit=20
+```
+
+`limit` is capped at 100. Newest first.
+
+```json
+{
+  "statusCode": 200,
+  "success": true,
+  "data": [
+    {
+      "id": "412",
+      "type": "warranty_generated",
+      "title": "Warranty certificate ready",
+      "body": "The warranty certificate for your customer was generated. Tap to view it.",
+      "data": { "quotationId": 83, "appointmentId": 34 },
+      "isRead": false,
+      "readAt": null,
+      "createdAt": "2026-10-02T09:41:00.000Z"
+    }
+  ],
+  "page": 1,
+  "limit": 20,
+  "total": 1,
+  "unreadCount": 1
+}
+```
+
+| Endpoint | Effect |
+|---|---|
+| `PATCH /api/v2/notifications/:id/read` | Marks one notification read (`404` if it isn't yours) |
+| `POST /api/v2/notifications/read-all` | Marks every unread notification read |
 
 ---
 
@@ -4320,7 +4157,7 @@ Authorization: Bearer <admin_jwt_token>
 
 ---
 
-## 6. Ready-to-Use Client Code Examples
+## 5. Ready-to-Use Client Code Examples
 
 ### A. TypeScript / Axios Client with Interceptors
 
@@ -4428,21 +4265,6 @@ export const ApiV2 = {
       }
       return apiClient.post(`/quotation-payments/${quotationId}`, data);
     },
-    recordFinalPayment: (
-      quotationId: number,
-      data: {
-        amount: number;
-        paymentMethod: "CASH" | "ACCOUNT" | "UPI";
-        applyGst: boolean;
-        customerGstNumber?: string;
-        accountId?: number;
-        upiId?: string;
-        voucher?: string;
-        referenceNumber?: string;
-        paymentDate?: string;
-        notes?: string;
-      },
-    ) => apiClient.post(`/quotation-payments/${quotationId}/final`, data),
     verifyPayment: (
       quotationId: number,
       paymentId: number,
@@ -4456,17 +4278,6 @@ export const ApiV2 = {
       apiClient.delete(`/quotation-payments/${quotationId}/${paymentId}`),
     getVerifyView: (quotationId: number, paymentId: number) =>
       apiClient.get(`/quotation-payments/${quotationId}/${paymentId}/verify-view`),
-    addAdditionalService: (
-      quotationId: number,
-      data: {
-        title: string;
-        sqft?: number;
-        rate?: number;
-        totalPrice?: number;
-        warranty?: string;
-        notes?: string;
-      },
-    ) => apiClient.post(`/quotation-payments/${quotationId}/additional-services`, data),
   },
 
   payments: {
@@ -4505,51 +4316,10 @@ export const ApiV2 = {
         data,
       );
     },
-    addAdditionalService: (quotationId: number, data: {
-      title: string;
-      sqft?: number;
-      rate?: number;
-      totalPrice: number;
-      warranty?: string;
-      notes?: string;
-    }) => apiClient.post(`/quotations/${quotationId}/additional-services`, data),
-    recordAdditionalServicePayment: (
-      quotationId: number,
-      serviceId: number,
-      data: {
-        amount: number;
-        paymentMethod: "CASH" | "ACCOUNT" | "UPI";
-        voucher?: string;
-        accountId?: number;
-        upiId?: string;
-        notes?: string;
-        proofImage?: File | Blob | string;
-      },
-    ) => {
-      if (data.proofImage instanceof Blob || data.proofImage instanceof File) {
-        const formData = new FormData();
-        formData.append("amount", String(data.amount));
-        formData.append("paymentMethod", data.paymentMethod);
-        if (data.voucher) formData.append("voucher", data.voucher);
-        if (data.accountId) formData.append("accountId", String(data.accountId));
-        if (data.upiId) formData.append("upiId", data.upiId);
-        if (data.notes) formData.append("notes", data.notes);
-        formData.append("proofImage", data.proofImage);
-        return apiClient.post(
-          `/quotations/${quotationId}/additional-services/${serviceId}/payments`,
-          formData,
-          { headers: { "Content-Type": "multipart/form-data" } },
-        );
-      }
-      return apiClient.post(
-        `/quotations/${quotationId}/additional-services/${serviceId}/payments`,
-        data,
-      );
-    },
     confirmFinalSettlement: (
       quotationId: number,
       data: {
-        withGst: boolean;
+        withGst?: boolean; // optional: follows the quotation's tax status
         amount?: number;
         paymentMethod?: "CASH" | "ACCOUNT" | "UPI";
         voucher?: string;
@@ -4561,7 +4331,7 @@ export const ApiV2 = {
     ) => {
       if (data.proofImage instanceof Blob || data.proofImage instanceof File) {
         const formData = new FormData();
-        formData.append("withGst", String(data.withGst));
+        if (data.withGst !== undefined) formData.append("withGst", String(data.withGst));
         if (data.amount !== undefined) formData.append("amount", String(data.amount));
         if (data.paymentMethod) formData.append("paymentMethod", data.paymentMethod);
         if (data.voucher) formData.append("voucher", data.voucher);
@@ -4776,17 +4546,6 @@ export function useQuotationPayments(quotationId: number) {
     }
   };
 
-  const recordFinalPayment = async (data: any) => {
-    setSubmitting(true);
-    try {
-      const res = await ApiV2.quotationPayments.recordFinalPayment(quotationId, data);
-      await fetchSummary();
-      return res.data;
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   const verifyPayment = async (paymentId: number, isVerified = true, notes?: string) => {
     const res = await ApiV2.quotationPayments.verifyPayment(quotationId, paymentId, {
       isVerified,
@@ -4809,7 +4568,6 @@ export function useQuotationPayments(quotationId: number) {
     error,
     refetch: fetchSummary,
     recordPayment,
-    recordFinalPayment,
     verifyPayment,
     deletePayment,
   };
@@ -4956,56 +4714,6 @@ class ApiV2Service {
     );
   }
 
-  Future<Response> recordFinalQuotationPayment({
-    required int quotationId,
-    required double amount,
-    required String paymentMethod,
-    required bool applyGst,
-    String? customerGstNumber,
-    int? accountId,
-    String? upiId,
-    String? voucher,
-    String? referenceNumber,
-    String? paymentDate,
-    String? notes,
-    String? proofImagePath,
-  }) async {
-    if (proofImagePath != null) {
-      final formData = FormData.fromMap({
-        'amount': amount,
-        'paymentMethod': paymentMethod,
-        'applyGst': applyGst,
-        if (customerGstNumber != null) 'customerGstNumber': customerGstNumber,
-        if (accountId != null) 'accountId': accountId,
-        if (upiId != null) 'upiId': upiId,
-        if (voucher != null) 'voucher': voucher,
-        if (referenceNumber != null) 'referenceNumber': referenceNumber,
-        if (paymentDate != null) 'paymentDate': paymentDate,
-        if (notes != null) 'notes': notes,
-        'proofImage': await MultipartFile.fromFile(proofImagePath),
-      });
-      return await _dio.post(
-        '/quotation-payments/$quotationId/final',
-        data: formData,
-      );
-    }
-    return await _dio.post(
-      '/quotation-payments/$quotationId/final',
-      data: {
-        'amount': amount,
-        'paymentMethod': paymentMethod,
-        'applyGst': applyGst,
-        if (customerGstNumber != null) 'customerGstNumber': customerGstNumber,
-        if (accountId != null) 'accountId': accountId,
-        if (upiId != null) 'upiId': upiId,
-        if (voucher != null) 'voucher': voucher,
-        if (referenceNumber != null) 'referenceNumber': referenceNumber,
-        if (paymentDate != null) 'paymentDate': paymentDate,
-        if (notes != null) 'notes': notes,
-      },
-    );
-  }
-
   Future<Response> verifyQuotationPayment(
     int quotationId,
     int paymentId, {
@@ -5027,28 +4735,6 @@ class ApiV2Service {
 
   Future<Response> getQuotationPaymentVerifyView(int quotationId, int paymentId) async {
     return await _dio.get('/quotation-payments/$quotationId/$paymentId/verify-view');
-  }
-
-  Future<Response> addAdditionalService({
-    required int quotationId,
-    required String title,
-    double? sqft,
-    double? rate,
-    double? totalPrice,
-    String? warranty,
-    String? notes,
-  }) async {
-    return await _dio.post(
-      '/quotation-payments/$quotationId/additional-services',
-      data: {
-        'title': title.trim(),
-        if (sqft != null) 'sqft': sqft,
-        if (rate != null) 'rate': rate,
-        if (totalPrice != null) 'totalPrice': totalPrice,
-        if (warranty != null && warranty.trim().isNotEmpty) 'warranty': warranty.trim(),
-        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
-      },
-    );
   }
 
   // 5. Payments & Blockchain Ledger (with Proof Image Upload)
@@ -5095,70 +4781,9 @@ class ApiV2Service {
     );
   }
 
-  Future<Response> addAdditionalService({
-    required int quotationId,
-    required String title,
-    required double totalPrice,
-    double? sqft,
-    double? rate,
-    String? warranty,
-    String? notes,
-  }) async {
-    return await _dio.post(
-      '/quotations/$quotationId/additional-services',
-      data: {
-        'title': title,
-        'totalPrice': totalPrice,
-        if (sqft != null) 'sqft': sqft,
-        if (rate != null) 'rate': rate,
-        if (warranty != null) 'warranty': warranty,
-        if (notes != null) 'notes': notes,
-      },
-    );
-  }
-
-  Future<Response> recordAdditionalServicePayment({
-    required int quotationId,
-    required int serviceId,
-    required double amount,
-    required String paymentMethod,
-    String? voucher,
-    int? accountId,
-    String? upiId,
-    String? notes,
-    String? proofImagePath,
-  }) async {
-    if (proofImagePath != null) {
-      final formData = FormData.fromMap({
-        'amount': amount,
-        'paymentMethod': paymentMethod,
-        if (voucher != null) 'voucher': voucher,
-        if (accountId != null) 'accountId': accountId,
-        if (upiId != null) 'upiId': upiId,
-        if (notes != null) 'notes': notes,
-        'proofImage': await MultipartFile.fromFile(proofImagePath),
-      });
-      return await _dio.post(
-        '/quotations/$quotationId/additional-services/$serviceId/payments',
-        data: formData,
-      );
-    }
-    return await _dio.post(
-      '/quotations/$quotationId/additional-services/$serviceId/payments',
-      data: {
-        'amount': amount,
-        'paymentMethod': paymentMethod,
-        if (voucher != null) 'voucher': voucher,
-        if (accountId != null) 'accountId': accountId,
-        if (upiId != null) 'upiId': upiId,
-        if (notes != null) 'notes': notes,
-      },
-    );
-  }
-
   Future<Response> confirmFinalSettlement({
     required int quotationId,
-    required bool withGst,
+    bool? withGst, // optional: follows the quotation's tax status
     double? amount,
     String? paymentMethod,
     String? voucher,
@@ -5169,7 +4794,7 @@ class ApiV2Service {
   }) async {
     if (proofImagePath != null) {
       final formData = FormData.fromMap({
-        'withGst': withGst,
+        if (withGst != null) 'withGst': withGst,
         if (amount != null) 'amount': amount,
         if (paymentMethod != null) 'paymentMethod': paymentMethod,
         if (voucher != null) 'voucher': voucher,
@@ -5186,7 +4811,7 @@ class ApiV2Service {
     return await _dio.post(
       '/quotations/$quotationId/final-settlement',
       data: {
-        'withGst': withGst,
+        if (withGst != null) 'withGst': withGst,
         if (amount != null) 'amount': amount,
         if (paymentMethod != null) 'paymentMethod': paymentMethod,
         if (voucher != null) 'voucher': voucher,

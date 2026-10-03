@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { apiClient } from '../../../core/api/apiClient';
 import { API_ENDPOINTS } from '../../../core/config/config';
 
@@ -109,8 +110,33 @@ export const quotationRepository = {
   getQuotationPdfView: async (quotationId) => {
     try {
       const cleanId = String(quotationId).replace(/\D/g, '') || quotationId;
-      console.log(`[getQuotationPdfView] Fetching ${API_ENDPOINTS.QUOTATIONS}/${cleanId}/pdf-view`);
-      const response = await apiClient.get(`${API_ENDPOINTS.QUOTATIONS}/${cleanId}/pdf-view`);
+      const endpoint = `${API_ENDPOINTS.QUOTATIONS}/${cleanId}/pdf-view`;
+      const fullUrl = `${apiClient.defaults.baseURL || ''}${endpoint}`;
+
+      let token = null;
+      try {
+        token = await AsyncStorage.getItem('auth_token');
+      } catch (_e) {}
+
+      console.log('[PDF] API request started');
+      console.log('PDF VIEW URL:', fullUrl);
+      console.log('QUOTATION ID:', cleanId);
+      console.log('TOKEN EXISTS:', !!token);
+
+      const response = await apiClient.get(endpoint, {
+        headers: {
+          Accept: 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      console.log('[PDF] API request successful');
+      console.log('PDF VIEW STATUS:', response.status);
+      console.log('PDF VIEW CONTENT TYPE:', response.headers?.['content-type'] || response.headers?.['Content-Type']);
+      console.log('PDF VIEW RESPONSE:', JSON.stringify(response.data, null, 2));
+      console.log('PDF VIEW DATA:', JSON.stringify(response.data?.data, null, 2));
+      console.log('[PDF] quotation data received');
+
       const data = response.data;
       const quotation = data?.data?.quotation || data?.quotation || data?.data || data;
       return {
@@ -471,6 +497,101 @@ export const quotationRepository = {
         success: false,
         message: err.response?.data?.message || err.message || 'Failed to add service from existing master data',
         error: err,
+      };
+    }
+  },
+
+  /**
+   * GET /api/v2/quotations/:id/proforma-invoice
+   * Fetches the existing proforma invoice for a quotation (if any).
+   * 404 means none exists yet.
+   */
+  getProformaInvoice: async (quotationId) => {
+    try {
+      const cleanId = String(quotationId).replace(/\D/g, '') || quotationId;
+      const response = await apiClient.get(`${API_ENDPOINTS.QUOTATIONS}/${cleanId}/proforma-invoice`);
+      const resData = response?.data;
+      const invoice = resData?.data || resData;
+      return {
+        success: true,
+        data: invoice,
+        poNumber: invoice?.poNumber || null,
+        invoiceNumber: invoice?.invoiceNumber || null,
+      };
+    } catch (err) {
+      const status = err?.response?.status;
+      if (status === 404) {
+        // No invoice yet — not an error
+        return { success: false, notFound: true, poNumber: null, data: null };
+      }
+      console.warn(`[getProformaInvoice] Error for quotation ${quotationId}:`, err?.response?.data || err.message);
+      return {
+        success: false,
+        message: err.response?.data?.message || err.message || 'Failed to fetch proforma invoice',
+        poNumber: null,
+        data: null,
+      };
+    }
+  },
+
+  /**
+   * POST /api/v2/quotations/:id/proforma-invoice
+   * Creates the proforma invoice (Admin/Master only). Requires bankDetails + terms; poNumber is optional.
+   */
+  createProformaInvoice: async (quotationId, { poNumber, bankDetails, terms }) => {
+    try {
+      const cleanId = String(quotationId).replace(/\D/g, '') || quotationId;
+      const body = { bankDetails, terms };
+      if (poNumber) body.poNumber = poNumber;
+      const response = await apiClient.post(
+        `${API_ENDPOINTS.QUOTATIONS}/${cleanId}/proforma-invoice`,
+        body
+      );
+      const resData = response?.data;
+      const invoice = resData?.data || resData;
+      return {
+        success: true,
+        data: invoice,
+        poNumber: invoice?.poNumber || null,
+        invoiceNumber: invoice?.invoiceNumber || null,
+        message: resData?.message || 'Proforma invoice generated',
+      };
+    } catch (err) {
+      console.warn(`[createProformaInvoice] Error for quotation ${quotationId}:`, err?.response?.data || err.message);
+      return {
+        success: false,
+        message: err.response?.data?.message || err.message || 'Failed to create proforma invoice',
+        statusCode: err?.response?.status,
+      };
+    }
+  },
+
+  /**
+   * PATCH /api/v2/quotations/:id/proforma-invoice
+   * Updates poNumber (and optionally bankDetails / terms) on an existing proforma invoice.
+   * poNumber: null clears it.
+   */
+  updateProformaInvoice: async (quotationId, fields) => {
+    try {
+      const cleanId = String(quotationId).replace(/\D/g, '') || quotationId;
+      const response = await apiClient.patch(
+        `${API_ENDPOINTS.QUOTATIONS}/${cleanId}/proforma-invoice`,
+        fields
+      );
+      const resData = response?.data;
+      const invoice = resData?.data || resData;
+      return {
+        success: true,
+        data: invoice,
+        poNumber: invoice?.poNumber || null,
+        message: resData?.message || 'Proforma invoice updated',
+      };
+    } catch (err) {
+      console.warn(`[updateProformaInvoice] Error for quotation ${quotationId}:`, err?.response?.data || err.message);
+      return {
+        success: false,
+        message: err.response?.data?.message || err.message || 'Failed to update proforma invoice',
+        statusCode: err?.response?.status,
       };
     }
   },

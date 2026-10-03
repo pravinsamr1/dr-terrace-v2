@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Dimensions,
   Image,
@@ -22,6 +22,8 @@ import { appointmentRepository } from '../../../features/appointments/api/appoin
 import { authRepository } from '../../../features/auth/api/authRepository';
 import { employeeRepository } from '../../../features/employees/api/employeeRepository';
 import { MaterialAlertModal } from '../../../shared/components/material';
+import { notificationRepository } from '../../notifications/api/notificationRepository';
+import { subscribeToIncomingNotifications } from '../../notifications/utils/pushNotifications';
 import { MONTH_NAMES } from '../../../shared/constants/fallbackDefaults';
 import {
   AccountGroupIcon3D,
@@ -173,6 +175,16 @@ export default function HomeScreen() {
     loadData();
   }, [loadData]));
 
+  // Unread notifications for the bell badge: refreshed on focus and when a push arrives while the app is open
+  const [unreadCount, setUnreadCount] = useState(0);
+  const loadUnreadCount = useCallback(async () => {
+    setUnreadCount(await notificationRepository.getUnreadCount());
+  }, []);
+  useFocusEffect(useCallback(() => {
+    loadUnreadCount();
+  }, [loadUnreadCount]));
+  useEffect(() => subscribeToIncomingNotifications(() => loadUnreadCount()), [loadUnreadCount]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadData();
@@ -262,7 +274,7 @@ export default function HomeScreen() {
           </View>
 
           {/* Header Action Buttons */}
-          {/* <View style={styles.headerActions}>
+          <View style={styles.headerActions}>
             <TouchableOpacity
               style={[styles.actionButton, { backgroundColor: isDark ? '#1C1C1C' : '#FFFFFF' }]}
               activeOpacity={0.7}
@@ -273,8 +285,13 @@ export default function HomeScreen() {
                 size={24}
                 color={isDark ? '#F1F5F9' : '#1E293B'}
               />
+              {unreadCount > 0 && (
+                <View style={styles.bellBadge}>
+                  <Text style={styles.bellBadgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+                </View>
+              )}
             </TouchableOpacity>
-          </View> */}
+          </View>
         </View>
 
         {/* Section: Today's Appointments */}
@@ -859,6 +876,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 8,
+  },
+  bellBadge: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    borderRadius: 9,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bellBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '800',
   },
   notificationBadge: {
     position: 'absolute',

@@ -185,6 +185,26 @@ export function useWarranty(initialQuotationId = null) {
     }
   }, [quotationId, loadWarrantyData]);
 
+  /**
+   * Verify the generated warranty (Master Admin Only). Until then only the master admin can view or share it.
+   */
+  const verify = useCallback(async () => {
+    if (!quotationId) return { success: false, message: 'Quotation ID missing' };
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const res = await warrantyRepository.verifyWarranty(quotationId);
+      if (res.success) {
+        await loadWarrantyData(quotationId);
+      } else {
+        setError(res.message);
+      }
+      return res;
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [quotationId, loadWarrantyData]);
+
   return {
     quotationId,
     setQuotationId,
@@ -200,6 +220,7 @@ export function useWarranty(initialQuotationId = null) {
     updateConfig,
     generate,
     removeWarranty,
+    verify,
   };
 }
 

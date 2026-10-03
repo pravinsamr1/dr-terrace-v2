@@ -36,14 +36,19 @@ TextInput.displayName = 'TextInput';
  * 3. Configured: Displays saved configuration, supports editing via PATCH, and generating certificate
  * 4. Generated / Active: Shows official verified warranty card, itemized coverage, and an Admin option to delete and redo it
  *
- * Only an Admin (isAdmin) can configure, edit, generate or delete a warranty. A Field Employee sees the same
- * information read-only.
+ * Anyone (master admin, office employee, field employee) can configure, edit and generate a warranty. Only an Admin
+ * (isAdmin) can delete it.
+ *
+ * A generated warranty must be verified by the master admin (isMasterAdmin). Until then only the master admin can
+ * view it (and verify it); admins and field employees see a "waiting for verification" card and cannot open or
+ * share the warranty letter.
  */
 export default function WarrantyTab({
   quotationId,
   app,
   payView,
   isAdmin = false,
+  isMasterAdmin = false,
   onNavigatePaymentTab,
 }) {
   const router = useRouter();
@@ -61,6 +66,7 @@ export default function WarrantyTab({
     updateConfig,
     generate,
     removeWarranty,
+    verify,
   } = useWarranty(quotationId);
 
   // Form states for Unconfigured & Edit mode
@@ -128,7 +134,6 @@ export default function WarrantyTab({
 
   // Handle Save (Create or Update)
   const handleSaveConfig = async () => {
-    if (!isAdmin) return;
     const activeServicesList = config?.services?.length ? config.services : availableServices;
     if (!activeServicesList || activeServicesList.length === 0) {
       Alert.alert('No Services', 'No services found to configure warranty for.');
@@ -183,7 +188,6 @@ export default function WarrantyTab({
 
   // Handle Generate
   const handleGenerateWarranty = () => {
-    if (!isAdmin) return;
     Alert.alert(
       'Generate Warranty Certificate',
       'This will snapshot the current configuration into an official immutable warranty record with specific start and end dates. Proceed?',
@@ -222,6 +226,30 @@ export default function WarrantyTab({
               Alert.alert('Warranty Deleted', 'Warranty cleared. The configuration is preserved and can be edited.');
             } else {
               Alert.alert('Deletion Failed', res.message || 'Could not delete warranty.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Handle Verify (Master Admin only)
+  const handleVerifyWarranty = () => {
+    if (!isMasterAdmin) return;
+    Alert.alert(
+      'Verify Warranty',
+      'Once verified, admins and field employees can view and share this warranty letter. Proceed?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Verify',
+          style: 'default',
+          onPress: async () => {
+            const res = await verify();
+            if (res.success) {
+              Alert.alert('Warranty Verified', 'The warranty can now be viewed and shared.');
+            } else {
+              Alert.alert('Verification Failed', res.message || 'Could not verify the warranty.');
             }
           },
         },
@@ -377,6 +405,95 @@ export default function WarrantyTab({
   // 4. Generated State (Active Digital Warranty Certificate)
   if (warranty && !isEditingConfig) {
     const items = warranty.items || [];
+    // Servers that do not send isVerified at all are treated as "no verification step" (nothing is hidden)
+    const isVerified = warranty.isVerified === true;
+    const isPendingVerification = warranty.isVerified === false;
+    const canViewWarranty = !isPendingVerification || isMasterAdmin;
+    // A verified warranty can only be deleted by the master admin
+    const canDeleteWarranty = isAdmin && (isMasterAdmin || !isVerified);
+
+    const deleteButton = canDeleteWarranty ? (
+      <TouchableOpacity
+        style={{
+          borderColor: '#EF4444',
+          borderWidth: 1.5,
+          height: 46,
+          borderRadius: 14,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+          backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : '#FEF2F2',
+        }}
+        onPress={handleDeleteWarranty}
+        disabled={isSubmitting}
+        activeOpacity={0.85}
+      >
+        {isSubmitting ? (
+          <ActivityIndicator size="small" color="#EF4444" />
+        ) : (
+          <Ionicons name="trash-outline" size={18} color="#EF4444" />
+        )}
+        <Text style={{ color: '#EF4444', fontSize: 13, fontWeight: '700' }}>
+          Delete Warranty (Unlock Configuration)
+        </Text>
+      </TouchableOpacity>
+    ) : null;
+
+    // Not verified yet and not the master admin: the warranty cannot be viewed or shared
+    if (!canViewWarranty) {
+      return (
+        <View style={{
+          width: '100%',
+          backgroundColor: isDark ? '#1C1C1C' : '#FFFFFF',
+          borderRadius: 20,
+          padding: 20,
+          borderWidth: 1,
+          borderColor: isDark ? '#334155' : '#E2E8F0',
+          marginBottom: 20,
+        }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+            <View style={{
+              width: 44,
+              height: 44,
+              borderRadius: 14,
+              backgroundColor: isDark ? 'rgba(217, 119, 6, 0.18)' : '#FEF3C7',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}>
+              <Ionicons name="hourglass-outline" size={22} color="#D97706" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 16, fontWeight: '800', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                Warranty Awaiting Verification
+              </Text>
+              <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', marginTop: 1 }}>
+                Receipt: {warranty.receiptNumber || eligibility?.receiptNumber || 'Locked Receipt'}
+              </Text>
+            </View>
+          </View>
+
+          <View style={{
+            flexDirection: 'row',
+            alignItems: 'flex-start',
+            gap: 10,
+            backgroundColor: isDark ? '#080808' : '#F8FAFC',
+            borderWidth: 1,
+            borderColor: isDark ? '#334155' : '#E2E8F0',
+            borderRadius: 14,
+            padding: 14,
+            marginBottom: deleteButton ? 10 : 0,
+          }}>
+            <Ionicons name="lock-closed-outline" size={18} color={isDark ? '#94A3B8' : '#64748B'} style={{ marginTop: 1 }} />
+            <Text style={{ flex: 1, fontSize: 13, color: isDark ? '#CBD5E1' : '#475569', lineHeight: 18 }}>
+              The master admin must verify this warranty before it can be viewed or shared.
+            </Text>
+          </View>
+
+          {deleteButton}
+        </View>
+      );
+    }
 
     return (
       <View style={{ width: '100%', paddingBottom: 24 }}>
@@ -399,21 +516,21 @@ export default function WarrantyTab({
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
                 <Ionicons name="shield-checkmark" size={18} color="#4F46E5" />
                 <Text style={{ fontSize: 11, fontWeight: '800', color: '#4F46E5', textTransform: 'uppercase', letterSpacing: 0.8 }}>
-                  Verified Certificate
+                  {isPendingVerification ? 'Pending Verification' : 'Verified Certificate'}
                 </Text>
               </View>
-              <Text style={{ fontSize: 18, fontWeight: '800', color: isDark ? '#FFFFFF' : '#1E1B4B' }}>
-                {warranty.receiptNumber || 'Official Warranty'}
+              <Text style={{ fontSize: 16, fontWeight: '800', color: isDark ? '#FFFFFF' : '#1E1B4B' }}>
+                {warranty.receiptNumber}
               </Text>
             </View>
             <View style={{
-              backgroundColor: '#10B981',
+              backgroundColor: isPendingVerification ? '#D97706' : '#10B981',
               paddingVertical: 4,
               paddingHorizontal: 10,
               borderRadius: 8,
             }}>
-              <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '800' }}>
-                ACTIVE COVERAGE
+              <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '800' }}>
+                {isPendingVerification ? 'NOT VERIFIED' : 'ACTIVE COVERAGE'}
               </Text>
             </View>
           </View>
@@ -437,6 +554,15 @@ export default function WarrantyTab({
                 {formatDateDDMMYY(warranty.generatedAt)}
               </Text>
             </View>
+            {isVerified && (
+              <View>
+                <Text style={{ fontSize: 11, color: isDark ? '#94A3B8' : '#64748B' }}>Verified By</Text>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: isDark ? '#FFFFFF' : '#0F172A' }}>
+                  {warranty.verifiedBy || 'Master Admin'}
+                  {warranty.verifiedAt ? ` • ${formatDateDDMMYY(warranty.verifiedAt)}` : ''}
+                </Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -500,6 +626,33 @@ export default function WarrantyTab({
 
         {/* Action Buttons */}
         <View style={{ gap: 10 }}>
+          {/* Master admin only: verify the warranty so admins and field employees can view and share it */}
+          {isMasterAdmin && isPendingVerification && (
+            <TouchableOpacity
+              style={{
+                backgroundColor: '#10B981',
+                height: 48,
+                borderRadius: 14,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+              }}
+              onPress={handleVerifyWarranty}
+              disabled={isSubmitting}
+              activeOpacity={0.85}
+            >
+              {isSubmitting ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Ionicons name="shield-checkmark-outline" size={18} color="#FFFFFF" />
+              )}
+              <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '700' }}>
+                Verify Warranty
+              </Text>
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity
             style={{
               backgroundColor: '#4F46E5',
@@ -527,34 +680,8 @@ export default function WarrantyTab({
             </Text>
           </TouchableOpacity>
 
-          {/* Admin Deletion Action */}
-          {isAdmin && (
-            <TouchableOpacity
-              style={{
-                borderColor: '#EF4444',
-                borderWidth: 1.5,
-                height: 46,
-                borderRadius: 14,
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-                backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : '#FEF2F2',
-              }}
-              onPress={handleDeleteWarranty}
-              disabled={isSubmitting}
-              activeOpacity={0.85}
-            >
-              {isSubmitting ? (
-                <ActivityIndicator size="small" color="#EF4444" />
-              ) : (
-                <Ionicons name="trash-outline" size={18} color="#EF4444" />
-              )}
-              <Text style={{ color: '#EF4444', fontSize: 13, fontWeight: '700' }}>
-                Delete Warranty (Unlock Configuration)
-              </Text>
-            </TouchableOpacity>
-          )}
+          {/* Admin Deletion Action (a verified warranty: master admin only) */}
+          {deleteButton}
         </View>
       </View>
     );
@@ -644,27 +771,7 @@ export default function WarrantyTab({
           ))}
         </View>
 
-        {/* Field employees can only view the configuration */}
-        {!isAdmin && (
-          <View style={{
-            flexDirection: 'row',
-            alignItems: 'flex-start',
-            gap: 10,
-            backgroundColor: isDark ? '#080808' : '#F8FAFC',
-            borderWidth: 1,
-            borderColor: isDark ? '#334155' : '#E2E8F0',
-            borderRadius: 14,
-            padding: 14,
-          }}>
-            <Ionicons name="eye-outline" size={18} color={isDark ? '#94A3B8' : '#64748B'} style={{ marginTop: 1 }} />
-            <Text style={{ flex: 1, fontSize: 13, color: isDark ? '#CBD5E1' : '#475569', lineHeight: 18 }}>
-              View only. An admin will generate the official warranty certificate.
-            </Text>
-          </View>
-        )}
-
-        {/* Action Buttons (Admin only) */}
-        {isAdmin && (
+        {/* Action Buttons (anyone can generate or edit the configuration; the master admin verifies the result) */}
         <View style={{ gap: 10 }}>
           <TouchableOpacity
             style={{
@@ -715,59 +822,6 @@ export default function WarrantyTab({
               Edit Warranty Configuration
             </Text>
           </TouchableOpacity>
-        </View>
-        )}
-      </View>
-    );
-  }
-
-  // 2a. Not configured yet, viewed by a Field Employee: nothing to configure, read-only notice
-  if (!isAdmin) {
-    return (
-      <View style={{
-        width: '100%',
-        backgroundColor: isDark ? '#1C1C1C' : '#FFFFFF',
-        borderRadius: 20,
-        padding: 20,
-        borderWidth: 1,
-        borderColor: isDark ? '#334155' : '#E2E8F0',
-        marginBottom: 20,
-      }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 }}>
-          <View style={{
-            width: 44,
-            height: 44,
-            borderRadius: 14,
-            backgroundColor: isDark ? 'rgba(79, 70, 229, 0.18)' : '#EEF2FF',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}>
-            <Ionicons name="shield-outline" size={22} color="#4F46E5" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 16, fontWeight: '800', color: isDark ? '#FFFFFF' : '#0F172A' }}>
-              Warranty Not Configured Yet
-            </Text>
-            <Text style={{ fontSize: 12, color: isDark ? '#94A3B8' : '#64748B', marginTop: 1 }}>
-              Receipt: {eligibility?.receiptNumber || 'Locked Receipt'}
-            </Text>
-          </View>
-        </View>
-
-        <View style={{
-          flexDirection: 'row',
-          alignItems: 'flex-start',
-          gap: 10,
-          backgroundColor: isDark ? '#080808' : '#F8FAFC',
-          borderWidth: 1,
-          borderColor: isDark ? '#334155' : '#E2E8F0',
-          borderRadius: 14,
-          padding: 14,
-        }}>
-          <Ionicons name="eye-outline" size={18} color={isDark ? '#94A3B8' : '#64748B'} style={{ marginTop: 1 }} />
-          <Text style={{ flex: 1, fontSize: 13, color: isDark ? '#CBD5E1' : '#475569', lineHeight: 18 }}>
-            View only. An admin will configure and generate the warranty. It will appear here once it is ready.
-          </Text>
         </View>
       </View>
     );

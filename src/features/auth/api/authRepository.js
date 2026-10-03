@@ -11,7 +11,7 @@ const USER_DATA_KEY = 'user_data';
  * v2 returns role as "ADMIN" or "FIELD_EMPLOYEE".
  * These helpers provide backward-compatible checks.
  */
-const ADMIN_ROLES = ['ADMIN', 'admin', 'master'];
+const ADMIN_ROLES = ['ADMIN', 'MASTER_ADMIN', 'admin', 'master'];
 const FIELD_EMPLOYEE_ROLES = ['FIELD_EMPLOYEE', 'field-employee', 'employee'];
 
 function isAdminRole(role) {
@@ -40,8 +40,13 @@ function normalizeUser(rawUser) {
 
   return {
     ...rawUser,
+    // `role` stays "ADMIN" / "FIELD_EMPLOYEE": several screens compare it to those values. `serverRole` is the exact
+    // role the server sent (for example "MASTER_ADMIN"). Both are saved in local storage at login.
     role: normalizedRole,
+    serverRole: rawRole || normalizedRole,
     isAdmin: !isFieldEmp,
+    // The one master admin (role "MASTER_ADMIN"); also an admin. Only they can verify a warranty.
+    isMasterAdmin: !isFieldEmp && (rawUser.isMasterAdmin === true || rawRole === 'MASTER_ADMIN'),
     isFieldEmployee: isFieldEmp,
   };
 }
@@ -169,6 +174,14 @@ export const authRepository = {
   },
 
   logout: async () => {
+    // First, while the login token still exists: stop pushes for this phone.
+    // Loaded here (not at the top of the file) so the auth module does not pull in Expo's notification packages.
+    try {
+      const { unregisterPushDevice } = require('../../notifications/utils/pushRegistration');
+      await unregisterPushDevice();
+    } catch (pushErr) {
+      console.warn('Could not unregister this device from push notifications:', pushErr?.message);
+    }
     try {
       await apiClient.post(API_ENDPOINTS.LOGOUT);
     } catch (error) {

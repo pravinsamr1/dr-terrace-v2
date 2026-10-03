@@ -170,6 +170,29 @@ export const warrantyRepository = {
       };
     }
   },
+
+  /**
+   * 8. Verify Warranty (Master Admin Only)
+   * POST /api/v2/quotations/:id/warranty/verify
+   * Until it is verified, only the master admin can view or share the warranty.
+   */
+  async verifyWarranty(quotationId) {
+    if (!quotationId) return { success: false, message: 'Quotation ID required' };
+    try {
+      const res = await ApiV2.warranty.verifyWarranty(quotationId, { isVerified: true });
+      const data = res?.data?.data || res?.data?.warranty || null;
+      return {
+        success: true,
+        message: res?.data?.message || 'Warranty verified',
+        warranty: data,
+      };
+    } catch (err) {
+      return {
+        success: false,
+        message: extractApiErrorMessage(err, 'Failed to verify warranty'),
+      };
+    }
+  },
 };
 
 export default warrantyRepository;

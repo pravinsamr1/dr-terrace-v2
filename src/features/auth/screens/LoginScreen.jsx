@@ -154,7 +154,7 @@ export default function LoginScreen() {
               ]}
             >
               <Text style={styles.helloText}>Hello !</Text>
-              <Text style={styles.welcomeText}>Admin to NEXA Login</Text>
+              <Text style={styles.welcomeText}>NEXA Admin Login</Text>
             </View>
           </TouchableWithoutFeedback>
 
@@ -165,7 +165,7 @@ export default function LoginScreen() {
               { paddingBottom: keyboardVisible ? 24 : Math.max(insets.bottom + 24, 34) },
             ]}
           >
-            <Text style={styles.loginTitle}>Admin Login</Text>
+            <Text style={styles.loginTitle}>Login</Text>
 
             {/* Mobile Number / Username Input */}
             <View style={[styles.inputWrapper, errors.mobileNumber && styles.inputWrapperError]}>

@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   StyleSheet,
   View,
@@ -7,12 +7,14 @@ import {
   TouchableOpacity,
   StatusBar,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from '../../../core/hooks/useColorScheme';
 import InnerHeader from '../../../shared/components/InnerHeader';
+import { notificationRepository } from '../api/notificationRepository';
 
 const ICON_COLOR_MAP = {
   calendar: '#0052CC',
@@ -21,6 +23,7 @@ const ICON_COLOR_MAP = {
   megaphone: '#8B5CF6',
   'information-circle': '#3B82F6',
   alert: '#EF4444',
+  'shield-checkmark': '#4F46E5',
 };
 
 const getIconBg = (iconName, isDark) => {
@@ -31,6 +34,7 @@ const getIconBg = (iconName, isDark) => {
     megaphone: isDark ? '#4C1D95' : '#EDE9FE',
     'information-circle': isDark ? '#1E3A6E' : '#DBEAFE',
     alert: isDark ? '#7F1D1D' : '#FEE2E2',
+    'shield-checkmark': isDark ? '#312E81' : '#E0E7FF',
   };
   return colors[iconName] || (isDark ? '#1C1C1C' : '#F1F5F9');
 };
@@ -40,7 +44,25 @@ export default function NotificationDetailScreen() {
   const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
-  const notif = null;
+  const { id } = useLocalSearchParams();
+  const [notif, setNotif] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // The backend has no "get one" call, so find it in the inbox; opening it marks it as read
+  useEffect(() => {
+    let isActive = true;
+    (async () => {
+      const res = await notificationRepository.list({ limit: 100 });
+      const found = res.success ? res.data.find((n) => n.id === String(id)) : null;
+      if (!isActive) return;
+      setNotif(found || null);
+      setIsLoading(false);
+      if (found && !found.read) notificationRepository.markRead(found.id);
+    })();
+    return () => {
+      isActive = false;
+    };
+  }, [id]);
 
   useFocusEffect(
     useCallback(() => {
@@ -51,6 +73,14 @@ export default function NotificationDetailScreen() {
       }
     }, [isDark])
   );
+
+  if (isLoading) {
+    return (
+      <View style={[styles.container, isDark && styles.containerDark, { alignItems: 'center', justifyContent: 'center' }]}>
+        <ActivityIndicator size="large" color={isDark ? '#F8FAFC' : '#0052CC'} />
+      </View>
+    );
+  }
 
   if (!notif) {
     return (
@@ -123,7 +153,7 @@ export default function NotificationDetailScreen() {
             </View>
             <View style={styles.metaInfo}>
               <Text style={[styles.metaLabel, isDark && styles.subtextDark]}>Recipient</Text>
-              <Text style={[styles.metaValue, isDark && styles.textDark]}>{notif.targetEmployee}</Text>
+              <Text style={[styles.metaValue, isDark && styles.textDark]}>You</Text>
             </View>
           </View>
 

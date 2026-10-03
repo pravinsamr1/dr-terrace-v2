@@ -15,8 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { useTabBar } from '../../../core/context/TabBarContext';
 import { useColorScheme } from '../../../core/hooks/useColorScheme';
-import { createPdfFile, sharePdfFile, toSafeFileName } from '../../../core/utils/pdfShare';
-import { sendDocumentOnWhatsApp } from '../../whatsapp/utils/sendDocumentOnWhatsApp';
+import { createPdfFile, sharePdfFile, shareToWhatsApp, toSafeFileName } from '../../../core/utils/pdfShare';
 import InnerHeader from '../../../shared/components/InnerHeader';
 import { MaterialOverlayLoader, MaterialPageLoader } from '../../../shared/components/material';
 import { quotationRepository } from '../../quotations/api/quotationRepository';
@@ -39,7 +38,7 @@ const A4_HEIGHT = 842;
 
 export default function ProformaInvoiceScreen() {
   const router = useRouter();
-  const { id, quoteId } = useLocalSearchParams();
+  const { id, quoteId, poNumber } = useLocalSearchParams();
   const { setTabBarVisible } = useTabBar();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
@@ -71,17 +70,45 @@ export default function ProformaInvoiceScreen() {
         if (quotation.isTaxCustomer !== true) {
           throw new Error('A proforma invoice is only available for tax customers.');
         }
+
+        // Prefer the PO number stored on the server; fall back to route param
+        let resolvedPoNumber = poNumber || null;
+        let resolvedBankDetails = null;
+        let resolvedTerms = null;
+        let resolvedQuotationTermsHtml = null;
+        let resolvedInvoiceNumber = null;
+        let resolvedInvoiceDate = null;
+        const serverInvoice = await quotationRepository.getProformaInvoice(quoteId);
+        if (serverInvoice.success && serverInvoice.data) {
+          resolvedPoNumber = serverInvoice.poNumber || serverInvoice.data.poNumber || resolvedPoNumber;
+          resolvedBankDetails = serverInvoice.data.bankDetails || null;
+          resolvedTerms = serverInvoice.data.terms || null;
+          // HTML quotation terms (numbered list from server)
+          resolvedQuotationTermsHtml = serverInvoice.data.quotationTerms || null;
+          resolvedInvoiceNumber = serverInvoice.invoiceNumber || serverInvoice.data.invoiceNumber || null;
+          resolvedInvoiceDate = serverInvoice.data.invoiceDate || null;
+        }
+
+        const receiptData = buildProformaReceiptData(
+          quotation,
+          resolvedPoNumber,
+          resolvedBankDetails,
+          resolvedTerms,
+          resolvedQuotationTermsHtml,
+          resolvedInvoiceNumber,
+          resolvedInvoiceDate
+        );
         // Built once so the preview and the shared PDF carry the same date
         const html = generateTaxInvoiceHTML(
           null,
           quotation.customerGstNumber || '',
-          buildProformaReceiptData(quotation),
+          receiptData,
           { isFullServiceReceipt: 'true', docTitle: PROFORMA_DOC_TITLE },
           null
         );
         nextInvoice = {
           html,
-          invoiceNo: getProformaInvoiceNumber(quotation),
+          invoiceNo: resolvedInvoiceNumber || getProformaInvoiceNumber(quotation),
           clientName: String(quotation.customer?.name || 'Customer').trim(),
           phone: quotation.customer?.mobile || quotation.mobileNumber || quotation.phone,
         };
@@ -97,7 +124,7 @@ export default function ProformaInvoiceScreen() {
     return () => {
       isMounted = false;
     };
-  }, [quoteId]);
+  }, [quoteId, poNumber]);
 
   const handleBack = useCallback(() => {
     if (router.canGoBack()) {
@@ -145,22 +172,11 @@ export default function ProformaInvoiceScreen() {
     if (!invoice || isSharing) return;
     try {
       setIsSharing(true);
-      // Sends from the business WhatsApp number when WhatsApp Business is set up; otherwise opens the share sheet
-      await sendDocumentOnWhatsApp({
-        documentType: 'receipt',
-        documentLabel: 'proforma invoice',
-        customerName: invoice.clientName,
+      const { shareUri } = await preparePdf();
+      await shareToWhatsApp({
+        uri: shareUri,
+        title: `Send Proforma Invoice - ${invoice.invoiceNo} via WhatsApp`,
         phone: invoice.phone,
-        bodyParams: [invoice.clientName, 'proforma invoice', invoice.invoiceNo],
-        onBusyChange: setIsSendingWhatsApp,
-        buildPdf: async () => {
-          const { shareUri, fileName } = await preparePdf();
-          return { uri: shareUri, fileName };
-        },
-        fallbackShare: async () => {
-          const { shareUri } = await preparePdf();
-          await sharePdfFile({ uri: shareUri, title: `Send Proforma Invoice - ${invoice.invoiceNo} via WhatsApp` });
-        },
       });
     } catch (error) {
       Alert.alert('Error', `Failed to share the proforma invoice:\n${error?.message || String(error)}`);

@@ -13,16 +13,16 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { logoBase64 } from '../../../shared/constants/LogoBase64';
+import { plusJakartaSansFontCss } from '../../../shared/constants/PlusJakartaSansFontCss';
 import { appointmentRepository } from '../../appointments/api/appointmentRepository';
 import { clientRepository } from '../../clients/api/clientRepository';
 import { warrantyRepository } from '../api/warrantyRepository';
+import { authRepository } from '../../auth/api/authRepository';
 import { useColorScheme } from '../../../core/hooks/useColorScheme';
 import InnerHeader from '../../../shared/components/InnerHeader';
 import { MaterialOverlayLoader } from '../../../shared/components/material';
 import { formatDateDDMMYY } from '../../../core/utils/dateFormat';
-import { createPdfFile, sharePdfFile, toSafeFileName } from '../../../core/utils/pdfShare';
-import { sendDocumentOnWhatsApp } from '../../whatsapp/utils/sendDocumentOnWhatsApp';
-import { isWhatsAppBusinessConfigured } from '../../whatsapp/config/whatsappBusinessConfig';
+import { createPdfFile, sharePdfFile, shareToWhatsApp, toSafeFileName } from '../../../core/utils/pdfShare';
 import { transformStyleForJakarta } from '../../../core/theme/initFonts';
 
 const Text = React.forwardRef((props, ref) => (
@@ -39,12 +39,15 @@ export default function WarrantyLetterScreen() {
   const { id, quotationId } = useLocalSearchParams();
   const [appointment, setAppointment] = React.useState(null);
   const [officialWarranty, setOfficialWarranty] = React.useState(null);
+  const [isMasterAdmin, setIsMasterAdmin] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSendingWhatsApp, setIsSendingWhatsApp] = React.useState(false);
 
   React.useEffect(() => {
     async function loadData() {
       setIsLoading(true);
+      const user = await authRepository.getUser();
+      setIsMasterAdmin(user?.isMasterAdmin === true);
       const cleanId = id ? String(id).replace(/^DR/i, '').trim() : null;
       let appData = null;
       if (cleanId) {
@@ -88,6 +91,23 @@ export default function WarrantyLetterScreen() {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
         <Text style={{ color: isDark ? '#fff' : '#000' }}>Warranty not found.</Text>
+        <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 20 }}>
+          <Text style={{ color: '#0052CC' }}>Go Back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // A warranty must be verified by the master admin before anyone else can view or share the letter
+  if (officialWarranty?.isVerified === false && !isMasterAdmin) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32 }]}>
+        <Text style={{ color: isDark ? '#fff' : '#000', fontSize: 16, fontWeight: '700', textAlign: 'center' }}>
+          This warranty has not been verified yet.
+        </Text>
+        <Text style={{ color: isDark ? '#CBD5E1' : '#475569', marginTop: 8, textAlign: 'center' }}>
+          The master admin must verify it before it can be viewed or shared.
+        </Text>
         <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 20 }}>
           <Text style={{ color: '#0052CC' }}>Go Back</Text>
         </TouchableOpacity>
@@ -150,7 +170,7 @@ export default function WarrantyLetterScreen() {
   const createWarrantyPdf = async () => {
     const htmlContent =
       '<html><head>' +
-      '<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">' +
+      '<style>' + plusJakartaSansFontCss + '</style>' +
       '<style>' +
       '@page{margin:44px 52px;}' +
       'body{font-family:"Plus Jakarta Sans",Helvetica,Arial,sans-serif;font-size:13.5px;color:#1e293b;line-height:1.65;}' +
@@ -178,7 +198,7 @@ export default function WarrantyLetterScreen() {
       '<span></span>' +
       (siteEngineerCode ? '<span class="meta-r">Site Engineer coad -' + siteEngineerCode + '</span>' : '') +
       '</div><hr class="thin"/>' +
-      '<p>This is to certify that we have done a <b>Waterproofing or Heatproofing or Waterproofing cum Heatproofing </b> in the below mentioned building if require in future in order to claim the warranty please submit this along with your building leaking pictures.</p>' +
+      '<p>This is to certify that we have done a Turn Key contract in this below mentioned building if require in future in order to claim the warranty please submit this along with pictures which are related to your complaint.</p>' +
       '<p><span class="lbl">Warranty For:</span>&nbsp;&nbsp;<span class="red">' + clientLine + '</span></p>' +
       '<p><span class="lbl">Work Completed:</span> <span class="red">' + serviceType.toUpperCase() + ' COMPLETED ON ' + completedDate + '.</span></p>' +
       warrantyItemsHtml +
@@ -208,22 +228,19 @@ export default function WarrantyLetterScreen() {
     }
   };
 
-  // Sends the warranty letter from the business WhatsApp number (shown only when WhatsApp Business is set up)
-  const sendOnWhatsAppBusiness = async () => {
+  const sendOnWhatsApp = async () => {
     try {
-      const customerName = appointment?.clientName || 'Customer';
-      await sendDocumentOnWhatsApp({
-        documentType: 'warranty',
-        documentLabel: 'warranty letter',
-        customerName,
+      setIsSendingWhatsApp(true);
+      const { uri } = await createWarrantyPdf();
+      await shareToWhatsApp({
+        uri,
+        title: `Share Warranty Letter - ${clientLine || 'Customer'}`,
         phone: mobile,
-        bodyParams: [customerName],
-        buildPdf: createWarrantyPdf,
-        onBusyChange: setIsSendingWhatsApp,
-        fallbackShare: generateAndSharePDF,
       });
     } catch (error) {
-      Alert.alert('Error', 'Failed to send the warranty letter: ' + (error?.message || error));
+      Alert.alert('Error', 'Failed to open WhatsApp: ' + (error?.message || error));
+    } finally {
+      setIsSendingWhatsApp(false);
     }
   };
 
@@ -237,11 +254,9 @@ export default function WarrantyLetterScreen() {
         isDark={isDark}
         right={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-            {isWhatsAppBusinessConfigured() && (
-              <TouchableOpacity onPress={sendOnWhatsAppBusiness} activeOpacity={0.7}>
-                <Ionicons name="logo-whatsapp" size={22} color="#FFFFFF" />
-              </TouchableOpacity>
-            )}
+            <TouchableOpacity onPress={sendOnWhatsApp} activeOpacity={0.7}>
+              <Ionicons name="logo-whatsapp" size={22} color="#FFFFFF" />
+            </TouchableOpacity>
             <TouchableOpacity onPress={generateAndSharePDF} activeOpacity={0.7}>
               <Ionicons name="share-social-outline" size={22} color="#FFFFFF" />
             </TouchableOpacity>
@@ -286,9 +301,7 @@ export default function WarrantyLetterScreen() {
 
           {/* Intro */}
           <Text style={styles.body}>
-            {'This is to certify that we have done a '}
-            <Text style={[styles.body, { fontWeight: '700', color: '#0F172A'}]}>Waterproofing or Heatproofing or Waterproofing cum Heatproofing </Text>
-            {' in the below mentioned building if require in future in order to claim the warranty please submit this along with your building leaking pictures.'}
+            {'This is to certify that we have done a Turn Key contract in this below mentioned building if require in future in order to claim the warranty please submit this along with pictures which are related to your complaint.'}
           </Text>
 
           {/* Warranty For */}

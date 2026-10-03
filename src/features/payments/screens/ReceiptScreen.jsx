@@ -17,9 +17,9 @@ import { sealBase64 } from '../../../shared/constants/SealBase64';
 import { appointmentRepository } from '../../appointments/api/appointmentRepository';
 import { clientRepository } from '../../clients/api/clientRepository';
 import { paymentRepository } from '../api/paymentRepository';
+import { quotationRepository } from '../../quotations/api/quotationRepository';
 import { useTabBarScroll } from '../../../core/context/TabBarContext';
-import { createPdfFile, sharePdfFile, toSafeFileName } from '../../../core/utils/pdfShare';
-import { sendDocumentOnWhatsApp } from '../../whatsapp/utils/sendDocumentOnWhatsApp';
+import { createPdfFile, sharePdfFile, shareToWhatsApp, toSafeFileName } from '../../../core/utils/pdfShare';
 import { useColorScheme } from '../../../core/hooks/useColorScheme';
 import InnerHeader from '../../../shared/components/InnerHeader';
 import { MaterialOverlayLoader } from '../../../shared/components/material';
@@ -401,6 +401,10 @@ const getReceiptData = (app, customerGst, finalReceiptData = null, params = {}, 
     sgstAmount,
     afterTax,
     grandTotal,
+    poNumber: finalReceiptData?.poNumber || params?.poNumber || null,
+    proformaBankDetails: finalReceiptData?.proformaBankDetails || null,
+    proformaTerms: finalReceiptData?.proformaTerms || null,
+    proformaQuotationHtml: finalReceiptData?.proformaQuotationHtml || null,
   };
 };
 
@@ -434,6 +438,10 @@ export const generateTaxInvoiceHTML = (
     sgstAmount,
     afterTax,
     grandTotal,
+    poNumber,
+    proformaBankDetails,
+    proformaTerms,
+    proformaQuotationHtml,
   } = getReceiptData(
     app,
     customerGst,
@@ -650,24 +658,23 @@ export const generateTaxInvoiceHTML = (
       </div>
 
       ${addressLines
-        .map(
-          (line) => `
+      .map(
+        (line) => `
             <div class="billing-line">
               ${escapeHtml(line)}
             </div>
           `
-        )
-        .join('')}
+      )
+      .join('')}
 
-      ${
-        gstinVal
-          ? `
+      ${gstinVal
+      ? `
             <div class="billing-line gst-line">
               GST - ${escapeHtml(gstinVal)}
             </div>
           `
-          : ''
-      }
+      : ''
+    }
 
     </div>
 
@@ -759,23 +766,54 @@ export const generateTaxInvoiceHTML = (
   const renderHsn = () =>
     isGst
       ? `
-        <tr class="hsn-row">
-
-          <td></td>
-
-          <td class="center bold">
-            HSN CODE : 995453
-          </td>
-
-          <td></td>
-
-          <td></td>
-
-          <td></td>
-
-        </tr>
+        <table class="items-table" style="margin-top:0;border-top:none;">
+          <tr class="hsn-row">
+            <td colspan="2" class="center bold">HSN CODE : 995453</td>
+            <td></td>
+          </tr>
+          ${poNumber ? `
+          <tr class="hsn-row">
+            <td colspan="2" class="center bold">Your Purchase Order No : ${escapeHtml(poNumber)}</td>
+            <td></td>
+          </tr>
+          ` : ''}
+        </table>
       `
       : '';
+
+  // ==========================================================
+  // PROFORMA BANK DETAILS + PAYMENT TERMS (proforma invoice only)
+  // ==========================================================
+
+  const renderProformaBankTerms = () => {
+    if (!isProforma || (!proformaBankDetails && !proformaTerms && !proformaQuotationHtml)) return '';
+    const bank = proformaBankDetails || {};
+    const hasTerms = proformaTerms || proformaQuotationHtml;
+    return `
+      <div class="proforma-bank-terms">
+        <table class="proforma-bt-table">
+          <tr>
+            ${proformaBankDetails ? `
+            <td class="proforma-bank-col">
+              <div class="proforma-section-title">Bank Details</div>
+              ${bank.accountName ? `<div class="proforma-bt-row"><span class="proforma-bt-label">Account Name</span><span class="proforma-bt-value">${escapeHtml(bank.accountName)}</span></div>` : ''}
+              ${bank.bankName ? `<div class="proforma-bt-row"><span class="proforma-bt-label">Bank</span><span class="proforma-bt-value">${escapeHtml(bank.bankName)}</span></div>` : ''}
+              ${bank.accountNumber ? `<div class="proforma-bt-row"><span class="proforma-bt-label">Account No.</span><span class="proforma-bt-value">${escapeHtml(bank.accountNumber)}</span></div>` : ''}
+              ${bank.ifscCode ? `<div class="proforma-bt-row"><span class="proforma-bt-label">IFSC Code</span><span class="proforma-bt-value">${escapeHtml(bank.ifscCode)}</span></div>` : ''}
+              ${bank.branchName ? `<div class="proforma-bt-row"><span class="proforma-bt-label">Branch</span><span class="proforma-bt-value">${escapeHtml(bank.branchName)}</span></div>` : ''}
+            </td>
+            ` : '<td></td>'}
+            ${hasTerms ? `
+            <td class="proforma-terms-col">
+              <div class="proforma-section-title">Payment Terms</div>
+              ${proformaQuotationHtml ? `<div class="proforma-qt-html">${proformaQuotationHtml}</div>` : ''}
+            </td>
+            ` : '<td></td>'}
+          </tr>
+        </table>
+      </div>
+    `;
+  };
 
   // ==========================================================
   // TOTALS
@@ -799,9 +837,8 @@ export const generateTaxInvoiceHTML = (
 
       </tr>
 
-      ${
-        isGst
-          ? `
+      ${isGst
+      ? `
             <tr>
 
               <td colspan="2"></td>
@@ -852,8 +889,8 @@ export const generateTaxInvoiceHTML = (
 
             </tr>
           `
-          : ''
-      }
+      : ''
+    }
 
       <tr class="grand-total-row">
 
@@ -876,8 +913,10 @@ export const generateTaxInvoiceHTML = (
   // SIGNATURE + SEAL
   // ==========================================================
 
+  const isProforma = docTitle === 'PROFORMA INVOICE';
+
   const renderSignature = () => `
-    <div class="signature-section">
+    <div class="signature-section${isProforma ? ' proforma-signature' : ''}">
 
       <table class="signature-table">
 
@@ -946,19 +985,18 @@ export const generateTaxInvoiceHTML = (
 
           <div class="page-content">
 
-            ${
-              isFirstPage
-                ? `
+            ${isFirstPage
+          ? `
                   ${renderBilling()}
                 `
-                : `
+          : `
                   <div class="continuation-title">
                     ${escapeHtml(docTitle)}
                     &nbsp;&mdash;&nbsp;
                     CONTINUED
                   </div>
                 `
-            }
+        }
 
 
             <!-- ==============================
@@ -996,17 +1034,18 @@ export const generateTaxInvoiceHTML = (
             </table>
 
 
-            ${
-              isLastPage
-                ? `
+            ${isLastPage
+          ? `
                   ${renderHsn()}
 
                   ${renderTotals()}
 
-                  ${renderSignature()}
+                  ${renderProformaBankTerms()}
+
+                  ${isProforma ? '' : renderSignature()}
                 `
-                : ''
-            }
+          : ''
+        }
 
           </div>
 
@@ -1014,6 +1053,8 @@ export const generateTaxInvoiceHTML = (
           <!-- ================================
                COMPANY FOOTER
                ================================ -->
+
+          ${isLastPage && isProforma ? renderSignature() : ''}
 
           ${renderFooter()}
 
@@ -1507,6 +1548,20 @@ body {
 }
 
 
+.proforma-signature {
+
+  position: absolute;
+
+  left: 13mm;
+
+  right: 13mm;
+
+  bottom: 26mm;
+
+  margin-top: 0;
+}
+
+
 .signature-table {
 
   width: 100%;
@@ -1590,6 +1645,126 @@ body {
   display: inline-block;
 
   transform: rotate(-6deg);
+}
+
+
+/* ============================================================
+   PROFORMA BANK DETAILS + TERMS
+   ============================================================ */
+
+.proforma-bank-terms {
+
+  margin-top: 7mm;
+
+  margin-bottom: 4mm;
+
+  page-break-inside: avoid;
+
+  break-inside: avoid;
+
+  border: 1px solid #000;
+}
+
+
+.proforma-bt-table {
+
+  width: 100%;
+
+  border-collapse: collapse;
+}
+
+
+.proforma-bt-table td {
+
+  border: none;
+
+  padding: 6px 8px;
+
+  vertical-align: top;
+}
+
+
+.proforma-bank-col {
+
+  width: 55%;
+
+  border-right: 1px solid #000;
+}
+
+
+.proforma-terms-col {
+
+  width: 45%;
+}
+
+
+.proforma-section-title {
+
+  font-size: 10px;
+
+  font-weight: 900;
+
+  text-transform: uppercase;
+
+  letter-spacing: 0.5px;
+
+  border-bottom: 1px solid #000;
+
+  padding-bottom: 3px;
+
+  margin-bottom: 5px;
+}
+
+
+.proforma-bt-row {
+
+  display: flex;
+
+  gap: 4px;
+
+  margin-bottom: 3px;
+
+  font-size: 9.5px;
+}
+
+
+.proforma-bt-label {
+
+  font-weight: 700;
+
+  min-width: 80px;
+}
+
+
+.proforma-bt-value {
+
+  font-weight: 400;
+}
+
+
+.proforma-terms-text {
+
+  font-size: 9.5px;
+
+  line-height: 1.5;
+
+  margin-bottom: 5px;
+}
+
+
+.proforma-qt-html {
+
+  font-size: 9.5px;
+
+  line-height: 1.4;
+}
+
+
+.proforma-qt-html p {
+
+  margin: 0 0 3px 0;
+
+  padding: 0;
 }
 
 
@@ -1695,6 +1870,7 @@ export default function ReceiptScreen() {
   const [finalReceiptData, setFinalReceiptData] = React.useState(null);
   const [payView, setPayView] = React.useState(null);
   const [isSendingWhatsApp, setIsSendingWhatsApp] = React.useState(false);
+  const [poNumber, setPoNumber] = React.useState(params.poNumber || null);
 
   React.useEffect(() => {
     if (!params.id) return;
@@ -1719,6 +1895,19 @@ export default function ReceiptScreen() {
       app?.activeQuotationId ||
       (Array.isArray(app?.quotations) && app.quotations.find((q) => q.isConfirmed)?.id);
     if (!qId) return;
+
+    // Fetch proforma invoice ONLY to get poNumber (per requirement: only use poNumber, don't use anything else)
+    quotationRepository
+      .getProformaInvoice(qId)
+      .then((pRes) => {
+        if (pRes?.success) {
+          const resolvedPo = pRes.poNumber || pRes.data?.poNumber;
+          if (resolvedPo) {
+            setPoNumber(String(resolvedPo).trim());
+          }
+        }
+      })
+      .catch(() => { });
 
     // Fetch payView for accurate ledger & services
     paymentRepository
@@ -1757,7 +1946,7 @@ export default function ReceiptScreen() {
                   setFinalReceiptData(genRes.data);
                 }
               })
-              .catch(() => {});
+              .catch(() => { });
           }
         })
         .catch(() => {
@@ -1768,7 +1957,7 @@ export default function ReceiptScreen() {
                 setFinalReceiptData(genRes.data);
               }
             })
-            .catch(() => {});
+            .catch(() => { });
         });
     }
   }, [
@@ -1789,6 +1978,10 @@ export default function ReceiptScreen() {
     app?.gstin ||
     '';
 
+  const effectiveParams = React.useMemo(() => {
+    return { ...params, ...(poNumber ? { poNumber } : {}) };
+  }, [params, poNumber]);
+
   const {
     isGst,
     docTitle,
@@ -1806,10 +1999,11 @@ export default function ReceiptScreen() {
     sgstAmount,
     afterTax,
     grandTotal,
-  } = getReceiptData(app, customerGst, finalReceiptData, params, payView);
+    poNumber: resolvedPoNumber,
+  } = getReceiptData(app, customerGst, finalReceiptData, effectiveParams, payView);
 
   const getPdfUri = async () => {
-    const htmlContent = generateTaxInvoiceHTML(app, customerGst, finalReceiptData, params, payView);
+    const htmlContent = generateTaxInvoiceHTML(app, customerGst, finalReceiptData, effectiveParams, payView);
     const cleanClientName = toSafeFileName(clientName, 'Customer');
     const cleanDocTitle = toSafeFileName(docTitle, 'Receipt');
     const fileName = `${cleanDocTitle}_${cleanClientName}.pdf`;
@@ -1827,32 +2021,28 @@ export default function ReceiptScreen() {
     }
   };
 
-  // Sends from the business WhatsApp number when WhatsApp Business is set up; otherwise opens the share sheet
+  // Opens the device WhatsApp app directly with the receipt/tax-invoice PDF attached.
   const handleWhatsApp = async () => {
     try {
-      const documentLabel = String(docTitle || 'receipt').toLowerCase();
-      await sendDocumentOnWhatsApp({
-        documentType: 'receipt',
-        documentLabel,
-        customerName: clientName,
-        phone:
-          finalReceiptData?.customer?.mobileNumber ||
-          payView?.customer?.mobileNumber ||
-          payView?.customer?.mobile ||
-          app?.mobileNumber ||
-          app?.clientPhone ||
-          app?.phone ||
-          app?.mobile,
-        bodyParams: [clientName, documentLabel, invoiceNo],
-        buildPdf: getPdfUri,
-        onBusyChange: setIsSendingWhatsApp,
-        fallbackShare: async () => {
-          const { uri } = await getPdfUri();
-          await sharePdfFile({ uri, title: `Send ${docTitle} to ${clientName} via WhatsApp` });
-        },
+      setIsSendingWhatsApp(true);
+      const { uri } = await getPdfUri();
+      const phone =
+        finalReceiptData?.customer?.mobileNumber ||
+        payView?.customer?.mobileNumber ||
+        payView?.customer?.mobile ||
+        app?.mobileNumber ||
+        app?.clientPhone ||
+        app?.phone ||
+        app?.mobile;
+      await shareToWhatsApp({
+        uri,
+        title: `Send ${docTitle} to ${clientName} via WhatsApp`,
+        phone,
       });
     } catch (error) {
       Alert.alert('Error', 'Failed to share receipt via WhatsApp: ' + error.message);
+    } finally {
+      setIsSendingWhatsApp(false);
     }
   };
 
@@ -1975,6 +2165,19 @@ export default function ReceiptScreen() {
                 <View style={[styles.gridEmptyCell, { width: '10%' }]} />
                 <Text style={[styles.gridTdCenter, styles.gridTdBold, { width: '40%' }]}>
                   HSN CODE : 995453
+                </Text>
+                <View style={[styles.gridEmptyCell, { width: '16%' }]} />
+                <View style={[styles.gridEmptyCell, { width: '17%' }]} />
+                <View style={[styles.gridEmptyCell, { width: '17%', borderRightWidth: 0 }]} />
+              </View>
+            )}
+
+            {/* PO Number Row */}
+            {isGst && Boolean(resolvedPoNumber || poNumber) && (
+              <View style={styles.gridDataRow}>
+                <View style={[styles.gridEmptyCell, { width: '10%' }]} />
+                <Text style={[styles.gridTdCenter, styles.gridTdBold, { width: '40%' }]}>
+                  Your Purchase Order No : {resolvedPoNumber || poNumber}
                 </Text>
                 <View style={[styles.gridEmptyCell, { width: '16%' }]} />
                 <View style={[styles.gridEmptyCell, { width: '17%' }]} />
