@@ -4231,7 +4231,8 @@ export default function CustomerDetailScreen() {
                               )}
                             </View>
 
-                            {/* Payment Card Actions: View Receipt & Share Document */}
+                            {/* Payment Card Actions: View Receipt & Share Document (only once the payment is verified) */}
+                            {isVerified && (
                             <View style={{
                               flexDirection: 'row',
                               gap: 8,
@@ -4289,6 +4290,7 @@ export default function CustomerDetailScreen() {
                                 </Text>
                               </TouchableOpacity>
                             </View>
+                            )}
                           </View>
                         );
                       })

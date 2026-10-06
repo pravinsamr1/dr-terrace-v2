@@ -53,6 +53,7 @@ This document provides complete integration specifications, architecture contrac
    - [Appointment Schedules (Unified)](#appointment-schedules-unified)
    - [Company & Employee Policies (Unified)](#company--employee-policies-unified)
    - [Push Notifications](#push-notifications)
+   - [WhatsApp Webhook (Meta Cloud API)](#whatsapp-webhook-meta-cloud-api)
    - [System Health](#system-health)
    - [Home View Dashboard](#home-view-dashboard)
    - [Master Data & Dropdowns (Unified)](#master-data--dropdowns-unified)
@@ -83,7 +84,7 @@ This document provides complete integration specifications, architecture contrac
 | **Direct Settlement**   | Dedicated `/api/v2/quotation-payments/:id` flow: payments against the quotation's grand total; GST (tax invoice vs cash bill) set on the quotation |
 | **Response Format**     | Standard `{ statusCode: 200, success: true, data: ..., meta: { ... } }` |
 | **Client Screen Loading** | **1 Single Unified Request**: `GET /api/v2/clients/:id` bundles profile, packages, quotations, and active payment summary |
-| **Post-Sale Warranty**  | New **Warranty module**: configure per-service warranty years after final receipt lock. Anyone (master admin, office employee, field employee) can configure and generate it; the **master admin verifies** it, and only then can office employees and field employees view and send it. Admin can delete and redo a warranty until it is verified |
+| **Post-Sale Warranty**  | New **Warranty module**: configure per-service warranty years after final receipt lock; Admin can delete and redo a warranty at any time |
 | **Bank Accounts**       | Full company account management via `/api/v2/account-details` with primary account toggle |
 | **Storage Lifecycle**   | Automated disk unlinking on payment deletion & admin orphaned receipt cleanup (`/api/v2/payments/cleanup-orphaned-images`) |
 
@@ -1580,7 +1581,7 @@ You can optionally provide a customer GST Number:
 
 #### 8. Post-Sale Warranty Integration for Quotation Payments
 
-The new `quotation-payments` architecture is 100% integrated with the Warranty system. Once a quotation is fully paid and verified, clients and field employees can configure and generate official warranty certificates directly using the `/quotation-payments/:id/warranty*` routes. A generated warranty must then be **verified by the master admin** before office employees and field employees can view or send it (see [Warranty (Unified)](#warranty-unified)).
+The new `quotation-payments` architecture is 100% integrated with the Warranty system. Once a quotation is fully paid and verified, clients and field employees can configure and generate official warranty certificates directly using the `/quotation-payments/:id/warranty*` routes.
 
 ##### Warranty Eligibility Criteria
 1. **Fully Paid**: `progress.paymentStatus === "FULLY_PAID"` (all balances cleared either with or without GST).
@@ -1597,9 +1598,8 @@ The new `quotation-payments` architecture is 100% integrated with the Warranty s
 | `POST` | `/api/v2/quotation-payments/:id/warranty-config` | Creates warranty duration configuration per service | Admin, Field Employee |
 | `PATCH` | `/api/v2/quotation-payments/:id/warranty-config` | Updates warranty configuration (before warranty generation) | Admin, Field Employee |
 | `POST` | `/api/v2/quotation-payments/:id/warranty` | Generates final warranty certificate (locks config) | Admin, Field Employee |
-| `GET` | `/api/v2/quotation-payments/:id/warranty` | Retrieves the generated warranty certificate. Until it is verified, everyone except the master admin gets it **without `items`** (see Warranty (Unified) #6) | Admin, Field Employee |
-| `POST` | `/api/v2/quotation-payments/:id/warranty/verify` | Verifies the warranty so office employees and field employees can view and send it | Master Admin Only |
-| `DELETE` | `/api/v2/quotation-payments/:id/warranty` | Deletes the warranty (unlocks config). A verified warranty can only be deleted by the master admin | Admin Only (Master Admin once verified) |
+| `GET` | `/api/v2/quotation-payments/:id/warranty` | Retrieves generated warranty certificate with all items | Admin, Field Employee |
+| `DELETE` | `/api/v2/quotation-payments/:id/warranty` | Deletes warranty at any time (unlocks config) | Admin Only |
 
 *(Note: Standard `/api/v2/quotations/:id/warranty*` aliases are also fully supported).*
 
@@ -3015,35 +3015,17 @@ Warranty is a **post-receipt** module: it can only be configured and generated f
 
 ```
 Receipt generated & locked  ─▶  ELIGIBLE
-        │  POST /warranty-config            (anyone: master admin, office employee, field employee)
+        │  POST /warranty-config
         ▼
-  CONFIGURED (warranty === null)  ─▶  editable via PATCH /warranty-config  (anyone)
-        │  POST /warranty                   (anyone)
+  CONFIGURED (warranty === null)  ─▶  editable via PATCH /warranty-config
+        │  POST /warranty
         ▼
-  GENERATED, NOT VERIFIED (isVerified: false)  ─▶  config now locked, no more PATCH
-        │     Only the master admin can view it. Office employees and field employees
-        │     see that a warranty exists and is waiting, but get no warranty content.
-        │  POST /warranty/verify (master admin only)
-        ▼
-  VERIFIED (isVerified: true)  ─▶  office employees and field employees can now view and send it
+  GENERATED (warranty exists)  ─▶  config now locked, no more PATCH
+        │  POST /warranty/verify (master admin only)  ─▶  VERIFIED (isVerified: true)
         │  DELETE /warranty (Admin while not verified; only a master admin once verified)
         ▼
   back to CONFIGURED (config preserved & editable again)
 ```
-
-##### Who can do what
-
-"Admin" below is the master admin (`MASTER_ADMIN`); office employees log in as `ADMIN`; technicians as `FIELD_EMPLOYEE`.
-
-| Action | Endpoint | Master admin | Office employee (`ADMIN`) | Field employee |
-| :--- | :--- | :---: | :---: | :---: |
-| Check eligibility, read the config | `GET .../warranty-eligibility`, `GET .../warranty-config` | Yes | Yes | Yes |
-| Configure (create / edit) | `POST` / `PATCH .../warranty-config` | Yes | Yes | Yes |
-| Generate | `POST .../warranty` | Yes | Yes | Yes |
-| **Verify** | `POST .../warranty/verify` | **Yes** | No (`403`) | No (`403`) |
-| View the warranty (full content, letter, PDF) | `GET .../warranty` | Always | **Only once verified** | **Only once verified** |
-| Send / share the warranty | (built from the `GET .../warranty` content) | Always | **Only once verified** | **Only once verified** |
-| Delete | `DELETE .../warranty` | Always | While not verified | No (`403`) |
 
 > [!IMPORTANT]
 > The service list used to build the config form is the quotation's own service lines (**not** parsed out of the final-receipt response).
@@ -3118,6 +3100,7 @@ If no config has been created yet, `config` is `null` and `availableServices` li
     "receiptNumber": "DRT ATEG 016/25-26",
     "warrantyStartDate": "2026-09-22",
     "configuredBy": "Admin (Suresh)",
+    "supervisorId": "SUP-101",
     "createdAt": "2026-09-22T10:00:00.000Z",
     "updatedAt": "2026-09-22T10:00:00.000Z",
     "services": [
@@ -3140,6 +3123,7 @@ Content-Type: application/json
 
 {
   "warrantyStartDate": "2026-09-22",
+  "supervisorId": "SUP-101",
   "services": [
     { "serviceId": 12, "years": 5 },
     { "serviceId": 7,  "years": 1.5 }
@@ -3150,6 +3134,7 @@ Content-Type: application/json
 > [!IMPORTANT]
 > - Fails `400` if the quotation is not `isEligible` (see #1), if a config already exists (use PATCH instead), or if a warranty has already been generated.
 > - Each `serviceId` must reference a real service line on this quotation — unknown IDs return `404`.
+> - `supervisorId` is optional free text (trimmed, max 100 chars; empty/omitted = `null`; `supervisor_id` is also accepted). It is copied onto the warranty when it is generated.
 > - `years` accepts **fractional values** (e.g. `1.5` = 18 months), rounded to 2 decimal places on save. Negative or non-numeric values return `400`.
 
 ##### Response (`201 Created`)
@@ -3174,6 +3159,7 @@ Content-Type: application/json
 
 {
   "warrantyStartDate": "2026-09-25",
+  "supervisorId": "SUP-101",
   "services": [
     { "serviceId": 12, "years": 6 }
   ]
@@ -3181,7 +3167,7 @@ Content-Type: application/json
 ```
 
 > [!IMPORTANT]
-> Full replace, not a merge — the `services` array you send **replaces** the existing config's service list entirely. Only allowed while `hasWarranty === false`; once a warranty has been generated, this returns `400` (an Admin must delete the warranty first to unlock editing again).
+> Full replace, not a merge — `supervisorId` is overwritten too (omit it and it becomes `null`), and the `services` array you send **replaces** the existing config's service list entirely. Only allowed while `hasWarranty === false`; once a warranty has been generated, this returns `400` (an Admin must delete the warranty first to unlock editing again).
 
 ##### Response (`200 OK`)
 ```json
@@ -3207,8 +3193,6 @@ Snapshots the current config into an immutable warranty record. **Idempotent**: 
 
 > [!IMPORTANT]
 > Fails `400` if warranty config hasn't been created yet, or if the quotation's receipt was somehow regenerated under a different number since the config was created (reconfigure in that case).
->
-> Anyone allowed to read the quotation (master admin, office employee, field employee) can generate. The new warranty starts **not verified** (`isVerified: false`). For a caller who is **not the master admin**, the response below is returned **without `items`** (`"items": []`), exactly as in [#6 Get Warranty](#6-get-warranty): the person who generated it cannot view it until the master admin has verified it.
 
 ##### Response (`201 Created`)
 ```json
@@ -3222,6 +3206,7 @@ Snapshots the current config into an immutable warranty record. **Idempotent**: 
     "receiptNumber": "DRT ATEG 016/25-26",
     "warrantyStartDate": "2026-09-22",
     "generatedBy": "Admin (Suresh)",
+    "supervisorId": "SUP-101",
     "generatedAt": "2026-09-22T10:15:00.000Z",
     "isVerified": false,
     "verifiedBy": null,
@@ -3259,37 +3244,6 @@ Authorization: Bearer <jwt_token>
   "statusCode": 200,
   "success": true,
   "data": { "...": "WarrantyResponse, same shape as #5, or null if none generated yet" },
-  "warranty": { "...": "same object" }
-}
-```
-
-> [!IMPORTANT]
-> **Verification gate (enforced by the server).** While `isVerified` is `false`:
-> - the **master admin** receives the full warranty (so it can be checked before verifying);
-> - an **office employee or field employee** still gets `200` with `isVerified: false`, so the app can show "waiting for verification", but **`items` is `[]`**. Nothing the warranty letter is built from is returned.
->
-> Once `isVerified` is `true`, everyone who can read the quotation receives the full warranty. The mobile app builds the warranty letter (PDF) from `items` and hides the letter and the share buttons while `isVerified` is `false`; returning no `items` is what makes that lock real instead of only hidden in the UI.
-
-##### Response (`200 OK`) — not yet verified, requested by an office employee or field employee
-```json
-{
-  "statusCode": 200,
-  "success": true,
-  "data": {
-    "id": 2,
-    "quotationId": 481,
-    "receiptNumber": "DRT ATEG 016/25-26",
-    "warrantyStartDate": "2026-09-22",
-    "generatedBy": "Karthik Raja",
-    "generatedAt": "2026-09-22T10:15:00.000Z",
-    "isVerified": false,
-    "verifiedBy": null,
-    "verifiedAt": null,
-    "verificationNotes": null,
-    "deletableUntil": null,
-    "isDeletable": true,
-    "items": []
-  },
   "warranty": { "...": "same object" }
 }
 ```
@@ -3352,8 +3306,6 @@ Content-Type: application/json
 - Verifying a warranty that is already verified changes nothing, so the first verifier and time are kept.
 - A warranty starts **not verified**. Existing warranties were migrated as not verified.
 - `verifiedBy` is `Master Admin (<name>)`. Unverifying clears `verifiedBy` and `verifiedAt`.
-- **After verification**, office employees and field employees receive the full warranty from [#6](#6-get-warranty) and can view and send it. Unverifying (`isVerified: false`) locks it for them again.
-- Verifying sends a `warranty_verified` notification (see [Push Notifications](#push-notifications)).
 
 ##### Response (`200 OK`)
 ```json
@@ -3693,8 +3645,8 @@ Employee). Sending is fire-and-forget: a failed push never affects the request t
 | `appointment_assigned` | The assigned field employee | An appointment is assigned to them |
 | `payment_pending_verification` | Every admin | A payment recorded by an employee needs verification |
 | `payment_verified` | The quotation's field employee | An admin verifies a payment |
-| `warranty_generated` | The master admin | A warranty is generated and **waits for verification** (see below) |
-| `warranty_verified` | The person who generated the warranty and the quotation's field employee | The master admin verifies a warranty (see below) |
+| `warranty_generated` | The quotation's field employee | A warranty certificate is generated (see below) |
+| `warranty_verified` | The quotation's field employee | The master admin approves (verifies) the warranty (see below) |
 
 The person who triggered a notification never receives it. `data` carries ids only (`appointmentId`, `quotationId`,
 `paymentId`), never personal data. Tapping a notification should open the matching screen; `warranty_generated`
@@ -3702,22 +3654,21 @@ and `warranty_verified` open that customer's Warranty tab.
 
 **Warranty notification rules**
 
-- `warranty_generated`: sent once, when a new warranty is actually generated (`POST /api/v2/quotations/:id/warranty`
-  or `POST /api/v2/quotation-payments/:id/warranty`), after the transaction commits. It tells the master admin there is
-  a warranty to verify. It is **not** sent to the field employee: they cannot view the warranty until it is verified.
-- `warranty_verified`: sent once, when `POST .../warranty/verify` moves a warranty from not verified to verified, after
-  the transaction commits. Recipients: the person who generated the warranty and the quotation's field employee (once
-  each; never the verifier).
-- Neither is sent for a repeat request (the existing warranty / the already-verified warranty is returned), for a request
-  that lost a race, when saving the warranty configuration, or when a verification is removed.
-- The master admin is the root account (`user.id` `0`) and has no employee row. Device tokens and inbox rows must be
-  storable for `user.id` `0`, otherwise the master admin receives nothing.
+- Sent once, when a new warranty is actually generated (`POST /api/v2/quotations/:id/warranty` or
+  `POST /api/v2/quotation-payments/:id/warranty`), after the transaction commits.
+- Not sent for a repeat request (the existing warranty is returned), for a request that lost a race, or when saving the
+  warranty configuration.
+- Not sent when the quotation has no field employee, or when the field employee is the one who generated it.
+- `warranty_verified` is sent when the master admin approves the warranty (`POST` or `PATCH` on
+  `.../warranty/verify`), once, and only when the warranty really changes from not verified to verified. It is not
+  sent for a repeat approval of an already verified warranty, or when the approval is removed
+  (`isVerified: false`). Approving it again after removing the approval sends a new one.
 
 ```json
 {
   "type": "warranty_generated",
-  "title": "Warranty awaiting verification",
-  "body": "A warranty certificate was generated and needs your verification.",
+  "title": "Warranty certificate ready",
+  "body": "The warranty certificate for your customer was generated. Tap to view it.",
   "data": { "quotationId": 83, "appointmentId": 34 }
 }
 ```
@@ -3725,8 +3676,8 @@ and `warranty_verified` open that customer's Warranty tab.
 ```json
 {
   "type": "warranty_verified",
-  "title": "Warranty verified",
-  "body": "The warranty certificate for your customer is verified. You can now view and send it.",
+  "title": "Warranty approved",
+  "body": "The warranty for your customer was approved by the master admin. Tap to view it.",
   "data": { "quotationId": 83, "appointmentId": 34 }
 }
 ```
@@ -3788,6 +3739,19 @@ GET /api/v2/notifications?page=1&limit=20
 |---|---|
 | `PATCH /api/v2/notifications/:id/read` | Marks one notification read (`404` if it isn't yours) |
 | `POST /api/v2/notifications/read-all` | Marks every unread notification read |
+
+---
+
+### WhatsApp Webhook (Meta Cloud API)
+
+Called by Meta, **not by the app**. There is no JWT; the POST is authenticated by Meta's signature. Configure it in Meta → WhatsApp → Configuration with the callback URL `https://<domain>/api/v2/webhooks/whatsapp` and subscribe to the `messages` field.
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `GET` | `/api/v2/webhooks/whatsapp` | Verification handshake. Needs `hub.mode=subscribe`, `hub.verify_token` (must equal `WHATSAPP_VERIFY_TOKEN`) and `hub.challenge`; echoes the challenge as plain text, else `403`. |
+| `POST` | `/api/v2/webhooks/whatsapp` | Event delivery. `X-Hub-Signature-256` is checked against `WHATSAPP_APP_SECRET` over the raw body (`401` if invalid or if the secret is not configured). Inbound messages go to `whatsapp_messages`, delivery statuses (sent/delivered/read/failed) to `whatsapp_message_statuses`; duplicates are ignored. A database error returns `500` so Meta retries. |
+
+Env vars: `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`.
 
 ---
 

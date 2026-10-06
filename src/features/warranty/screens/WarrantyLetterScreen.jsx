@@ -30,6 +30,10 @@ const Text = React.forwardRef((props, ref) => (
 ));
 Text.displayName = 'Text';
 
+// The Site Engineer Code is typed by the user, so it is escaped before it goes into the PDF HTML
+const escapeHtml = (value) =>
+  String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
 export default function WarrantyLetterScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -106,7 +110,7 @@ export default function WarrantyLetterScreen() {
           This warranty has not been verified yet.
         </Text>
         <Text style={{ color: isDark ? '#CBD5E1' : '#475569', marginTop: 8, textAlign: 'center' }}>
-          The master admin must verify it before it can be viewed or shared.
+          Warranty has been generated for Manufacturer approval, your customer would receive within 24hrs from Dr Terrace official CRM.
         </Text>
         <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 20 }}>
           <Text style={{ color: '#0052CC' }}>Go Back</Text>
@@ -118,7 +122,8 @@ export default function WarrantyLetterScreen() {
   // Derived data
   const currentDate = formatDateDDMMYY(new Date());
   const refNo = officialWarranty?.receiptNumber || ('Dr.217' + (appointment?.id || ''));
-  const siteEngineerCode = officialWarranty?.siteEngineerCode || appointment?.siteEngineerCode || '';
+  // The Site Engineer Code typed in the warranty configuration; the API returns it on the warranty as `supervisorId`
+  const siteEngineerCode = officialWarranty?.supervisorId || appointment?.siteEngineerCode || '';
   const serviceType = appointment?.serviceType || 'Waterproofing System';
 
   const nameLower = appointment?.clientName?.trim?.().toLowerCase() || '';
@@ -192,11 +197,12 @@ export default function WarrantyLetterScreen() {
       '</style></head><body>' +
       '<div class="header"><div class="header-side"><img src="data:image/png;base64,' + logoBase64 + '" class="logo" /></div>' +
       '<div class="ref-no">Warranty reference no-' + refNo + '</div><div class="header-side"></div></div>' +
-      '<div class="meta-row"><span>' + currentDate + '</span></div>' +
+      '<div class="meta-row"><span>' + currentDate + '</span>' +
+      (siteEngineerCode ? '<span class="meta-r">Site Engineer Code - ' + escapeHtml(siteEngineerCode) + '</span>' : '') +
+      '</div>' +
       '<div class="meta-row">' +
       // '<span class="italic">Warranty Letter</span>' +
       '<span></span>' +
-      (siteEngineerCode ? '<span class="meta-r">Site Engineer coad -' + siteEngineerCode + '</span>' : '') +
       '</div><hr class="thin"/>' +
       '<p>This is to certify that we have done a Turn Key contract in this below mentioned building if require in future in order to claim the warranty please submit this along with pictures which are related to your complaint.</p>' +
       '<p><span class="lbl">Warranty For:</span>&nbsp;&nbsp;<span class="red">' + clientLine + '</span></p>' +
@@ -283,17 +289,17 @@ export default function WarrantyLetterScreen() {
             <View style={styles.headerSide} />
           </View>
 
-          {/* Meta Row 1: date */}
+          {/* Meta Row 1: date | site engineer code (top right) */}
           <View style={styles.metaRow}>
             <Text style={styles.metaLeft}>{currentDate}</Text>
+            {Boolean(siteEngineerCode) && (
+              <Text style={styles.metaRight}>{'Site Engineer Code - ' + siteEngineerCode}</Text>
+            )}
           </View>
 
-          {/* Meta Row 2: Warranty Letter | site engineer */}
+          {/* Meta Row 2: Warranty Letter */}
           <View style={styles.metaRow}>
             {/* <Text style={styles.warrantyLabel}>Warranty Letter</Text> */}
-            {Boolean(siteEngineerCode) && (
-              <Text style={styles.metaRight}>{'Site Engineer coad -' + siteEngineerCode}</Text>
-            )}
           </View>
 
           {/* Thin line */}
@@ -353,7 +359,7 @@ export default function WarrantyLetterScreen() {
           {/* Warranty Exclusion */}
           <Text style={styles.body}>
             <Text style={styles.lbl}>{'Warranty Exclusion For : '}</Text>
-            {'Customer who has due, Leakages through untreated places, Plumbing, electrical pipes related problems, physically damaged area and for the work which was done as a complementary.'}
+            {'Customer who has due, Leakages through untreated places, Plumbing, electrical pipes related problems, Damage Due to crackers, Floor mate and flower pots, physically damaged area and for the work which was done as a complementary.'}
           </Text>
 
           {/* Service mail */}

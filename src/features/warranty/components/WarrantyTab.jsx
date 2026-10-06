@@ -76,6 +76,11 @@ export default function WarrantyTab({
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [datePickerValue, setDatePickerValue] = useState(new Date());
 
+  // Site Engineer Code typed by the user; it is printed at the top right of the warranty letter.
+  // The API stores it as `supervisorId` (free text, up to 100 characters).
+  const [customEngineerCode, setCustomEngineerCode] = useState(null);
+  const siteEngineerCode = customEngineerCode ?? config?.supervisorId ?? '';
+
   // Mapping of service key -> duration in years override
   const [serviceYears, setServiceYears] = useState({});
 
@@ -134,6 +139,12 @@ export default function WarrantyTab({
 
   // Handle Save (Create or Update)
   const handleSaveConfig = async () => {
+    const trimmedEngineerCode = String(siteEngineerCode).trim();
+    if (!trimmedEngineerCode) {
+      Alert.alert('Site Engineer Code Required', 'Please enter the Site Engineer Code. It is printed on the warranty letter.');
+      return;
+    }
+
     const activeServicesList = config?.services?.length ? config.services : availableServices;
     if (!activeServicesList || activeServicesList.length === 0) {
       Alert.alert('No Services', 'No services found to configure warranty for.');
@@ -164,6 +175,7 @@ export default function WarrantyTab({
 
     const payload = {
       warrantyStartDate: startDate,
+      supervisorId: trimmedEngineerCode,
       services: payloadServices,
     };
 
@@ -486,7 +498,7 @@ export default function WarrantyTab({
           }}>
             <Ionicons name="lock-closed-outline" size={18} color={isDark ? '#94A3B8' : '#64748B'} style={{ marginTop: 1 }} />
             <Text style={{ flex: 1, fontSize: 13, color: isDark ? '#CBD5E1' : '#475569', lineHeight: 18 }}>
-              The master admin must verify this warranty before it can be viewed or shared.
+              Warranty has been generated for Manufacturer approval, your customer would receive within 24hrs from Dr Terrace official CRM.
             </Text>
           </View>
 
@@ -720,6 +732,7 @@ export default function WarrantyTab({
           </Text>
           <Text style={{ fontSize: 12, color: isDark ? '#CBD5E1' : '#92400E', marginTop: 4 }}>
             Configured by {config.configuredBy || 'Staff'} • Start Date: {formatDateDDMMYY(config.warrantyStartDate)}
+            {config.supervisorId ? ` • Site Engineer Code: ${config.supervisorId}` : ''}
           </Text>
         </View>
 
@@ -900,6 +913,35 @@ export default function WarrantyTab({
           </TouchableOpacity>
           <Text style={{ fontSize: 11, color: isDark ? '#94A3B8' : '#64748B', marginTop: 4 }}>
             Each service warranty end date will be calculated from this start date.
+          </Text>
+        </View>
+
+        {/* Site Engineer Code (printed at the top right of the warranty letter) */}
+        <View style={{ marginTop: 14 }}>
+          <Text style={{ fontSize: 13, fontWeight: '700', color: isDark ? '#CBD5E1' : '#334155', marginBottom: 6 }}>
+            Site Engineer Code <Text style={{ color: '#EF4444' }}>*</Text>
+          </Text>
+          <TextInput
+            style={{
+              backgroundColor: isDark ? '#080808' : '#F8FAFC',
+              borderWidth: 1,
+              borderColor: isDark ? '#334155' : '#CBD5E1',
+              borderRadius: 12,
+              paddingHorizontal: 14,
+              paddingVertical: 12,
+              fontSize: 14,
+              fontWeight: '600',
+              color: isDark ? '#FFFFFF' : '#0F172A',
+            }}
+            value={siteEngineerCode}
+            onChangeText={setCustomEngineerCode}
+            placeholder="Enter the Site Engineer Code"
+            placeholderTextColor={isDark ? '#64748B' : '#94A3B8'}
+            autoCorrect={false}
+            maxLength={100}
+          />
+          <Text style={{ fontSize: 11, color: isDark ? '#94A3B8' : '#64748B', marginTop: 4 }}>
+            This code is shown at the top right of the warranty letter.
           </Text>
         </View>
       </View>

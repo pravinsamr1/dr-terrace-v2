@@ -63,7 +63,7 @@ export const warrantyRepository = {
    * 3. Create Warranty Config
    * POST /api/v2/quotations/:id/warranty-config
    * @param {number|string} quotationId
-   * @param {{ warrantyStartDate: string, services: Array<{ serviceId: number, isAdditional: boolean, years: number }> }} payload
+   * @param {{ warrantyStartDate: string, supervisorId: string, services: Array<{ serviceId: number, isAdditional: boolean, years: number }> }} payload
    */
   async createConfig(quotationId, payload) {
     if (!quotationId) return { success: false, message: 'Quotation ID required' };
@@ -87,7 +87,7 @@ export const warrantyRepository = {
    * 4. Update Warranty Config
    * PATCH /api/v2/quotations/:id/warranty-config
    * @param {number|string} quotationId
-   * @param {{ warrantyStartDate: string, services: Array<{ serviceId: number, isAdditional: boolean, years: number }> }} payload
+   * @param {{ warrantyStartDate: string, supervisorId: string, services: Array<{ serviceId: number, isAdditional: boolean, years: number }> }} payload
    */
   async updateConfig(quotationId, payload) {
     if (!quotationId) return { success: false, message: 'Quotation ID required' };

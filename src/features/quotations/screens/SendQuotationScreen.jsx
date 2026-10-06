@@ -513,7 +513,7 @@ export const generateHTML = (app, quote, isExport = false, fallbackQuoteId = '')
               <div class="main-title">Quotation For German Tech Water Proofing</div>
 
               <div class="site-details">
-                Site Details : ATTENTION TO MR. ${clientNameStr}-${areaStr}. <span class="red-bold">(${propStr})</span>
+                Site Details : ATTENTION TO ${clientNameStr}-${areaStr}. <span class="red-bold">(${propStr})</span>
               </div>
             </div>
 
