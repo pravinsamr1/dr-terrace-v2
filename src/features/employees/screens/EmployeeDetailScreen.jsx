@@ -5,6 +5,7 @@ import {
   Alert,
   Image,
   Linking,
+  Modal,
   RefreshControl,
   ScrollView,
   StatusBar,
@@ -35,6 +36,7 @@ export default function EmployeeDetailScreen() {
   const [employee, setEmployee] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isImageOpen, setIsImageOpen] = useState(false);
 
   useEffect(() => {
     setEmployee(null);
@@ -177,9 +179,13 @@ export default function EmployeeDetailScreen() {
       >
         {/* Profile Card Header */}
         <View style={styles.profileSection}>
-          <View style={styles.avatarWrapper}>
+          <TouchableOpacity
+            style={styles.avatarWrapper}
+            onPress={() => setIsImageOpen(true)}
+            activeOpacity={0.8}
+          >
             <Image source={getAvatarSource(employee.image)} style={styles.largeAvatar} />
-          </View>
+          </TouchableOpacity>
           <View style={styles.nameHeader}>
             <Text style={[styles.fullName, isDark && styles.textDark]}>{employee.name}</Text>
             <View style={styles.roleBadge}>
@@ -256,6 +262,34 @@ export default function EmployeeDetailScreen() {
           </View>
         </View>
       </ScrollView>
+
+      {/* Full Screen Image Viewer */}
+      <Modal
+        visible={isImageOpen}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setIsImageOpen(false)}
+      >
+        <TouchableOpacity
+          style={styles.imageViewer}
+          activeOpacity={1}
+          onPress={() => setIsImageOpen(false)}
+        >
+          <Image
+            source={getAvatarSource(employee.image)}
+            style={styles.fullImage}
+            resizeMode="contain"
+          />
+          <TouchableOpacity
+            style={[styles.imageViewerClose, { top: insets.top + 12 }]}
+            onPress={() => setIsImageOpen(false)}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="close" size={28} color="#FFFFFF" />
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -365,6 +399,23 @@ const styles = StyleSheet.create({
     borderRadius: 48,
     borderWidth: 3,
     borderColor: '#0052CC',
+  },
+  imageViewer: {
+    flex: 1,
+    backgroundColor: '#000000',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullImage: {
+    width: '100%',
+    height: '100%',
+  },
+  imageViewerClose: {
+    position: 'absolute',
+    right: 16,
+    padding: 6,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)',
   },
   nameHeader: {
     alignItems: 'center',
