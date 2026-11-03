@@ -7,26 +7,18 @@
     "icon": "./assets/images/icon.png",
     "scheme": "frontend",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "nexacrm.in.drterrace"
     },
     "android": {
       "package": "nexacrm.in.drterrace",
-      "jsEngine": "hermes",
       "adaptiveIcon": {
         "backgroundColor": "#000000",
         "foregroundImage": "./assets/images/android-icon-foreground.png"
       },
-      "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "googleServicesFile": "./google-services.json"
-    },
-    "splash": {
-      "image": "./assets/images/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#000000"
     },
     "web": {
       "output": "static",
@@ -50,9 +42,6 @@
       [
         "expo-build-properties",
         {
-          "ios": {
-            "enableSceneSupport": true
-          },
           "android": {
             "enableProguardInReleaseBuilds": true,
             "enableShrinkResourcesInReleaseBuilds": true
@@ -81,7 +70,16 @@
           "color": "#0052CC",
           "defaultChannel": "default"
         }
-      ]
+      ],
+      "expo-font",
+      "expo-status-bar",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow Nexa CRM to record voice notes for customer status updates."
+        }
+      ],
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,

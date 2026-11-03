@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   StatusBar,
-  Platform,
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -67,10 +66,6 @@ export default function NotificationDetailScreen() {
   useFocusEffect(
     useCallback(() => {
       StatusBar.setBarStyle(isDark ? 'light-content' : 'dark-content', true);
-      if (Platform.OS === 'android') {
-        StatusBar.setTranslucent(true);
-        StatusBar.setBackgroundColor('transparent');
-      }
     }, [isDark])
   );
 

@@ -4,6 +4,9 @@ import { API_BASE_URL, API_TIMEOUT_MS } from '../config/config';
 import { notifySessionExpired } from '../auth/sessionEvents';
 import { setApiClientForRetry, notifyServerError, isServerError } from './serverErrorEvents';
 
+// Sending these again after an unclear failure cannot create a second record
+const REPLAY_SAFE_METHODS = ['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE'];
+
 /**
  * Handle 401 Unauthorized / Expired Token
  */
@@ -151,16 +154,15 @@ apiClient.interceptors.request.use(
       }
     }
 
-    console.log(`[Axios Request] ${(config.method || 'GET').toUpperCase()} ${(config.baseURL || '') + (config.url || '')}`, {
-      headers: config.headers,
-      data: isMultipart ? '[FormData]' : JSON.stringify(config.data),
-      params: JSON.stringify(config.params),
-    });
+    // Method and URL only: headers and bodies can hold the auth token, passwords and customer data.
+    if (__DEV__) {
+      console.log(`[Axios Request] ${(config.method || 'GET').toUpperCase()} ${(config.baseURL || '') + (config.url || '')}`);
+    }
 
     return config;
   },
   (error) => {
-    console.log('[Axios Request Error]', error);
+    if (__DEV__) console.log('[Axios Request Error]', error?.message);
     return Promise.reject(error);
   }
 );
@@ -170,6 +172,9 @@ apiClient.interceptors.request.use(
  */
 export function extractApiErrorMessage(error, defaultMessage = 'An unexpected error occurred. Please try again.') {
   if (!error) return defaultMessage;
+
+  // A write that was not replayed: its message is already set, and the body may be a gateway's HTML page
+  if (error.isUnconfirmedWrite) return error.message;
 
   // 1. Check error.response.data
   const resData = error.response?.data;
@@ -231,7 +236,9 @@ export function extractApiErrorMessage(error, defaultMessage = 'An unexpected er
 // Response Interceptor: Format error responses and handle expired tokens
 apiClient.interceptors.response.use(
   (response) => {
-    console.log(`[Axios Response] ${response.status} ${(response.config?.method || 'GET').toUpperCase()} ${(response.config?.baseURL || '') + (response.config?.url || '')}`, JSON.stringify(response.data));
+    if (__DEV__) {
+      console.log(`[Axios Response] ${response.status} ${(response.config?.method || 'GET').toUpperCase()} ${(response.config?.baseURL || '') + (response.config?.url || '')}`);
+    }
     return response;
   },
   async (error) => {
@@ -241,14 +248,14 @@ apiClient.interceptors.response.use(
       error.message = backendMessage;
     }
 
-    const errorDetails = {
-      message: error.message,
-      code: error.code,
-      url: (error.config?.baseURL || '') + (error.config?.url || ''),
-      status: error.response?.status,
-      data: JSON.stringify(error.response?.data),
-    };
-    console.log('[Axios Response Error]', errorDetails);
+    if (__DEV__) {
+      console.log('[Axios Response Error]', {
+        message: error.message,
+        code: error.code,
+        url: (error.config?.baseURL || '') + (error.config?.url || ''),
+        status: error.response?.status,
+      });
+    }
 
     // Auto redirect to /login when token is expired or unauthorized (401)
     if (error.response?.status === 401) {
@@ -262,7 +269,13 @@ apiClient.interceptors.response.use(
 
     // Server Connection Error / Offline popup with Try Again button
     if (isServerError(error) && !error.config?._skipServerErrorPopup) {
-      return notifyServerError(error);
+      const retryMethod = (error.config?.method || 'GET').toUpperCase();
+      if (REPLAY_SAFE_METHODS.includes(retryMethod)) {
+        return notifyServerError(error);
+      }
+      // The server may already have saved this POST/PATCH (for example a payment), so never resend it automatically.
+      error.isUnconfirmedWrite = true;
+      error.message = 'Could not confirm this was saved. Please check whether it went through before trying again.';
     }
 
     return Promise.reject(error);

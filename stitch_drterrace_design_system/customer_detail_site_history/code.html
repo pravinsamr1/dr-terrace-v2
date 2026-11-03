@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>Customer Detail</title>
+<!-- Tailwind CSS CDN with forms & container queries plugins -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0f5ff',
+              100: '#e0ecff',
+              500: '#2563eb',
+              600: '#1d5bd8',
+              700: '#194bb8'
+            }
+          },
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Text"', '"SF Pro Display"', 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', 'sans-serif']
+          }
+        }
+      }
+    }
+  </script>
+<style data-purpose="custom-scroll-and-resets">
+    /* iOS friendly clean frame */
+    body {
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      background-color: #eef2f6;
+    }
+    /* Hide scrollbar for tabs */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
+<style data-purpose="card-shadows">
+    .card-shadow {
+      box-shadow: 0 4px 20px -2px rgba(16, 24, 40, 0.05), 0 2px 6px -1px rgba(16, 24, 40, 0.03);
+    }
+  </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-0 sm:py-6">
+<!-- BEGIN: Mobile Container Device Frame -->
+<main class="w-full max-w-[440px] bg-[#f4f7fb] min-h-screen sm:min-h-0 sm:rounded-[36px] overflow-hidden shadow-2xl relative border border-slate-200/60 pb-8">
+<!-- BEGIN: TopHeaderSection -->
+<header class="bg-[#2563eb] text-white pt-3 pb-7 px-4 relative shadow-sm">
+<!-- iOS Status Bar Simulation -->
+<div class="flex justify-between items-center text-xs font-semibold px-2 pb-3.5 tracking-tight text-white">
+<span>9:41</span>
+<div class="flex items-center space-x-1.5">
+<!-- Signal Icon -->
+<svg class="w-3.5 h-3.5 fill-current" viewbox="0 0 24 24">
+<path d="M12 3c-4.97 0-9 4.03-9 9 0 2.12.74 4.07 1.97 5.61L12 22l7.03-4.39C20.26 16.07 21 14.12 21 12c0-4.97-4.03-9-9-9zm0 2c3.87 0 7 3.13 7 7 0 1.5-.47 2.89-1.28 4.04L12 19.62l-5.72-3.58C5.47 14.89 5 13.5 5 12c0-3.87 3.13-7 7-7z"></path>
+</svg>
+<!-- Wifi Icon -->
+<svg class="w-3.5 h-3.5 fill-current" viewbox="0 0 24 24">
+<path d="M12 4C7.31 4 3.07 5.9 0 8.98L12 21 24 8.98A16.88 16.88 0 0012 4zm0 3.6c3.6 0 6.9 1.34 9.46 3.56L12 19.04 2.54 11.16C5.1 8.94 8.4 7.6 12 7.6z"></path>
+</svg>
+<!-- Battery Percentage -->
+<span class="text-[11px] font-normal pl-0.5">91%</span>
+<!-- Battery Icon -->
+<div class="w-5 h-2.5 border border-white rounded-[3px] p-0.5 flex items-center">
+<div class="bg-white h-full w-[85%] rounded-[1px]"></div>
+</div>
+</div>
+</div>
+<!-- Nav Bar Navigation & Title -->
+<div class="flex items-center justify-between mt-0.5 px-1">
+<button aria-label="Go Back" class="w-9 h-9 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center text-white active:scale-95 transition-transform" type="button">
+<svg class="w-5 h-5 stroke-current stroke-[2.5]" fill="none" viewbox="0 0 24 24">
+<path d="M15 19l-7-7 7-7" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</button>
+<h1 class="text-lg font-bold tracking-normal text-white">Customer Detail</h1>
+<div class="w-9 h-9"></div> <!-- Empty spacer to balance layout -->
+</div>
+</header>
+<!-- END: TopHeaderSection -->
+<!-- Main Container Content with negative top margin to overlap header -->
+<div class="px-4 -mt-3.5 space-y-4">
+<!-- BEGIN: CustomerProfileCard -->
+<section class="bg-white rounded-3xl p-4 card-shadow border border-slate-100" data-purpose="customer-summary-card">
+<div class="flex items-start space-x-3.5">
+<!-- Circular Avatar with Blue Outline -->
+<div class="w-16 h-16 rounded-full border-2 border-[#2563eb] flex items-center justify-center flex-shrink-0 bg-blue-50/40">
+<span class="text-2xl font-bold text-[#2563eb]">R</span>
+</div>
+<!-- Customer Identity Details -->
+<div class="flex-1 min-w-0 pt-0.5">
+<h2 class="text-[17px] font-bold text-slate-900 tracking-tight leading-snug">Mr R.murugan</h2>
+<p class="text-[13px] text-slate-500 font-medium mt-0.5">
+              Cust ID: <span class="font-bold text-slate-700">DR55</span> <span class="mx-1">•</span> 9884401133
+            </p>
+<div class="flex items-center text-xs text-blue-600 font-medium mt-1">
+<svg class="w-3.5 h-3.5 mr-1 fill-current flex-shrink-0" viewbox="0 0 24 24">
+<path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 110-5 2.5 2.5 0 010 5z"></path>
+</svg>
+<span class="truncate">Mugalivakkam, Chennai</span>
+</div>
+</div>
+</div>
+<!-- Quick Action Buttons / Pills -->
+<div class="grid grid-cols-3 gap-2 mt-4 pt-1">
+<!-- Call Action -->
+<a class="flex items-center justify-center py-2 px-2.5 rounded-xl border border-blue-200/90 bg-blue-50/50 hover:bg-blue-100/60 active:scale-95 transition text-[#2563eb] text-xs font-semibold space-x-1.5 shadow-sm" href="tel:9884401133">
+<svg class="w-3.5 h-3.5 fill-current" viewbox="0 0 24 24">
+<path d="M6.62 10.79a15.053 15.053 0 006.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"></path>
+</svg>
+<span>Call</span>
+</a>
+<!-- WhatsApp Action -->
+<a class="flex items-center justify-center py-2 px-2.5 rounded-xl border border-emerald-200 bg-emerald-50/60 hover:bg-emerald-100/60 active:scale-95 transition text-emerald-600 text-xs font-semibold space-x-1.5 shadow-sm" href="#">
+<svg class="w-3.5 h-3.5 fill-current" viewbox="0 0 24 24">
+<path d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91 0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.816 9.816 0 0012.04 2m.01 1.67c4.54 0 8.24 3.7 8.24 8.24 0 2.2-.86 4.28-2.42 5.84-1.56 1.56-3.64 2.41-5.84 2.41-1.49 0-2.95-.4-4.23-1.15l-.3-.18-3.12.82.83-3.04-.2-.32a8.196 8.196 0 01-1.26-4.38c0-4.54 3.7-8.24 8.26-8.24"></path>
+</svg>
+<span>WhatsApp</span>
+</a>
+<!-- Directions Action -->
+<a class="flex items-center justify-center py-2 px-2.5 rounded-xl border border-rose-200 bg-rose-50/50 hover:bg-rose-100/60 active:scale-95 transition text-rose-600 text-xs font-semibold space-x-1.5 shadow-sm" href="#">
+<svg class="w-3.5 h-3.5 fill-current rotate-45" viewbox="0 0 24 24">
+<path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"></path>
+</svg>
+<span>Directions</span>
+</a>
+</div>
+</section>
+<!-- END: CustomerProfileCard -->
+<!-- BEGIN: NavigationTabs -->
+<section class="grid grid-cols-4 gap-2" data-purpose="module-navigation-tabs">
+<!-- Site Info Tab (Active) -->
+<button class="bg-white rounded-2xl py-3 px-1 border-2 border-blue-500 shadow-sm flex flex-col items-center justify-center space-y-1">
+<div class="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
+<svg class="w-4 h-4 fill-current" viewbox="0 0 24 24">
+<path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"></path>
+</svg>
+</div>
+<span class="text-[11px] font-bold text-blue-600 leading-tight">Site Info</span>
+</button>
+<!-- Quotations Tab -->
+<button class="bg-white/90 rounded-2xl py-3 px-1 border border-slate-200/80 shadow-sm flex flex-col items-center justify-center space-y-1 opacity-80 hover:opacity-100">
+<div class="w-6 h-6 flex items-center justify-center text-slate-400">
+<svg class="w-4 h-4 stroke-current stroke-2" fill="none" viewbox="0 0 24 24">
+<path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</div>
+<span class="text-[11px] font-semibold text-slate-500 leading-tight">Quotations</span>
+</button>
+<!-- Payments Tab -->
+<button class="bg-white/90 rounded-2xl py-3 px-1 border border-slate-200/80 shadow-sm flex flex-col items-center justify-center space-y-1 opacity-80 hover:opacity-100">
+<div class="w-6 h-6 flex items-center justify-center text-slate-400">
+<svg class="w-4 h-4 stroke-current stroke-2" fill="none" viewbox="0 0 24 24">
+<path d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</div>
+<span class="text-[11px] font-semibold text-slate-500 leading-tight">Payments</span>
+</button>
+<!-- Warranty Tab -->
+<button class="bg-white/90 rounded-2xl py-3 px-1 border border-slate-200/80 shadow-sm flex flex-col items-center justify-center space-y-1 opacity-80 hover:opacity-100">
+<div class="w-6 h-6 flex items-center justify-center text-slate-400">
+<svg class="w-4 h-4 stroke-current stroke-2" fill="none" viewbox="0 0 24 24">
+<path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</div>
+<div class="flex items-center space-x-0.5">
+<span class="text-[11px] font-semibold text-slate-500 leading-tight">Warranty</span>
+<svg class="w-2.5 h-2.5 fill-slate-400" viewbox="0 0 20 20">
+<path clip-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" fill-rule="evenodd"></path>
+</svg>
+</div>
+</button>
+</section>
+<!-- END: NavigationTabs -->
+<!-- BEGIN: SiteAndDetailsCard -->
+<section class="bg-white rounded-3xl p-4 card-shadow border border-slate-100 space-y-3.5" data-purpose="site-and-details-card">
+<!-- Card Header with Update Status button -->
+<div class="flex items-center justify-between">
+<h3 class="text-base font-bold text-slate-900 tracking-tight">Site &amp; Details</h3>
+<button class="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border border-blue-200 bg-blue-50/70 text-blue-600 text-xs font-semibold hover:bg-blue-100 transition shadow-2xs" type="button">
+<svg class="w-3.5 h-3.5 stroke-current stroke-2" fill="none" viewbox="0 0 24 24">
+<path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+<span>Update Status</span>
+</button>
+</div>
+<!-- Service Packages Pills -->
+<div>
+<span class="text-xs font-semibold text-slate-600 block mb-2">Requested Service Packages:</span>
+<div class="flex flex-wrap gap-2">
+<!-- Active Service Pill -->
+<span class="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-600 border border-blue-100 shadow-2xs space-x-1.5">
+<svg class="w-3.5 h-3.5 fill-current" viewbox="0 0 24 24">
+<path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z"></path>
+</svg>
+<span>Waterproofing</span>
+</span>
+<!-- Secondary Service Pill -->
+<span class="inline-flex items-center px-3.5 py-1.5 rounded-full text-xs font-medium bg-slate-50 text-slate-600 border border-slate-200/60">
+              Terrace Coating
+            </span>
+</div>
+</div>
+<!-- Schedule Information: Date & Time Grid -->
+<div class="grid grid-cols-2 gap-2.5 pt-1">
+<!-- Fixed Visit Date -->
+<div class="bg-slate-50/70 rounded-2xl p-2.5 border border-slate-100">
+<span class="text-[11px] font-medium text-slate-400 block mb-1">Fixed Visit Date</span>
+<div class="flex items-center space-x-2 text-slate-900 font-bold text-xs sm:text-sm">
+<svg class="w-4 h-4 text-blue-600 stroke-current stroke-2" fill="none" viewbox="0 0 24 24">
+<path d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+<span>16-10-26</span>
+</div>
+</div>
+<!-- Appointment Time -->
+<div class="bg-slate-50/70 rounded-2xl p-2.5 border border-slate-100">
+<span class="text-[11px] font-medium text-slate-400 block mb-1">Appointment Time</span>
+<div class="flex items-center space-x-2 text-slate-900 font-bold text-xs sm:text-sm">
+<svg class="w-4 h-4 text-blue-600 stroke-current stroke-2" fill="none" viewbox="0 0 24 24">
+<path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+<span>04:14 PM</span>
+</div>
+</div>
+</div>
+<!-- Attended By Technician -->
+<div class="bg-slate-50/70 rounded-2xl p-2.5 px-3 border border-slate-100 flex items-center justify-between">
+<span class="text-xs font-medium text-slate-500">Attended By Technician</span>
+<div class="inline-flex items-center space-x-1.5 bg-white px-2.5 py-1 rounded-full border border-slate-200/80 shadow-2xs">
+<div class="w-4 h-4 rounded-full bg-blue-600 flex items-center justify-center text-white text-[9px] font-bold">
+<svg class="w-2.5 h-2.5 fill-current" viewbox="0 0 24 24">
+<path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"></path>
+</svg>
+</div>
+<span class="text-xs font-bold text-slate-900">Sriraman K</span>
+</div>
+</div>
+<!-- Attended Date & Time (Locked Records) -->
+<div class="grid grid-cols-2 gap-2.5">
+<!-- Attended Date -->
+<div class="bg-slate-50/70 rounded-2xl p-2.5 border border-slate-100 relative">
+<div class="flex justify-between items-center mb-1">
+<span class="text-[11px] font-medium text-slate-400">Attended Date</span>
+<svg class="w-3 h-3 text-slate-400 fill-current" viewbox="0 0 20 20">
+<path clip-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" fill-rule="evenodd"></path>
+</svg>
+</div>
+<div class="flex items-center space-x-2 text-slate-900 font-bold text-xs sm:text-sm">
+<svg class="w-4 h-4 text-slate-400 stroke-current stroke-2" fill="none" viewbox="0 0 24 24">
+<path d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+<span>06-10-26</span>
+</div>
+</div>
+<!-- Attended Time -->
+<div class="bg-slate-50/70 rounded-2xl p-2.5 border border-slate-100 relative">
+<div class="flex justify-between items-center mb-1">
+<span class="text-[11px] font-medium text-slate-400">Attended Time</span>
+<svg class="w-3 h-3 text-slate-400 fill-current" viewbox="0 0 20 20">
+<path clip-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" fill-rule="evenodd"></path>
+</svg>
+</div>
+<div class="flex items-center space-x-2 text-slate-900 font-bold text-xs sm:text-sm">
+<svg class="w-4 h-4 text-slate-400 stroke-current stroke-2" fill="none" viewbox="0 0 24 24">
+<path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+<span>17:52</span>
+</div>
+</div>
+</div>
+</section>
+<!-- END: SiteAndDetailsCard -->
+<!-- BEGIN: StatusHistorySection -->
+<section class="bg-white rounded-3xl p-4 card-shadow border border-slate-100 space-y-3.5" data-purpose="status-timeline-history">
+<!-- Section Title and Count Badge -->
+<div class="flex items-center justify-between">
+<div class="flex items-center space-x-2">
+<h3 class="text-base font-bold text-slate-900 tracking-tight">Status History</h3>
+<span class="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-600 border border-blue-100">
+              4 Updates
+            </span>
+</div>
+<span class="text-xs text-slate-400 font-medium">Cust ID: DR55</span>
+</div>
+<!-- Timeline Cards Container -->
+<div class="space-y-3 pt-1">
+<!-- Card 1: WON Status -->
+<article class="p-3.5 rounded-2xl border border-emerald-300/80 bg-emerald-50/20 space-y-2.5">
+<div class="flex items-center justify-between">
+<div class="flex items-center space-x-2">
+<span class="px-2 py-0.5 rounded-md text-[11px] font-bold bg-[#10b981] text-white tracking-wider">
+                  WON
+                </span>
+<span class="text-xs font-bold text-slate-900">$24,500</span>
+</div>
+<div class="flex items-center text-[11px] font-medium text-slate-500 space-x-1">
+<span>Oct 24, 04:30 PM</span>
+<svg class="w-3.5 h-3.5 stroke-current stroke-2" fill="none" viewbox="0 0 24 24">
+<path d="M9 5l7 7-7 7" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</div>
+</div>
+<p class="text-xs text-slate-700 leading-snug">
+              Payment received • Terrace coating &amp; waterproofing package finalized
+            </p>
+<!-- Audio Voice Note Player Pill -->
+<div class="bg-white rounded-xl p-2 px-3 border border-slate-200/70 flex items-center justify-between shadow-2xs">
+<div class="flex items-center space-x-2.5">
+<!-- Play Button -->
+<button aria-label="Play audio" class="w-6 h-6 rounded-full bg-[#10b981] text-white flex items-center justify-center flex-shrink-0 active:scale-95 transition" type="button">
+<svg class="w-3 h-3 fill-current ml-0.5" viewbox="0 0 24 24">
+<path d="M8 5v14l11-7z"></path>
+</svg>
+</button>
+<!-- Simulated Waveform -->
+<div class="flex items-center space-x-[2.5px] h-3.5">
+<span class="w-[3px] h-2 bg-emerald-500 rounded-full"></span>
+<span class="w-[3px] h-3.5 bg-emerald-500 rounded-full"></span>
+<span class="w-[3px] h-1.5 bg-emerald-300 rounded-full"></span>
+<span class="w-[3px] h-3 bg-emerald-500 rounded-full"></span>
+<span class="w-[3px] h-2 bg-slate-300 rounded-full"></span>
+<span class="w-[3px] h-1 bg-slate-200 rounded-full"></span>
+</div>
+<span class="text-[11px] font-medium text-slate-600 pl-1">Debrief voice note</span>
+</div>
+<span class="text-[11px] font-medium text-slate-400 tabular-nums">0:28</span>
+</div>
+</article>
+<!-- Card 2: FOLLOW_UP Status -->
+<article class="p-3.5 rounded-2xl border border-amber-200/90 bg-amber-50/20 space-y-2.5">
+<div class="flex items-center justify-between">
+<span class="px-2 py-0.5 rounded-md text-[10px] font-bold border border-amber-400/80 bg-amber-50 text-amber-700 tracking-wider">
+                FOLLOW_UP
+              </span>
+<div class="flex items-center text-[11px] font-medium text-slate-500 space-x-1">
+<span>Oct 20, 11:15 AM</span>
+<svg class="w-3.5 h-3.5 stroke-current stroke-2" fill="none" viewbox="0 0 24 24">
+<path d="M9 5l7 7-7 7" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</div>
+</div>
+<p class="text-xs text-slate-700 leading-snug">
+              Quotation pending review with owner
+            </p>
+<!-- Blue Audio Voice Note Player Pill -->
+<div class="bg-white rounded-xl p-2 px-3 border border-slate-200/70 flex items-center justify-between shadow-2xs">
+<div class="flex items-center space-x-2.5">
+<button aria-label="Play follow-up audio" class="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center flex-shrink-0 active:scale-95 transition" type="button">
+<svg class="w-3 h-3 fill-current ml-0.5" viewbox="0 0 24 24">
+<path d="M8 5v14l11-7z"></path>
+</svg>
+</button>
+<div class="flex items-center space-x-[2.5px] h-3.5">
+<span class="w-[3px] h-3 bg-blue-600 rounded-full"></span>
+<span class="w-[3px] h-4 bg-blue-600 rounded-full"></span>
+<span class="w-[3px] h-2 bg-blue-400 rounded-full"></span>
+<span class="w-[3px] h-1.5 bg-slate-300 rounded-full"></span>
+<span class="w-[3px] h-3 bg-blue-500 rounded-full"></span>
+</div>
+<span class="text-[11px] font-medium text-slate-600 pl-1">Follow-up memo</span>
+</div>
+<span class="text-[11px] font-medium text-slate-400 tabular-nums">0:19</span>
+</div>
+</article>
+<!-- Card 3: NEGOTIATION Status -->
+<article class="p-3.5 rounded-2xl border border-indigo-100 bg-indigo-50/20 space-y-1.5">
+<div class="flex items-center justify-between">
+<span class="px-2 py-0.5 rounded-md text-[10px] font-bold border border-indigo-200 bg-indigo-50 text-indigo-700 tracking-wider">
+                NEGOTIATION
+              </span>
+<div class="flex items-center text-[11px] font-medium text-slate-500 space-x-1">
+<span>Oct 17, 02:45 PM</span>
+<svg class="w-3.5 h-3.5 stroke-current stroke-2" fill="none" viewbox="0 0 24 24">
+<path d="M9 5l7 7-7 7" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</div>
+</div>
+<p class="text-xs text-slate-700 leading-snug">
+              Negotiation in progress on coating warranty terms
+            </p>
+</article>
+<!-- Card 4: SENT Status -->
+<article class="p-3.5 rounded-2xl border border-blue-100 bg-blue-50/20 space-y-1.5">
+<div class="flex items-center justify-between">
+<span class="px-2 py-0.5 rounded-md text-[10px] font-bold border border-blue-200 bg-blue-50 text-blue-700 tracking-wider">
+                SENT
+              </span>
+<div class="flex items-center text-[11px] font-medium text-slate-500 space-x-1">
+<span>Oct 16, 05:10 PM</span>
+<svg class="w-3.5 h-3.5 stroke-current stroke-2" fill="none" viewbox="0 0 24 24">
+<path d="M9 5l7 7-7 7" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</div>
+</div>
+<p class="text-xs text-slate-700 leading-snug">
+              Quotation sent to client WhatsApp &amp; Email
+            </p>
+</article>
+</div>
+</section>
+<!-- END: StatusHistorySection -->
+</div>
+</main>
+<!-- END: Mobile Container Device Frame -->
+</body></html>

@@ -206,8 +206,6 @@ export const authRepository = {
       const response = await apiClient.post(API_ENDPOINTS.LOGIN, payload);
       const data = response.data;
 
-      console.log('[Login Response]', data);
-
       const token =
         data?.token ||
         data?.accessToken ||

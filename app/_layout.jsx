@@ -28,7 +28,15 @@ import { setSessionExpiredHandler } from '../src/core/auth/sessionEvents';
 import {
   setServerErrorHandler,
   retryPendingServerRequests,
+  dismissPendingServerRequests,
 } from '../src/core/api/serverErrorEvents';
+
+// Release builds write nothing to device logs: logged values can include customer and payment data
+if (!__DEV__) {
+  ['log', 'info', 'debug', 'warn', 'error'].forEach((level) => {
+    console[level] = () => {};
+  });
+}
 
 // App always uses light theme — dark mode is removed
 const AppLightTheme = {
@@ -70,7 +78,7 @@ const AppLightTheme = {
 SplashScreen.preventAutoHideAsync();
 
 export const unstable_settings = {
-  initialRouteName: 'index',
+  anchor: 'index',
 };
 
 // ─── Global Network Banner ────────────────────────────────────────────────────
@@ -251,6 +259,8 @@ function RootLayoutContent() {
           <Stack.Screen name="send-quotation" options={{ headerShown: false }} />
           <Stack.Screen name="send-quote" options={{ headerShown: false }} />
           <Stack.Screen name="outstanding" options={{ headerShown: false }} />
+          <Stack.Screen name="appointment-reports" options={{ headerShown: false }} />
+          <Stack.Screen name="collections" options={{ headerShown: false }} />
           <Stack.Screen name="warranty" options={{ headerShown: false }} />
           <Stack.Screen name="warranty-letter" options={{ headerShown: false }} />
           <Stack.Screen name="policy" options={{ headerShown: false }} />
@@ -289,9 +299,10 @@ function RootLayoutContent() {
           type="error"
           icon="cloud-offline-outline"
           buttonText="Try Again"
-          dismissible={false}
+          secondaryButtonText="Dismiss"
           isLoading={serverErrorState.isRetrying}
           onConfirm={handleRetryServerError}
+          onSecondaryAction={dismissPendingServerRequests}
         />
       </ThemeProvider>
     </PaperProvider>

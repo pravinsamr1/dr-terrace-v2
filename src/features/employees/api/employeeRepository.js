@@ -103,11 +103,8 @@ export const employeeRepository = {
         formData.append('employeeImage', filePayload);
       }
 
-      console.log('Sending Add Employee FormData:', formData);
-
       const response = await apiClient.post(API_ENDPOINTS.EMPLOYEE, formData);
 
-      console.log('Add Employee Response Success:', response.data);
       return {
         success: true,
         data: response.data,
@@ -238,7 +235,6 @@ export const employeeRepository = {
 
       const cleanId = String(id).replace(/\D/g, '') || id;
       const updateUrl = `${API_ENDPOINTS.EMPLOYEE}/${cleanId}`;
-      console.log(`Sending Update Employee FormData to ${updateUrl}:`, formData);
 
       let response;
       try {
@@ -252,7 +248,6 @@ export const employeeRepository = {
         }
       }
 
-      console.log(`Update Employee ${id} Success:`, response.data);
       return {
         success: true,
         data: response.data,

@@ -19,7 +19,10 @@ This document provides complete integration specifications, architecture contrac
      - [9. Confirm Quotation](#9-confirm-quotation-idconfirm)
      - [10. Unlock Quotation](#10-unlock-quotation-idunlock)
      - [12. Quotation Errors](#12-quotation-errors)
+   - [Quotation Status & Follow-ups](#quotation-status--follow-ups)
+   - [Quotation Reports](#quotation-reports)
    - [Proforma Invoice (Tax Customers Only)](#proforma-invoice-tax-customers-only)
+   - [Payment Reports (Collections)](#payment-reports-collections)
    - [Quotation Payments & Direct Settlement (New Flow)](#quotation-payments--direct-settlement-new-simplified-flow)
      - [1. Get Payment Summary & History](#1-get-payment-summary--history)
      - [2. Record Intermediate Payment (Grand Total)](#2-record-intermediate-payment-checked-against-the-grand-total)
@@ -132,12 +135,17 @@ Both Admin and Field Employees log in through the same endpoint.
 ```http
 POST /api/v2/auth/login
 Content-Type: application/json
+X-Client: mobile
 
 {
-  "username": "<admin_username_OR_employee_mobile_number>",
+  "username": "<admin_username_OR_employee_mobile_number_OR_email>",
   "password": "<plain_text_password>"
 }
 ```
+
+- The identifier may be sent as `username`, `email`, `phone` or `mobileNumber`. Email works for employees that have one set.
+- **`X-Client` header**: send `mobile` from the apps and `web` from the React admin. With it, the access token lasts **15 minutes**, and you keep the session alive with `POST /api/v2/auth/refresh` (3.3).
+  - Without the header (older app builds), the token still lasts 100 hours. This ends once the server sets `LEGACY_TOKEN_TTL=off`, so update the apps first.
 
 #### Successful Response (`200 OK`)
 
@@ -157,15 +165,29 @@ Content-Type: application/json
     }
   },
   "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refreshToken": "q3V0...only with X-Client: mobile",
   "expiresAt": 1756400000000,
   "user": {
     "id": 102,
     "username": "9841999888",
     "name": "Karthik Raja",
-    "role": "FIELD_EMPLOYEE"
+    "role": "FIELD_EMPLOYEE",
+    "email": null,
+    "isSuperAdmin": false
   }
 }
 ```
+
+- `accessToken` is the same value as `token`. New code should use `accessToken`.
+- `data.user` carries `email` and `isSuperAdmin` too.
+- The response also sets an httpOnly cookie, `drt_refresh`, which the web admin uses for refresh. Mobile apps get `refreshToken` in the body instead and must store it securely (Keychain / Keystore).
+
+Errors:
+- `400` `{ message, errors: [{ field, message }] }`: a field is missing or has the wrong type.
+- `401` `"Invalid credentials"`.
+- `401` `"Account is inactive"`: an admin deactivated the account.
+- `429`: after 10 failed attempts from the same IP within 15 minutes.
 
 > [!TIP]
 > **Uniform Envelope**: 100% of API v2 endpoints return their core response payload under the `data` property (`res.data`) and include `statusCode` (`200` or `201`). Convenience top-level keys (`res.token`, `res.user`, `res.appointments`, etc.) are also preserved for non-breaking compatibility.
@@ -214,6 +236,65 @@ Authorization: Bearer <jwt_token>
 
 ---
 
+### 3.3 Refresh and Logout
+
+When a request returns `401`, refresh once and retry it. If the refresh also returns `401`, send the user to login.
+
+```http
+POST /api/v2/auth/refresh
+X-Client: mobile
+Content-Type: application/json
+
+{ "refreshToken": "<the refreshToken from login or from the last refresh>" }
+```
+
+```json
+{ "statusCode": 200, "success": true, "accessToken": "eyJ...", "expiresAt": 1756400900000, "refreshToken": "<new one>" }
+```
+
+- **Every refresh returns a new `refreshToken`. Store it, and throw the old one away.**
+  - Sending an old refresh token again counts as theft: the server ends that login session and the user has to log in again.
+  - If two requests can refresh at once, let only one refresh run and make the others wait for it.
+- **Web admin:** send `X-Client: web` and no body. The `drt_refresh` cookie is used, so call with `credentials: "include"`.
+- The `X-Client` header is required on refresh; without it the server returns `401`.
+
+```http
+POST /api/v2/auth/logout
+Authorization: Bearer <jwt_token>
+X-Client: mobile
+
+{ "refreshToken": "<current refreshToken>" }
+```
+
+Logout ends the session on the server: both the refresh token and the access token stop working. It works even when the access token has already expired.
+
+Other things that end a session:
+- An admin deactivates the account. The very next request returns `401 "Account is inactive"`.
+- The employee type changes. The very next request returns `401 "Your access has changed. Please log in again."`.
+- The employee's password is changed. Refresh stops working, so the session ends when the current access token expires.
+
+### 3.4 Permissions
+
+What each user may do is set by **roles that admins manage**. Where this guide says "Admin only" or "Field employees", it describes the default **Admin** and **Field Employee** roles; a custom role can allow more or less.
+
+- `403 Forbidden`: the user's role does not allow the action. Hide or disable the control.
+- `404 Not Found` on a record that exists: it is outside the user's scope (for example another technician's quotation), or that feature has been switched off.
+- `GET /api/v2/auth/me` returns the user's `permissions` (for example `"quotation.create"`), `scopes`, enabled `features` and `hiddenFields`, so the UI can show only what is allowed.
+
+Role management and the full permission list are in [`API_CONTRACT.md`](API_CONTRACT.md).
+
+### 3.5 Payment-proof images
+
+Proof images keep their URLs (`/static/payments/<file>`). Once the server sets `PROTECT_PAYMENT_PROOFS=true`, those URLs need the `Authorization: Bearer <token>` header, and a user only gets proofs for payments they may see (others get `404`).
+
+A plain `<img src>` cannot send headers:
+- **Web:** fetch the file with the header and show it through a `blob:` URL.
+- **React Native:** use `Image` with `source={{ uri, headers: { Authorization } }}`.
+
+Login attempts are also limited per account: after 10 failures in 15 minutes the account gets `429` with a `Retry-After` header, on top of the per-IP limit.
+
+---
+
 ## 4. Complete REST API v2 Endpoints Reference
 
 ### Appointments
@@ -254,6 +335,7 @@ Authorization: Bearer <jwt_token>
       "assignedEmployeeId": 102,
       "employeeName": "Karthik Raja",
       "isAttended": false,
+      "appointmentStatus": { "code": "NOT_VISITED", "name": "Not visited", "color": "#888780" },
       "status": "SCHEDULED",
       "address": {
         "doorNo": "42-A",
@@ -988,6 +1070,235 @@ All errors return `{ statusCode, success: false, message }`. Showing `message` a
 
 ---
 
+### Quotation Status & Follow-ups
+
+Every quotation has a `status`. The full design is in [QUOTATION_STATUS_PLAN.md](QUOTATION_STATUS_PLAN.md).
+
+| Status | Set by | When |
+|---|---|---|
+| `SENT` | Backend | Quotation created, or unconfirmed / unlocked |
+| `FOLLOW_UP`, `NEGOTIATION`, any admin-added status | User, in the quotation form | A follow-up call is logged |
+| `WON` | Backend | Quotation confirmed |
+| `IN_PROGRESS` | Backend | First payment recorded |
+| `COMPLETED` | Backend | Fully paid or final receipt generated |
+| `LOST` | Backend, or user with a reason | Validity date passed (unconfirmed, unpaid), or marked by hand |
+
+Every change is kept in `statusHistory` (who, when, note, audio, next follow-up date, `source`: `USER` or `SYSTEM`).
+
+#### 1. Status master (`/api/v2/quotation-statuses`)
+
+| Method | Path | Roles | Notes |
+|---|---|---|---|
+| GET | `/api/v2/quotation-statuses?active=true` | All | Ordered by `sortOrder`. Use it for the status dropdown. |
+| GET | `/api/v2/quotation-statuses/:id` | All | |
+| POST | `/api/v2/quotation-statuses` | Admin | `{ name, color?, sortOrder?, requiresAudio?, isActive? }`. `code` is made from the name (`"Site visit"` → `SITE_VISIT`). |
+| PUT | `/api/v2/quotation-statuses/:id` | Admin | Same fields. The code never changes. System statuses: only name, colour and order. |
+| DELETE | `/api/v2/quotation-statuses/:id` | Admin | Not for system statuses or a status that quotations use (deactivate it instead). |
+
+```json
+{ "id": 2, "code": "FOLLOW_UP", "name": "Follow-up", "color": "#7F77DD", "sortOrder": 20,
+  "isSystem": false, "requiresAudio": true, "isActive": true }
+```
+
+In the form dropdown, show active statuses where `isSystem` is false, plus `LOST`.
+
+#### 2. Logging a follow-up (quotation create / update form)
+
+`POST /api/v2/quotations` and `PUT /api/v2/quotations/:id` take these optional fields:
+
+| Field | Type | Notes |
+|---|---|---|
+| `statusCode` or `statusId` | string / number | The status to move to. `WON`, `IN_PROGRESS`, `COMPLETED` and `SENT` can't be picked. |
+| `statusNote` | string (≤ 2000) | Call notes. **Required** for `LOST` (the reason). |
+| `nextFollowUpDate` | `YYYY-MM-DD` or null | Today or later. Drives the reminder push and the due report. |
+| `audioDurationSec` | number | Length of the attached recording, measured by the app. |
+| `audio` (file) | multipart only | `.mp3 .m4a .aac .wav .ogg .webm .amr .3gp` or any `audio/*`, up to 25 MB. Required when the status has `requiresAudio`. |
+
+**JSON** works as before. To attach a recording, send `multipart/form-data` with the quotation JSON as a string in `data`:
+
+```ts
+const form = new FormData();
+form.append("data", JSON.stringify({ ...quotationForm, statusCode: "FOLLOW_UP",
+  statusNote: "Will decide Monday", nextFollowUpDate: "2026-10-20", audioDurationSec: 42 }));
+form.append("audio", { uri: recording.uri, name: "call.m4a", type: "audio/mp4" } as any); // React Native
+await api.put(`/quotations/${id}`, form); // let the client set the multipart boundary
+```
+
+Rules:
+- Sending the same status again **with** a note, audio or a new date adds a new history entry (one per call). A plain re-save without them adds nothing.
+- Once a quotation is `WON` or later, its status can't be changed by hand.
+- `WON`, `IN_PROGRESS`, `COMPLETED` and `LOST` clear `nextFollowUpDate`.
+
+#### 3. Status fields on the quotation object
+
+`GET /api/v2/quotations/:id` and the edit view now include:
+
+```json
+"status": { "id": 2, "code": "FOLLOW_UP", "name": "Follow-up", "color": "#7F77DD" },
+"nextFollowUpDate": "2026-10-20",
+"statusHistory": [
+  { "id": 97, "quotationId": 42,
+    "from": { "id": 1, "code": "SENT", "name": "Sent", "color": "#378ADD" },
+    "to": { "id": 2, "code": "FOLLOW_UP", "name": "Follow-up", "color": "#7F77DD" },
+    "note": "Will decide Monday",
+    "audio": { "url": "/api/v2/quotations/42/status-history/97/audio", "mime": "audio/mp4", "size": 351020, "durationSec": 42 },
+    "audioExpired": false, "nextFollowUpDate": "2026-10-20", "source": "USER",
+    "changedBy": "Field Employee (Ravi)", "changedByEmployeeId": 7, "createdAt": "2026-10-15T09:05:40.000Z" }
+]
+```
+
+List responses (`GET /api/v2/quotations`) include `status` and `nextFollowUpDate` but not `statusHistory`.
+
+#### 4. Playing a recording
+
+`GET /api/v2/quotations/:id/status-history/:historyId/audio` (Admin, or the owning field employee) streams the file
+and supports `Range` for seeking. It needs the `Authorization` header, so download it with your HTTP client, or pass
+headers to the player (`expo-av`: `{ uri, headers: { Authorization } }`). Recordings are never public URLs.
+`audioExpired: true` means the retention setting removed the file; the note stays.
+
+#### 5. Removing a wrong entry (master admin)
+
+`DELETE /api/v2/quotations/:id/status-history/:historyId`: user entries only. If it was the latest entry, the
+quotation's status and next follow-up date go back to the previous entry's. The recording is deleted. Returns the
+quotation.
+
+#### 6. Status errors
+
+| Status | `message` |
+|---|---|
+| 400 | `An audio recording is required for status Follow-up` |
+| 400 | `Won is set automatically (create, confirm and payments) and can't be picked` |
+| 400 | `A reason (statusNote) is required to mark a quotation Lost` |
+| 400 | `The quotation is already confirmed; its status now follows confirmation and payments` |
+| 400 | `nextFollowUpDate can't be in the past` |
+| 400 | `Unknown status NOPE. See GET /api/v2/quotation-statuses` |
+| 400 | `Invalid audio format. Allowed formats: ...` |
+| 413 | File larger than 25 MB |
+
+---
+
+### Quotation Reports
+
+All under `/api/v2/quotation-reports`, for admins and field employees. **Reports count appointments** (customer
+visits), not quotations: one visit with three package quotations counts once. Responses use the usual
+`{ statusCode, success, data }` envelope; everything is computed live.
+
+**Appointment status** = the status of its most advanced quotation:
+`COMPLETED` › `IN_PROGRESS` › `WON` › manual (`FOLLOW_UP`, `NEGOTIATION`, …) › `SENT` › `LOST` (newest wins a tie).
+So an appointment is Lost only when every quotation is Lost. An appointment without quotations has
+`{ "id": null, "code": "NO_QUOTATION", "name": "No quotation", "color": null }`.
+
+**`appointmentStatus`** groups that status into six values, returned as `{ code, name, color }` on report rows and on
+`GET /api/v2/appointments` and `GET /api/v2/appointments/:id`:
+
+| Code | Name | When |
+|---|---|---|
+| `WON` | Won | Lead quotation is `WON` or `COMPLETED` |
+| `OPEN` | Open | Lead quotation is `IN_PROGRESS`, `SENT`, `NEGOTIATION` or an admin-defined status |
+| `FOLLOW_UP` | Follow-up | Lead quotation is `FOLLOW_UP` |
+| `NOT_INTERESTED` | Not interested | Every quotation is `LOST` (picked by a user, or validity ended) |
+| `NOT_VISITED` | Not visited | No quotation, no check-in, nothing logged |
+| `NOT_QUOTED` | Not quoted | Checked in, no quotation, nothing logged |
+
+Without a quotation, the latest status update logged on the appointment decides (`FOLLOW_UP` or `NOT_INTERESTED`). It is computed live and has no field of its own to set: it changes through `POST /api/v2/appointments/:id/status-updates`, confirmation and payments. The existing `status` field and filter are unchanged.
+
+**App screens** (`month=YYYY-MM`, default this month):
+
+- `GET /api/v2/reports/home`: `{ month, previousMonth, appointments, payments }`. `appointments.current` and `.previous` split the total into `attended` (has a quotation), `visited` (checked in, no quotation), `pending` (no check-in, date not passed) and `unattended` (no check-in, date passed). `payments` is `null` without payment access; `received` counts all payments in the month, with `verified` and `awaitingVerification` shown separately. `current.pending` is the balance on every confirmed quotation as of today, so `previous` has only `received`, and `changePercent` compares received.
+- `GET /api/v2/reports/appointments` (also `employeeId`): `{ month, previousMonth, attention, metrics, comparison, leadStatus }`. `metrics.converted` includes `IN_PROGRESS`; the Won group in `leadStatus` doesn't.
+- `GET /api/v2/appointments/:id/status-updates` (`page`, `limit`): history entries across the appointment's quotations, newest first, with `meta`.
+- `GET /api/v2/appointments/:id/status-updates/:updateId`: one entry plus `dealValue` and `paymentStatus`.
+
+- `POST /api/v2/appointments/:id/status-updates` (multipart, needs `quotation.edit`). Fields: `status`, `notes`, `nextFollowUpDate` (`YYYY-MM-DD`), `quotationId` (default: the lead quotation), `audio` (file), `audioDurationSec`, `clientRequestId` (UUID, required). `status` is a quotation status code or `NOT_INTERESTED` (same as `LOST`). `WON` can't be picked: use `POST /api/v2/quotations/:id/confirm`. Audio rules come from the status's `requires_audio`, and Not interested needs `notes`. Without a quotation only `FOLLOW_UP` and `NOT_INTERESTED` are accepted, and the entry id looks like `"a12"`. Returns 201, or 200 with the first result for a repeated `clientRequestId`.
+
+**Receivables** (under `/api/v2/payment-reports`): every confirmed quotation, tax and non-tax. Payments fill Advance, then Mid, then Final. Advance is due on the confirmation day unless changed; Mid and Final are `UNSCHEDULED` until a date is set. Older quotations with no status history have no confirmation date, so their Advance is also `UNSCHEDULED`. An unscheduled balance counts in `outstanding` but never as overdue, and can't be reminded about. Use `state=UNSCHEDULED` to list quotations that need dates. States: `OVERDUE`, `DUE_TODAY`, `NOT_DUE`, `UNSCHEDULED`, `PAID`.
+
+- `GET /receivables/summary` (`employeeId`): `{ today, contractValue, paidToDate, outstanding, overdue, dueToday, notDue, unscheduled, excess, ageing: [{ bucket, amount, count }] }`.
+- `GET /receivables` (`employeeId`, `state`, `search`, `sort=daysLate|outstanding|nextDue`, `page`, `limit`): page of `{ quotationId, appointmentId, customerName, clientMobile, clientAddress, employee, contractValue, paid, paidPercent, outstanding, balancePercent, state, daysLate, nextDueDate, lastReminderAt, milestones: [{ key, label, amount, percent, paid, balance, dueDate, state, daysLate }] }`. Without `state`, only rows with a balance.
+- `GET /receivables/export`: CSV with one row per milestone with a balance (`payment.export`).
+- `POST /receivables/:quotationId/reminder`: notifies staff, not the customer (`payment.edit`). 202; 409 when nothing is due; 429 within 24 hours.
+- `GET` / `PUT /receivables/:quotationId/schedule`: `{ advanceDueDate, midDueDate, finalDueDate }`. `PUT` needs `payment.edit`; a field left out keeps its date and `null` clears it. Dates must run in order and not before confirmation. 404 outside the caller's scope; 409 on an unconfirmed quotation.
+
+To cover every customer on the Collections screens: use `/receivables` for the Due screen, read `receivables` (the `/receivables/summary` shape) on `GET /summary` and `GET /overview`, and send `basis=receivable` to `GET /payments` and `/payments/export`. With it, open rows have `kind: "receivable"`, `id` is the quotation id, `amount` is the whole balance, unscheduled and not-due balances are `PENDING`, and they are as of today in any `month`; paid rows still follow `month`. Everything else on these routes (`pending`, `overdue`, `comparison`, `statusBreakdown`, the default `/payments`, `/due`) stays proforma only.
+
+For the appointment list and export use `GET /appointments` and `/appointments/export` below with `appointmentStatus`. For the follow-ups screen use `GET /follow-ups/due?due=active`.
+
+**Shared filters** (query string, all optional):
+
+| Param | Meaning |
+|---|---|
+| `fromDate`, `toDate` | Appointment date, `YYYY-MM-DD`, inclusive |
+| `employeeId` | Assigned employee (admins). Field employees always get their own appointments. |
+| `status` | Appointment status codes or ids, comma-separated, incl. `NO_QUOTATION` |
+| `appointmentStatus` | The six codes above, comma-separated. Not used by `GET /follow-ups`. An unknown code returns 400. |
+| `appointmentId` | One appointment |
+| `page`, `limit` | Paging (`limit` ≤ 100) |
+
+A bad date, a reversed range or an unknown status returns 400. `grandTotal` and the values are the **lead
+quotation's** grand total (advance + mid + final), so alternative package quotes are never added up.
+
+| Route | `data` |
+|---|---|
+| `GET /summary` | `{ total, statuses: [{ id, code, name, color, count }], appointmentStatuses: [{ code, name, color, count }], followUps: { dueToday, overdue } }`. `statuses[0]` is `NO_QUOTATION`. With both `fromDate` and `toDate`, also `previousPeriod: { fromDate, toDate, total, statuses, appointmentStatuses }` and `totalChangePct` (null when the previous total is 0). |
+| `GET /appointments` | Page of `{ appointmentId, appointmentDate, customerName, customerMobile, area, city, address, propertyName, employee, quotationCount, leadQuotationId, status, appointmentStatus, grandTotal, nextFollowUpDate, followUpCount, lastFollowUp: { note, createdAt, hasAudio, changedBy } \| null }` |
+| `GET /follow-ups` | Page of history entries `{ historyId, quotationId, appointmentId, appointmentDate, customerName, from, to, note, audio, audioExpired, nextFollowUpDate, source, changedBy, employee (who logged it), assignedEmployee, createdAt }`. Extra params: `loggedFrom` / `loggedTo` (when it was logged, Indian time), `source=USER` (default) / `SYSTEM` / `ALL`. `status` here is the entry's new status. |
+| `GET /follow-ups/due` | One row per open appointment with a next follow-up date: `due=today` (default), `overdue`, `active` (overdue and today, oldest first), `upcoming`, `all`. `{ appointmentId, appointmentDate, leadQuotationId, customerName, employee, status, appointmentStatus, nextFollowUpDate, daysOverdue, grandTotal, lastFollowUp }` |
+| `GET /conversion` | See below. `groupBy=employee` (assigned) or `month` (appointment month) adds `breakdown`. With both dates, also `previousPeriod` (the same numbers for the period before) and `changes: { appointmentsPct, quotedPct, convertedPct, openPct, conversionRatePts, winRatePts }`; `*Pct` is a % change (null when the previous is 0), `*Pts` a difference in percentage points. |
+| `GET /appointments/export`, `GET /follow-ups/export` | CSV download (UTF-8 with BOM), up to 10,000 rows |
+| `GET /stream` | Server-Sent Events (below) |
+
+Pages are `{ page, limit, totalItems, totalPages, items }`.
+
+**Previous period:** for a whole-month range (the 1st to a month end) it is the same number of months before, so `2026-10-01..2026-10-31` compares with September. Any other range compares with the same number of days just before it. The design's "+15.9% vs Sep" is `summary.totalChangePct`; "50.0% › 54.9%" is `previousPeriod.conversionRate` › `totals.conversionRate`, with `changes.conversionRatePts`; the Sep vs Oct bars use `previousPeriod` and `totals` (`appointments`, `quoted`, `converted`, `open`). `address` is the full address on one line; the appointments CSV adds it as the last column.
+
+**Conversion** (per appointment): converted = `WON`, `IN_PROGRESS`, `COMPLETED`; lost = `LOST`; open = everything
+else, including `NO_QUOTATION`.
+
+```json
+{ "totals": { "appointments": 5, "quoted": 4, "noQuotation": 1, "converted": 1, "lost": 1, "open": 3,
+    "conversionRate": 20, "winRate": 50,
+    "quotedValue": 40000, "convertedValue": 10000, "lostValue": 10000,
+    "avgDaysToConvert": 4.4, "avgFollowUpsToConvert": 1 },
+  "breakdown": [ { "key": "7", "label": "Ravi", "appointments": 4, "converted": 1, "...": "..." } ] }
+```
+
+`conversionRate` = converted ÷ appointments; `winRate` = converted ÷ (converted + lost). `avgDaysToConvert` runs from
+the appointment date to the first Won; the speed figures only count quotations with history (created after this
+feature shipped) and are `null` when there are none.
+
+#### Realtime updates (`GET /api/v2/quotation-reports/stream`)
+
+A Server-Sent Events stream. Each committed change sends a small signal; **re-fetch the report you are showing**
+(debounce ~500 ms). Field employees only receive events for appointments assigned to them or quotations they own.
+Max 5 open streams per user.
+
+| Event | `data` |
+|---|---|
+| `ready` | Sent once when connected |
+| `status_changed`, `follow_up_logged`, `quotation_created`, `quotation_deleted` | `{ type, quotationId, appointmentId, fromStatus, toStatus, employeeId, assignedEmployeeId, quotationDate, at }` |
+| `appointment_changed` | An appointment was booked, edited, reassigned or deleted: `{ type, appointmentId, assignedEmployeeId, appointmentDate, at }` |
+| `statuses_expired` | `{ type, count, at }` (quotations moved to Lost) |
+| `resync` | The server's listener reconnected: re-fetch everything |
+| `ping` | Every 25 s, ignore |
+
+The browser `EventSource` can't send the `Authorization` header, so use a fetch-based client:
+
+```ts
+// Web: npm i @microsoft/fetch-event-source
+fetchEventSource(`${API}/quotation-reports/stream`, {
+  headers: { Authorization: `Bearer ${token}` },
+  onmessage: (ev) => { if (ev.event !== "ping") debouncedRefetch(); },
+  onopen: async () => refetch(), // also after a reconnect: missed events are not replayed
+});
+
+// Expo: npm i react-native-sse
+const es = new EventSource(`${API}/quotation-reports/stream`, { headers: { Authorization: `Bearer ${token}` } });
+["status_changed", "follow_up_logged", "quotation_created", "quotation_deleted", "appointment_changed",
+ "statuses_expired", "resync"].forEach((t) => es.addEventListener(t as any, debouncedRefetch));
+```
+
+---
+
 ### Proforma Invoice (Tax Customers Only)
 
 A proforma invoice is linked to a quotation and only exists for a **tax customer** (`isTaxCustomer: true`). A
@@ -1003,6 +1314,7 @@ request; the server generates the invoice.
 | Non-tax customer | `400`: "A proforma invoice can only be raised for a tax customer…". |
 | Number | `PI-<financial year>-<sequence>`, for example `PI-26-27-0001`. |
 | Frozen copy | The quotation is recorded as it was when the invoice was generated, so the invoice does not change if the quotation does. To refresh it, delete the invoice and generate a new one. |
+| Due date | Optional: `dueInDays` (0–365, from the invoice date) or `dueDate` (`YYYY-MM-DD`, on or after the invoice date). Send one, not both. `PATCH` with `dueDate: null` removes it. Responses include `dueDate` or `null`. Payment reports use it for Due today and Overdue; without one, the invoice is due on its invoice date. |
 
 The server does not email or message the customer; the response is the document to show or share.
 
@@ -1105,6 +1417,43 @@ Removes the invoice so a fresh one can be generated.
 | 409 | An invoice already exists for this quotation |
 
 ---
+
+### Payment Reports (Collections)
+
+Base: `/api/v2/payment-reports`. Needs `payment.view` and the `payment.reports` feature (on by default; switched off, every route answers `404`). Field employees see only their own quotations; `employeeId` works for admins only. Months and "today" are IST. Full response shapes are in `API_CONTRACT.md` ("Payment reports").
+
+| Screen | Call |
+|---|---|
+| Home widget (month total, change, received vs pending) | `GET /summary?month=2026-10` |
+| Collections > Overview (tiles, bars, status breakdown, recent, overdue banner) | `GET /overview?month=2026-10` |
+| Payments tab (month, employee, status chips) | `GET /payments?month=2026-10&employeeId=7&status=ALL\|PAID\|PENDING\|OVERDUE&basis=receivable&page=1&limit=20`. Send `basis=receivable` to include customers without a proforma |
+| Set due dates | `GET` / `PUT /receivables/:quotationId/schedule` (`PUT` needs `payment.edit`) |
+| Due tab, all customers (use this one) | `GET /receivables` and `GET /receivables/summary`; see "Receivables" under the quotation reports section |
+| Due tab, proforma invoices only (older) | `GET /due?month=2026-10&employeeId=7` |
+| Send reminder | `POST /receivables/:quotationId/reminder`, or `POST /due/:invoiceId/reminder` for an invoice (need `payment.edit`): `202`; `429` within 24 h, with `details.nextAllowedAt` |
+| Record payment | The existing `POST /api/v2/quotations/:id/payments` |
+| Export CSV | `GET /payments/export?...` (also takes `basis`), `GET /receivables/export` and `GET /due/export` (need `payment.export`) |
+| Monthly target | `GET /settings`; `PUT /settings {"monthlyTarget": 450000}` (`null` removes it; needs `payment.edit`) |
+
+Rows on the Payments tab have `kind: "payment"` (a payment made, status `PAID`), `kind: "invoice"` (an open proforma invoice, status `PENDING`, `DUE_TODAY` or `OVERDUE`, where `amount` is the balance) or, with `basis=receivable`, `kind: "receivable"` (an open quotation, where `id` is the quotation id). `/summary` and `/overview` also return `receivables` with every customer's balances as of today; use it for pending and overdue totals, because `pending`, `overdue` and the bars count proforma invoices only. Show `methodLabel` as the method; `mode` (`CASH`/`UPI`/`ACCOUNT`) is for the filter and icons and can be `null` on old payments. `summary.target` is present only when a target is set, so hide the target line when it is missing. The home headline uses `invoiced` and `invoicedChangePct`; the "N this week" line uses `thisWeek.paymentCount`; "N invoices due" uses `pendingInvoices` (plus `overdueInvoices` if overdue ones should count too).
+
+```http
+GET /api/v2/payment-reports/summary?month=2026-10
+Authorization: Bearer <jwt>
+```
+
+```json
+{
+  "statusCode": 200, "success": true,
+  "data": {
+    "month": "2026-10", "collected": 342800, "verified": 300000, "unverified": 42800, "paymentCount": 38,
+    "invoiceCount": 50, "invoiced": 520000, "paidInvoices": 28, "pending": 96000, "overdue": 81200,
+    "previousMonth": { "month": "2026-09", "collected": 284000, "...": "same fields" },
+    "changePct": 20.7,
+    "target": { "amount": 450000, "achievedPct": 76.2 }
+  }
+}
+```
 
 ### Quotation Payments & Direct Settlement (New Simplified Flow)
 
@@ -1864,7 +2213,7 @@ type SinglePaymentVerifyViewResponse = {
     - **All previous payments on a quotation must be verified by Admin before any new payment can be made.**
     - If any unverified payments exist, attempting to record a new payment is rejected (`400 Bad Request`: `"Cannot record new payment: Previous payment (${id}) is pending Admin verification. Admin must verify all previous payments before a new payment can be recorded."`).
     - In `PaymentState`, `canMakePayment` is calculated as `quote.isConfirmed && balanceAmount > 0 && !hasUnverifiedPayments`.
-    - Only `Role.ADMIN` can verify payments via `POST /api/v2/quotations/:id/payments/:paymentId/verify` (`403 Forbidden` for field employees).
+    - Only roles with `payment.verify` (the Admin role by default) can verify payments via `POST /api/v2/quotations/:id/payments/:paymentId/verify` (`403 Forbidden` for field employees).
 11. **No GST Decision Gate**:
     - There is no With GST / Without GST choice at the end. `canDecideGst` is deprecated: ignore it (it can still read `true`).
     - `gstStatus` and `receiptStatus` never return `AWAITING_GST_DECISION`.
@@ -3301,7 +3650,7 @@ Content-Type: application/json
 | `isVerified` | Optional boolean, default `true`. Send `false` to remove the verification. |
 | `verificationNotes` | Optional text, up to 1000 characters. |
 
-- **Master admin only.** An admin or employee gets `403 Forbidden` ("Master admin access required").
+- **Master admin only** by default. This is the `warranty.verify` permission, which only the master admin can give to a role. Anyone else gets `403 Forbidden` ("You do not have permission to do this"; it used to say "Master admin access required").
 - `404` if no warranty has been generated for the quotation yet.
 - Verifying a warranty that is already verified changes nothing, so the first verifier and time are kept.
 - A warranty starts **not verified**. Existing warranties were migrated as not verified.
@@ -3647,6 +3996,7 @@ Employee). Sending is fire-and-forget: a failed push never affects the request t
 | `payment_verified` | The quotation's field employee | An admin verifies a payment |
 | `warranty_generated` | The quotation's field employee | A warranty certificate is generated (see below) |
 | `warranty_verified` | The quotation's field employee | The master admin approves (verifies) the warranty (see below) |
+| `follow_up_due` | The quotation's field employee; one daily digest to admins. For a follow-up logged on an appointment with no quotation, its assigned employee | A next follow-up date is today or past (hourly check from 9 AM IST, once a day each). `data`: `{ quotationId }`, or `{ appointmentId }` when there is no quotation; the admin digest has `{ count, overdue }` |
 
 The person who triggered a notification never receives it. `data` carries ids only (`appointmentId`, `quotationId`,
 `paymentId`), never personal data. Tapping a notification should open the matching screen; `warranty_generated`
@@ -4100,6 +4450,12 @@ employeeImage: <binary image file: .png, .jpg, .jpeg, .webp>
 }
 ```
 
+Notes:
+- **Passwords are never returned**, by create, update or `GET /api/v2/employees/:id`. They are stored as one-way hashes. To change one, send a new `password` on update; leave it out to keep the current one.
+- Password rules (create, and update when sent): 10-128 characters, at least one letter and one digit, and not containing the mobile number. A weak password returns `400` with `errors: [{ "field": "password", "message": "..." }]`.
+- A new employee automatically gets the default role for their type: **Admin** for `OfficeEmployee`, **Field Employee** for `FieldEmployee`.
+- Non-admins see Aadhaar numbers masked, showing only the last 4 digits.
+
 ##### B. Update Employee Profile & Photo
 
 ```http
@@ -4118,6 +4474,53 @@ employeeImage: <new binary image file>
 DELETE /api/v2/employees/:id
 Authorization: Bearer <admin_jwt_token>
 ```
+
+---
+
+### Optional Features (switched on by the master admin)
+
+These three features are **off** until the master admin enables them in the admin (`PUT /api/v2/settings/features`). While a feature is off, its routes answer `404`.
+
+To decide what to show:
+- **Whether a feature is on:** `GET /api/v2/auth/me` → `features.<module>.features.<key>`.
+- **Whether the user may use it:** `permissions`.
+
+Full request and response shapes are in [`API_CONTRACT.md`](API_CONTRACT.md).
+
+#### Quotation approval (`features.quotation.features.approval`)
+
+- After saving, a quotation with a large discount or total may need a manager's approval.
+- Every quotation response has `data.approval`: `{ status: "NOT_REQUIRED" | "PENDING" | "APPROVED" | "REJECTED", draft, note, decidedBy, ... }`.
+- **While `approval.draft` is `true`:**
+  - show the PDF with a **DRAFT** watermark and hide **Share**;
+  - **Confirm** answers `409 "Awaiting approval"`, so show the status instead of a confirm button.
+- Users with `quotation.approve` work the queue at `GET /api/v2/quotation-approvals`, and decide with `POST /api/v2/quotations/:id/approval { "decision": "approve" | "reject", "note": "..." }`. Rejecting needs a note.
+
+#### Warranty claims (`features.warranty.features.claims`)
+
+Report a problem on a generated warranty. Send `multipart/form-data`:
+
+```http
+POST /api/v2/quotations/:id/warranty/claims
+Authorization: Bearer <jwt_token>
+Content-Type: multipart/form-data
+
+warrantyItemId: 812
+description: Leak near the parapet wall
+photos: <up to 5 images: png, jpg, webp; 10 MB each>
+```
+
+- **`warrantyItemId`** is one of the items in `GET /api/v2/quotations/:id/warranty`.
+- **After the item's warranty has ended**, the claim is refused unless someone with `warranty.approveClaim` adds an `overrideNote`.
+- **Status flow:** `OPEN → APPROVED → SCHEDULED → RESOLVED`, or `OPEN → REJECTED`. The routes are `PATCH /api/v2/warranty-claims/:id/decision`, `/schedule { appointmentId }` and `/resolve { resolutionNotes }`.
+- **Photo URLs** in `photos[].url` need the `Authorization` header. Load them the same way as payment-proof images (3.5).
+- **A voided warranty** (`POST /api/v2/quotations/:id/warranty/void`) takes no new claims (`409`).
+- Push notifications for claims use `type: "warranty_claim"`.
+
+#### Warranty expiry (`features.warranty.features.expiryAlerts`)
+
+- `GET /api/v2/warranties/expiring?within=90` lists items ending soon, soonest first, with `daysLeft`. Field employees see their own quotations only.
+- Staff get a push notification with `type: "warranty_expiring"` 60 and 15 days before an item ends.
 
 ---
 

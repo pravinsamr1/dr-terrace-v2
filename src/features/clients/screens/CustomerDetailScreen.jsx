@@ -42,6 +42,7 @@ import { cacheDirectory, deleteAsync, downloadAsync } from 'expo-file-system/leg
 import { createPdfFile, sharePdfFile, toSafeFileName } from '../../../core/utils/pdfShare';
 import { generateTaxInvoiceHTML } from '../../payments/screens/ReceiptScreen';
 import { generateHTML as generateQuotationHTML } from '../../quotations/screens/SendQuotationScreen';
+import StatusHistorySection from '../../reports/components/StatusHistorySection';
 
 
 const BTN_TEXT = '#1F2937'; // change to your brand/header color
@@ -2663,6 +2664,10 @@ export default function CustomerDetailScreen() {
               )}
             </View>
           </View>
+        )}
+
+        {activeTabSection === 'profile' && (
+          <StatusHistorySection appointmentId={String(params.id || app?.id || '').replace(/^DR/i, '').trim()} />
         )}
 
         {/* TAB 2: QUOTATIONS LIST ORGANIZED BY TIERS (ECONOMIC, PREMIUM, LUXURY) */}

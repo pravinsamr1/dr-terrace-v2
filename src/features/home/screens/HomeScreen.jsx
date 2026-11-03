@@ -1,9 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Dimensions,
   Image,
   Modal,
   Platform,
@@ -25,14 +23,31 @@ import { MaterialAlertModal } from '../../../shared/components/material';
 import { notificationRepository } from '../../notifications/api/notificationRepository';
 import { subscribeToIncomingNotifications } from '../../notifications/utils/pushNotifications';
 import { MONTH_NAMES } from '../../../shared/constants/fallbackDefaults';
+import HomeReportsCard from '../../reports/components/HomeReportsCard';
 import {
   AccountGroupIcon3D,
   CalendarPlusIcon3D,
   ClipboardListIcon3D,
   FileSendIcon3D,
+  ShieldCheckIcon3D,
+  WalletIcon3D,
 } from '../components/QuickActionIcons';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+const QUICK_ACTIONS = [
+  { label: 'New\nAppointment', Icon: CalendarPlusIcon3D, route: '/new-appointment' },
+  { label: 'View All\nAppointment', Icon: ClipboardListIcon3D, route: '/all-appointments' },
+  { label: 'Our\nClients', Icon: AccountGroupIcon3D, route: '/clients' },
+  { label: 'Send\nQuote', Icon: FileSendIcon3D, route: '/send-quote' },
+  { label: 'Outstanding\nPayments', Icon: WalletIcon3D, route: { pathname: '/collections', params: { tab: 'payments' } } },
+  // Only admins verify payments
+  {
+    label: 'Pending\nVerification',
+    Icon: ShieldCheckIcon3D,
+    route: { pathname: '/notifications', params: { filter: 'verification' } },
+    adminOnly: true,
+  },
+];
 
 const getAppointmentDateBadge = (app) => {
   let month = app.month || app.displayMonth;
@@ -200,10 +215,6 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       StatusBar.setBarStyle(isDark ? 'light-content' : 'dark-content', true);
-      if (Platform.OS === 'android') {
-        StatusBar.setTranslucent(true);
-        StatusBar.setBackgroundColor('transparent');
-      }
     }, [isDark])
   );
 
@@ -511,109 +522,25 @@ export default function HomeScreen() {
 
         {/* Section: Quick Actions */}
         <Text style={[styles.sectionHeading, isDark && styles.textDark]}>Quick Actions</Text>
-        <View style={styles.gridContainer}>
-          {/* Action 1: New Appointment */}
-          <TouchableOpacity
-              style={[styles.gridCard, isDark && styles.gridCardDark]}
-              onPress={() => router.push('/new-appointment')}
-              activeOpacity={0.85}
+        <View style={styles.quickGrid}>
+          {QUICK_ACTIONS.filter((action) => !action.adminOnly || isAdmin).map((action) => (
+            <TouchableOpacity
+              key={action.label}
+              style={styles.quickItem}
+              onPress={() => router.push(action.route)}
+              activeOpacity={0.8}
             >
-              <LinearGradient
-                colors={['#FF9F3E', '#FF6A1A']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.cardGradient}
-              >
-                <View style={styles.cardLeftContent}>
-                  <View>
-                    <Text style={styles.cardNativeTitle}>New{"\n"}Appointment</Text>
-                  </View>
-                  <View style={styles.cardCircularButton}>
-                    <Ionicons name="chevron-forward" size={15} color="#FF6A1A" />
-                  </View>
+              <View style={styles.quickCard}>
+                <View style={styles.quickIconBox}>
+                  <action.Icon size={54} />
                 </View>
-                <View style={styles.cardRightContent}>
-                  <CalendarPlusIcon3D size={68} />
-                </View>
-              </LinearGradient>
+                <Text style={styles.quickLabel}>{action.label}</Text>
+              </View>
             </TouchableOpacity>
-          {/* Action 2: View All */}
-          <TouchableOpacity
-              style={[styles.gridCard, isDark && styles.gridCardDark]}
-              onPress={() => router.push('/all-appointments')}
-              activeOpacity={0.85}
-            >
-              <LinearGradient
-                colors={['#A282FB', '#744CF0']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.cardGradient}
-              >
-                <View style={styles.cardLeftContent}>
-                  <View>
-                    <Text style={styles.cardNativeTitle}>View All{"\n"}Appointment</Text>
-                  </View>
-                  <View style={styles.cardCircularButton}>
-                    <Ionicons name="chevron-forward" size={15} color="#744CF0" />
-                  </View>
-                </View>
-                <View style={styles.cardRightContent}>
-                  <ClipboardListIcon3D size={68} />
-                </View>
-              </LinearGradient>
-            </TouchableOpacity>
-          {/* Action 3: Our Clients */}
-          <TouchableOpacity
-            style={[styles.gridCard, isDark && styles.gridCardDark]}
-            onPress={() => router.push('/clients')}
-            activeOpacity={0.85}
-          >
-            <LinearGradient
-              colors={['#2684FF', '#0052CC']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.cardGradient}
-            >
-              <View style={styles.cardLeftContent}>
-                <View>
-                  <Text style={styles.cardNativeTitle}>Our{"\n"}Clients</Text>
-                </View>
-                <View style={styles.cardCircularButton}>
-                  <Ionicons name="chevron-forward" size={15} color="#0052CC" />
-                </View>
-              </View>
-              <View style={styles.cardRightContent}>
-                <AccountGroupIcon3D size={68} />
-              </View>
-            </LinearGradient>
-          </TouchableOpacity>
-
-          {/* Action 4: Send Quote */}
-          <TouchableOpacity
-            style={[styles.gridCard, isDark && styles.gridCardDark]}
-            activeOpacity={0.85}
-            onPress={() => router.push({ pathname: '/send-quote' })}
-          >
-            <LinearGradient
-              colors={['#20CAB4', '#099A8B']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.cardGradient}
-            >
-              <View style={styles.cardLeftContent}>
-                <View>
-                  <Text style={styles.cardNativeTitle}>Send{"\n"}Quote</Text>
-                </View>
-                <View style={styles.cardCircularButton}>
-                  <Ionicons name="chevron-forward" size={15} color="#099A8B" />
-                </View>
-              </View>
-              <View style={styles.cardRightContent}>
-                <FileSendIcon3D size={68} />
-              </View>
-            </LinearGradient>
-          </TouchableOpacity>
+          ))}
         </View>
+
+        <HomeReportsCard />
 
         {isAdmin && (
         <>
@@ -1378,49 +1305,37 @@ const styles = StyleSheet.create({
     marginTop: 8,
     includeFontPadding: false,
   },
-  gridContainer: {
+  quickGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    marginBottom: 20,
+    rowGap: 12,
+    marginHorizontal: -5,
+    marginBottom: 24,
   },
-  gridCard: {
-    width: (SCREEN_WIDTH - 34) / 2,
-    height: 114,
-    borderRadius: 18,
-    marginBottom: 14,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 3,
+  quickItem: {
+    width: '33.33%',
+    paddingHorizontal: 5,
   },
-  gridCardDark: {
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  cardGradient: {
+  quickCard: {
     flex: 1,
-    flexDirection: 'row',
-    width: '100%',
-    height: '100%',
-  },
-  cardLeftContent: {
-    flex: 1.15,
-    paddingVertical: 12,
-    paddingLeft: 12,
-    justifyContent: 'space-between',
-  },
-  cardRightContent: {
-    flex: 0.85,
-    justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    paddingVertical: 14,
+    paddingHorizontal: 4,
+  },
+  quickIconBox: {
+    height: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  quickLabel: {
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: 'center',
+    color: '#0F172A',
+    fontFamily: 'PlusJakartaSans_500Medium',
   },
   cardIconCircle: {
     width: 60,
@@ -1429,14 +1344,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  cardNativeTitle: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    lineHeight: 17,
-    fontFamily: 'PlusJakartaSans_700Bold',
-    fontWeight: Platform.OS === 'android' ? 'normal' : '700',
-    includeFontPadding: false,
-  },
   cardNativeSubtitle: {
     color: 'rgba(255, 255, 255, 0.8)',
     fontSize: 9,
@@ -1444,14 +1351,6 @@ const styles = StyleSheet.create({
     lineHeight: 12,
     fontFamily: 'PlusJakartaSans_400Regular',
     includeFontPadding: false,
-  },
-  cardCircularButton: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   employeeManagementContainer: {
     backgroundColor: '#ffffff',
