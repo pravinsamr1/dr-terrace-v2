@@ -40,10 +40,6 @@ export default function InnerHeader({
   useFocusEffect(
     useCallback(() => {
       RNStatusBar.setBarStyle('light-content', true);
-      if (Platform.OS === 'android') {
-        RNStatusBar.setTranslucent(true);
-        RNStatusBar.setBackgroundColor('transparent');
-      }
     }, [])
   );
 

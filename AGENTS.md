@@ -8,7 +8,7 @@ Your primary goal is **correctness and preservation of existing behavior**, not 
 
 This project is a production-oriented React Native application built with:
 
-- Expo SDK 57
+- Expo SDK 58
 - React Native 0.86.3
 - React 19.2.3
 - Expo Router
@@ -88,7 +88,7 @@ After editing, verify that those behaviors still exist.
 
 The current project uses:
 
-```text
+```
 Expo: 57.0.24
 React Native: 0.86.3
 React: 19.2.3
@@ -159,7 +159,7 @@ Do not assume the first matching file is the only implementation.
 
 Before modifying a non-trivial feature, produce a short plan:
 
-```text
+```
 Root cause:
 ...
 
@@ -241,7 +241,7 @@ The project uses an Expo Router `app/` directory for routes and a feature-orient
 
 The major structure is:
 
-```text
+```
 app/
   Expo Router route files
 
@@ -276,7 +276,7 @@ Business logic should generally remain in the feature layer rather than being du
 
 Use:
 
-```text
+```
 app route
    ↓
 feature screen
@@ -312,7 +312,7 @@ search for an existing one.
 
 Examples of existing shared infrastructure include:
 
-```text
+```
 src/core/api/apiClient.js
 src/core/utils/imageUtils.js
 src/core/utils/validation.js
@@ -329,7 +329,7 @@ Reuse existing infrastructure where appropriate.
 
 The canonical API configuration is:
 
-```text
+```
 src/core/config/config.js
 ```
 
@@ -339,7 +339,7 @@ Do NOT hard-code API URLs into individual screens unless there is a specific doc
 
 Use:
 
-```text
+```
 src/core/config/config.js
 ```
 
@@ -349,13 +349,13 @@ and the existing repository/API architecture.
 
 The main Axios implementation is:
 
-```text
+```
 src/core/api/apiClient.js
 ```
 
 The compatibility facade is:
 
-```text
+```
 src/api/apiClient.js
 ```
 
@@ -371,13 +371,13 @@ Authentication uses AsyncStorage.
 
 The existing API client automatically reads:
 
-```text
+```
 auth_token
 ```
 
 and attaches:
 
-```text
+```
 Authorization: Bearer <token>
 ```
 
@@ -402,7 +402,7 @@ because these are cross-cutting features.
 
 This project has custom multipart handling in:
 
-```text
+```
 src/core/api/apiClient.js
 ```
 
@@ -414,7 +414,7 @@ Therefore:
 
 Before modifying uploads, inspect:
 
-```text
+```
 src/core/api/apiClient.js
 src/features/employees/api/employeeRepository.js
 src/features/payments/api/paymentRepository.js
@@ -428,13 +428,13 @@ and the affected screen.
 
 The project already has:
 
-```text
+```
 src/core/utils/imageUtils.js
 ```
 
 with:
 
-```text
+```
 compressImage()
 formatFileSize()
 resolveProofImageUrl()
@@ -452,7 +452,7 @@ Before creating another image compressor:
 
 Current image-related packages include:
 
-```text
+```
 expo-image
 expo-image-manipulator
 expo-image-picker
@@ -479,7 +479,7 @@ If the user asks for:
 
 implement target-size behavior carefully rather than assuming:
 
-```text
+```
 compress: 0.5
 ```
 
@@ -497,7 +497,7 @@ Never apply image compression blindly to all uploaded files.
 
 Before compression, determine:
 
-```text
+```
 Is this an image?
 Is this a PDF?
 What MIME type is expected?
@@ -513,13 +513,13 @@ For payment/proof uploads especially, inspect the existing repository implementa
 
 The repository contains API documentation:
 
-```text
+```
 CONNECT_FRONTEND_BACKEND_V2 (1).md
 ```
 
 and architecture documentation:
 
-```text
+```
 SHARED_ADMIN_EMPLOYEE_ARCHITECTURE.md
 ```
 
@@ -543,7 +543,7 @@ The project already organizes API calls by feature.
 
 Examples:
 
-```text
+```
 src/features/appointments/api/
 src/features/auth/api/
 src/features/clients/api/
@@ -566,13 +566,13 @@ This project uses Expo Router.
 
 Route files are under:
 
-```text
+```
 app/
 ```
 
 and feature screens are under:
 
-```text
+```
 src/features/*/screens/
 ```
 
@@ -597,7 +597,7 @@ The application supports Admin and Field Employee behavior through a shared arch
 
 Important shared components include:
 
-```text
+```
 src/shared/components/RoleGuard.jsx
 src/shared/components/PersistentNavigation.jsx
 ```
@@ -653,7 +653,7 @@ Before adding styles:
 
 Before creating a component, search:
 
-```text
+```
 src/shared/components/
 src/shared/components/material/
 src/features/*/components/
@@ -661,7 +661,7 @@ src/features/*/components/
 
 There are already reusable components such as:
 
-```text
+```
 InnerHeader
 PersistentNavigation
 RoleGuard
@@ -771,7 +771,7 @@ Before adding a package:
 
 Never casually change:
 
-```text
+```
 expo
 react
 react-native
@@ -788,7 +788,7 @@ versions.
 
 The repository contains:
 
-```text
+```
 package-lock.json
 ```
 
@@ -804,7 +804,7 @@ Do not change package-lock.json just to make an unrelated task look clean.
 
 The project contains:
 
-```text
+```
 eas.json
 app.json
 ```
@@ -824,7 +824,7 @@ unless the user explicitly asks for a build/configuration change.
 
 Current identifiers include:
 
-```text
+```
 iOS:
 nexacrm.in.drterrace
 
@@ -840,7 +840,7 @@ Treat these as production identifiers.
 
 The main Expo configuration is:
 
-```text
+```
 app.json
 ```
 
@@ -864,13 +864,13 @@ Do not remove plugins or experiments because they appear unused without verifyin
 
 API configuration is in:
 
-```text
+```
 src/core/config/config.js
 ```
 
 The app supports:
 
-```text
+```
 EXPO_PUBLIC_API_URL
 ```
 
@@ -886,7 +886,7 @@ If local development requires a different API URL, use the existing environment 
 
 Available npm scripts include:
 
-```bash
+```
 npm run lint
 npm run test:health
 npm run test:login
@@ -897,7 +897,7 @@ Use the most relevant checks for the change.
 
 For a UI-only change:
 
-```bash
+```
 npm run lint
 ```
 
@@ -923,7 +923,7 @@ unless you actually verified it.
 
 Instead say:
 
-```text
+```
 Implemented the change.
 
 Verified:
@@ -953,7 +953,7 @@ If unrelated files changed accidentally:
 
 Never run destructive Git commands such as:
 
-```bash
+```
 git reset --hard
 git clean -fd
 ```
@@ -1082,7 +1082,7 @@ For asynchronous code:
 
 When modifying effects, inspect:
 
-```text
+```
 useEffect
 useFocusEffect
 navigation listeners
@@ -1102,7 +1102,7 @@ Before modifying image selection:
 
 Search for existing patterns such as:
 
-```text
+```
 launchCameraAsync
 launchImageLibraryAsync
 requestCameraPermissionsAsync
@@ -1133,7 +1133,7 @@ Never treat PDFs as images.
 
 Before changing file handling, check:
 
-```text
+```
 mimeType
 fileName
 URI
@@ -1158,7 +1158,7 @@ Do not rename fields without checking:
 
 For example, do not change:
 
-```text
+```
 proofImage
 proof
 image
@@ -1180,7 +1180,7 @@ Preserve established response normalization.
 
 Do not silently change:
 
-```text
+```
 response.data
 response.data.data
 response.data.user
@@ -1197,7 +1197,7 @@ Before changing route parameters:
 
 Search for:
 
-```text
+```
 router.push
 router.replace
 router.back
@@ -1228,7 +1228,7 @@ Do not weaken access controls.
 
 At the end of a task, report:
 
-```text
+```
 Implemented:
 - ...
 
@@ -1259,7 +1259,7 @@ Do NOT immediately modify everything.
 
 Break the work into stages:
 
-```text
+```
 Stage 1 — Inspect
 Stage 2 — Plan
 Stage 3 — Core implementation
@@ -1275,7 +1275,7 @@ After each stage, ensure the previous stage is correct before continuing.
 
 For a bug:
 
-```text
+```
 SYMPTOM
 ↓
 REPRODUCE
@@ -1297,7 +1297,7 @@ If an upload fails, do not immediately change Axios.
 
 First inspect:
 
-```text
+```
 picker result
 ↓
 URI
@@ -1363,45 +1363,52 @@ If uncertain, inspect the project or ask.
 Before saying a task is complete, verify:
 
 ### Scope
-- [ ] Only requested functionality was changed.
-- [ ] No unrelated refactor was introduced.
-- [ ] Existing behavior was preserved.
+
+- \[ \] Only requested functionality was changed.
+- \[ \] No unrelated refactor was introduced.
+- \[ \] Existing behavior was preserved.
 
 ### Code
-- [ ] Imports are correct.
-- [ ] No undefined variables.
-- [ ] No duplicate utilities/components.
-- [ ] Existing architecture was followed.
+
+- \[ \] Imports are correct.
+- \[ \] No undefined variables.
+- \[ \] No duplicate utilities/components.
+- \[ \] Existing architecture was followed.
 
 ### Expo
-- [ ] Expo SDK 57 compatibility preserved.
-- [ ] No accidental package upgrades.
-- [ ] No accidental Expo config changes.
+
+- \[ \] Expo SDK 57 compatibility preserved.
+- \[ \] No accidental package upgrades.
+- \[ \] No accidental Expo config changes.
 
 ### API
-- [ ] Correct repository/API client used.
-- [ ] Correct endpoint used.
-- [ ] Correct request fields used.
-- [ ] Auth behavior preserved.
-- [ ] Multipart behavior preserved where relevant.
+
+- \[ \] Correct repository/API client used.
+- \[ \] Correct endpoint used.
+- \[ \] Correct request fields used.
+- \[ \] Auth behavior preserved.
+- \[ \] Multipart behavior preserved where relevant.
 
 ### Images/files
-- [ ] File type checked.
-- [ ] Image compression only applied to images.
-- [ ] PDFs preserved.
-- [ ] File URI and MIME type remain valid.
-- [ ] Resulting file size checked when a target size is required.
+
+- \[ \] File type checked.
+- \[ \] Image compression only applied to images.
+- \[ \] PDFs preserved.
+- \[ \] File URI and MIME type remain valid.
+- \[ \] Resulting file size checked when a target size is required.
 
 ### UI
-- [ ] Existing UI preserved unless requested.
-- [ ] Dark/light behavior preserved.
-- [ ] Navigation preserved.
-- [ ] Existing reusable components reused.
+
+- \[ \] Existing UI preserved unless requested.
+- \[ \] Dark/light behavior preserved.
+- \[ \] Navigation preserved.
+- \[ \] Existing reusable components reused.
 
 ### Verification
-- [ ] Relevant lint/test/check was run.
-- [ ] Final diff was reviewed.
-- [ ] No false claims about testing were made.
+
+- \[ \] Relevant lint/test/check was run.
+- \[ \] Final diff was reviewed.
+- \[ \] No false claims about testing were made.
 
 ---
 

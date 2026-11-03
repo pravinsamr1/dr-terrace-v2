@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Platform,
   RefreshControl,
   ScrollView,
   StatusBar,
@@ -12,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from '../../../core/hooks/useColorScheme';
 import { authRepository, isAdminRole } from '../../auth/api/authRepository';
@@ -49,6 +48,7 @@ function groupNotificationsByDate(items) {
 
 export default function NotificationsScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams();
   const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
@@ -57,7 +57,7 @@ export default function NotificationsScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [activeFilter, setActiveFilter] = useState('all');
+  const [activeFilter, setActiveFilter] = useState(params.filter === 'verification' ? 'verification' : 'all');
   const [refreshing, setRefreshing] = useState(false);
 
   const loadNotifications = useCallback(async () => {
@@ -94,10 +94,6 @@ export default function NotificationsScreen() {
   useFocusEffect(
     useCallback(() => {
       StatusBar.setBarStyle('light-content', true);
-      if (Platform.OS === 'android') {
-        StatusBar.setTranslucent(true);
-        StatusBar.setBackgroundColor('transparent');
-      }
     }, [])
   );
 
@@ -185,6 +181,11 @@ export default function NotificationsScreen() {
             label: 'Admin Notices',
             count: notifications.filter((n) => n.type === 'admin' || n.isActionRequest).length,
           },
+          {
+            key: 'verification',
+            label: 'Pending Verification',
+            count: notifications.filter((n) => n.rawType === NOTIFICATION_TYPES.PAYMENT_PENDING).length,
+          },
         ]
       : []),
   ];
@@ -214,6 +215,9 @@ export default function NotificationsScreen() {
     }
     if (activeFilter === 'admin') {
       return n.type === 'admin' || n.isActionRequest;
+    }
+    if (activeFilter === 'verification') {
+      return n.rawType === NOTIFICATION_TYPES.PAYMENT_PENDING;
     }
     return true;
   });

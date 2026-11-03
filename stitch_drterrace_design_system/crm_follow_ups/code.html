@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>CRM - Follow-ups</title>
+<!-- Tailwind CSS CDN with plugins -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Tailwind configuration -->
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              blue: '#2563eb',
+              lightBlue: '#eff6ff',
+              bg: '#f0f4f9',
+              cardOverdue: '#fef2f2',
+              cardDue: '#eff6ff',
+              badgeOverdueBg: '#fef2f2',
+              badgeOverdueText: '#dc2626',
+              badgeTodayBg: '#e0f2fe',
+              badgeTodayText: '#0284c7',
+            }
+          },
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Text"', '"SF Pro Display"', 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+<!-- Custom styles for iOS touch optimization and precise styling -->
+<style data-purpose="custom-layout">
+    body {
+      -webkit-tap-highlight-color: transparent;
+      background-color: #f1f5f9;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex justify-center bg-slate-100 font-sans antialiased">
+<!-- Mobile Screen Container (390px typical width) -->
+<div class="w-full max-w-[390px] min-h-screen bg-[#f0f4f8] px-4 pt-6 pb-12 flex flex-col gap-4 text-slate-800">
+<!-- BEGIN: TopHeader -->
+<header class="flex items-center justify-between pb-1" data-purpose="screen-header">
+<div class="flex items-center gap-3">
+<!-- Back Navigation Button -->
+<button aria-label="Go back" class="w-10 h-10 rounded-full bg-white flex items-center justify-center text-slate-700 shadow-sm active:bg-slate-50 transition-colors" type="button">
+<svg class="h-5 w-5" fill="currentColor" viewbox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+<path clip-rule="evenodd" d="M9.707 14.707a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 1.414L7.414 9H15a1 1 0 110 2H7.414l2.293 2.293a1 1 0 010 1.414z" fill-rule="evenodd"></path>
+</svg>
+</button>
+<!-- Title and Subtitle -->
+<div>
+<h1 class="text-[22px] font-bold leading-tight text-slate-900 tracking-tight">Follow-ups</h1>
+<p class="text-xs text-slate-500 font-normal">Oct 2024 · Your tasks</p>
+</div>
+</div>
+<!-- User Profile Badge -->
+<div class="w-9 h-9 rounded-full bg-[#2563eb] flex items-center justify-center text-white text-xs font-semibold tracking-wider shadow-sm">
+        PS
+      </div>
+</header>
+<!-- END: TopHeader -->
+<!-- BEGIN: MetricsOverview -->
+<section class="grid grid-cols-2 gap-3" data-purpose="metrics-summary">
+<!-- Overdue Counter Card -->
+<div class="bg-[#fef2f2] rounded-2xl p-3.5 flex flex-col justify-between h-[86px]">
+<span class="text-xs font-medium text-slate-600">Overdue</span>
+<span class="text-2xl font-bold text-[#b91c1c] leading-none">2</span>
+</div>
+<!-- Due Today Counter Card -->
+<div class="bg-[#eff6ff] rounded-2xl p-3.5 flex flex-col justify-between h-[86px]">
+<span class="text-xs font-medium text-slate-600">Due today</span>
+<span class="text-2xl font-bold text-[#1d4ed8] leading-none">3</span>
+</div>
+</section>
+<!-- END: MetricsOverview -->
+<!-- BEGIN: SegmentedControl -->
+<nav class="bg-[#e2e8f0] p-1 rounded-xl flex items-center text-sm font-medium" data-purpose="tab-navigation">
+<button class="flex-1 py-1.5 text-center text-slate-500 rounded-lg hover:text-slate-800 transition-colors" type="button">
+        Overview
+      </button>
+<button class="flex-1 py-1.5 text-center text-slate-900 bg-white rounded-lg shadow-sm font-semibold" type="button">
+        Follow-ups
+      </button>
+</nav>
+<!-- END: SegmentedControl -->
+<!-- BEGIN: MainContent -->
+<main class="flex flex-col gap-5 mt-1">
+<!-- BEGIN: OverdueSection -->
+<section class="flex flex-col gap-2.5" data-purpose="overdue-tasks">
+<h2 class="text-sm font-bold text-[#b91c1c] px-0.5 tracking-tight">Overdue</h2>
+<!-- Task Card 1: Robert Lang -->
+<article class="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex flex-col gap-2.5">
+<div class="flex items-start justify-between">
+<h3 class="text-base font-bold text-slate-900 leading-snug">Robert Lang</h3>
+<span class="text-[10px] font-bold text-[#b91c1c] bg-[#fee2e2] px-2 py-0.5 rounded-full tracking-wider uppercase">OVERDUE</span>
+</div>
+<div class="text-sm text-slate-700 font-medium">
+            Call about the ₹8,900 quote
+          </div>
+<p class="text-xs text-slate-400">
+            Due Oct 22 · 2 days late
+          </p>
+<div class="grid grid-cols-2 gap-2.5 pt-1.5">
+<button class="w-full py-2.5 bg-[#2563eb] text-white rounded-xl text-sm font-semibold shadow-sm hover:bg-blue-700 active:scale-[0.99] transition" type="button">
+              Call
+            </button>
+<button class="w-full py-2.5 bg-white border border-slate-200 text-slate-800 rounded-xl text-sm font-semibold hover:bg-slate-50 active:scale-[0.99] transition" type="button">
+              Update Status
+            </button>
+</div>
+</article>
+<!-- Task Card 2: Ananya Sharma -->
+<article class="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex flex-col gap-2.5">
+<div class="flex items-start justify-between">
+<h3 class="text-base font-bold text-slate-900 leading-snug">Ananya Sharma</h3>
+<span class="text-[10px] font-bold text-[#b91c1c] bg-[#fee2e2] px-2 py-0.5 rounded-full tracking-wider uppercase">OVERDUE</span>
+</div>
+<div class="text-sm text-slate-700 font-medium">
+            Send payment reminder for ₹32,000
+          </div>
+<p class="text-xs text-slate-400">
+            Due Oct 21 · 3 days late
+          </p>
+<div class="grid grid-cols-2 gap-2.5 pt-1.5">
+<button class="w-full py-2.5 bg-[#2563eb] text-white rounded-xl text-sm font-semibold shadow-sm hover:bg-blue-700 active:scale-[0.99] transition" type="button">
+              Call
+            </button>
+<button class="w-full py-2.5 bg-white border border-slate-200 text-slate-800 rounded-xl text-sm font-semibold hover:bg-slate-50 active:scale-[0.99] transition" type="button">
+              Update Status
+            </button>
+</div>
+</article>
+</section>
+<!-- END: OverdueSection -->
+<!-- BEGIN: TodaySection -->
+<section class="flex flex-col gap-2.5" data-purpose="today-tasks">
+<h2 class="text-sm font-bold text-[#2563eb] px-0.5 tracking-tight">Today</h2>
+<!-- Task Card 3: Sarah Jenkins -->
+<article class="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex flex-col gap-2.5">
+<div class="flex items-start justify-between">
+<h3 class="text-base font-bold text-slate-900 leading-snug">Sarah Jenkins</h3>
+<span class="text-[10px] font-bold text-[#0284c7] bg-[#e0f2fe] px-2 py-0.5 rounded-full tracking-wider uppercase">TODAY</span>
+</div>
+<div class="text-sm text-slate-700 font-medium">
+            Confirm site visit at Grand Palm Villa
+          </div>
+<p class="text-xs text-slate-400">
+            Due today · 10:00 AM
+          </p>
+<div class="grid grid-cols-2 gap-2.5 pt-1.5">
+<button class="w-full py-2.5 bg-[#2563eb] text-white rounded-xl text-sm font-semibold shadow-sm hover:bg-blue-700 active:scale-[0.99] transition" type="button">
+              Call
+            </button>
+<button class="w-full py-2.5 bg-white border border-slate-200 text-slate-800 rounded-xl text-sm font-semibold hover:bg-slate-50 active:scale-[0.99] transition" type="button">
+              Update Status
+            </button>
+</div>
+</article>
+<!-- Task Card 4: Michael Chang -->
+<article class="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex flex-col gap-2.5">
+<div class="flex items-start justify-between">
+<h3 class="text-base font-bold text-slate-900 leading-snug">Michael Chang</h3>
+<span class="text-[10px] font-bold text-[#0284c7] bg-[#e0f2fe] px-2 py-0.5 rounded-full tracking-wider uppercase">TODAY</span>
+</div>
+<div class="text-sm text-slate-700 font-medium">
+            Collect ₹19,400 balance
+          </div>
+<p class="text-xs text-slate-400">
+            Due today · 2:00 PM
+          </p>
+<div class="grid grid-cols-2 gap-2.5 pt-1.5">
+<button class="w-full py-2.5 bg-[#2563eb] text-white rounded-xl text-sm font-semibold shadow-sm hover:bg-blue-700 active:scale-[0.99] transition" type="button">
+              Call
+            </button>
+<button class="w-full py-2.5 bg-white border border-slate-200 text-slate-800 rounded-xl text-sm font-semibold hover:bg-slate-50 active:scale-[0.99] transition" type="button">
+              Update Status
+            </button>
+</div>
+</article>
+<!-- Task Card 5: Rajesh Gupta -->
+<article class="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex flex-col gap-2.5">
+<div class="flex items-start justify-between">
+<h3 class="text-base font-bold text-slate-900 leading-snug">Rajesh Gupta</h3>
+<span class="text-[10px] font-bold text-[#0284c7] bg-[#e0f2fe] px-2 py-0.5 rounded-full tracking-wider uppercase">TODAY</span>
+</div>
+<div class="text-sm text-slate-700 font-medium">
+            Send the updated quotation
+          </div>
+<p class="text-xs text-slate-400">
+            Due today · 4:30 PM
+          </p>
+<div class="grid grid-cols-2 gap-2.5 pt-1.5">
+<button class="w-full py-2.5 bg-[#2563eb] text-white rounded-xl text-sm font-semibold shadow-sm hover:bg-blue-700 active:scale-[0.99] transition" type="button">
+              Call
+            </button>
+<button class="w-full py-2.5 bg-white border border-slate-200 text-slate-800 rounded-xl text-sm font-semibold hover:bg-slate-50 active:scale-[0.99] transition" type="button">
+              Update Status
+            </button>
+</div>
+</article>
+</section>
+<!-- END: TodaySection -->
+</main>
+<!-- END: MainContent -->
+</div>
+</body></html>

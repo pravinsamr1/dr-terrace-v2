@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>Customer Detail - Status Update</title>
+<!-- Google Fonts: Plus Jakarta Sans -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS v3 -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+          },
+          colors: {
+            appBlue: '#1F53B7',
+            navyButton: '#0F172A',
+            emeraldBadge: '#059669',
+            emeraldLight: '#E6F9F0',
+            emeraldBorder: '#A7F3D0',
+          }
+        }
+      }
+    }
+  </script>
+<style data-purpose="base-styling">
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+  </style>
+</head>
+<body class="bg-slate-200 flex justify-center items-start min-h-screen sm:py-6">
+<!-- BEGIN: MobileContainer -->
+<div class="w-full max-w-[390px] min-h-[844px] bg-[#2257be] relative overflow-hidden flex flex-col shadow-2xl sm:rounded-[36px]" data-purpose="mobile-viewport">
+<!-- BEGIN: TopStatusBar -->
+<header class="w-full pt-3 px-6 flex justify-between items-center text-white text-xs font-semibold z-10" data-purpose="status-bar">
+<span>9:41</span>
+<div class="flex items-center space-x-1.5">
+<!-- Signal / Network Icon -->
+<svg class="w-3.5 h-3.5 fill-current" viewbox="0 0 24 24">
+<path d="M12 3c-4.97 0-9 4.03-9 9 0 2.12.74 4.07 1.97 5.61L4.35 18.25C2.89 16.48 2 14.34 2 12 2 6.48 6.48 2 12 2s10 4.48 10 10c0 2.34-.89 4.48-2.35 6.25l-.62-.64C20.26 16.07 21 14.12 21 12c0-4.97-4.03-9-9-9zm0 4c-2.76 0-5 2.24-5 5 0 1.28.48 2.45 1.28 3.34l.71-.71C8.38 14.07 8 13.08 8 12c0-2.21 1.79-4 4-4s4 1.79 4 4c0 1.08-.38 2.07-.99 2.63l.71.71c.8-.89 1.28-2.06 1.28-3.34 0-2.76-2.24-5-5-5zm0 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"></path>
+</svg>
+<!-- Wifi Icon -->
+<svg class="w-3.5 h-3.5 fill-current" viewbox="0 0 24 24">
+<path d="M12 4C7.31 4 3.07 5.9 0 8.98L12 21 24 8.98A17.92 17.92 0 0 0 12 4zm0 3.2c3.78 0 7.23 1.48 9.8 3.91L12 19.04 2.2 11.11A13.9 13.9 0 0 1 12 7.2z"></path>
+</svg>
+<!-- Battery Icon & Percentage -->
+<div class="flex items-center space-x-1 pl-0.5">
+<span class="text-[11px] font-medium">91%</span>
+<div class="w-5 h-2.5 border border-white rounded-[3px] p-[1px] flex items-center relative">
+<div class="bg-white h-full w-[90%] rounded-[1px]"></div>
+<div class="w-[2px] h-1 bg-white absolute -right-[3px] rounded-r-sm"></div>
+</div>
+</div>
+</div>
+</header>
+<!-- END: TopStatusBar -->
+<!-- BEGIN: BackgroundHeaderArea -->
+<!-- Dimmed background showing previous screen header and info card -->
+<div class="px-5 pt-3 pb-2 flex items-center text-white relative z-10" data-purpose="screen-title-bar">
+<button aria-label="Go back" class="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white">
+<svg class="w-4 h-4 stroke-current stroke-2" fill="none" viewbox="0 0 24 24">
+<path d="M15 19l-7-7 7-7" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</button>
+<h1 class="text-base font-semibold flex-1 text-center pr-8 tracking-wide">Customer Detail</h1>
+</div>
+<!-- Underlying Customer Preview Card -->
+<div class="mx-4 mt-3 bg-white/95 rounded-2xl p-4 shadow-sm relative z-0 flex items-center space-x-3.5" data-purpose="customer-preview">
+<div class="w-13 h-13 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 text-lg font-bold w-12 h-12 flex-shrink-0">
+        R
+      </div>
+<div>
+<h2 class="text-slate-800 font-bold text-base">Mr R.murugan</h2>
+<p class="text-slate-500 text-xs font-medium">Cust ID: <span class="font-bold text-slate-700">DR55</span> • 9884401133</p>
+<p class="text-blue-600 text-xs flex items-center mt-0.5">
+<svg class="w-3 h-3 mr-0.5 fill-current" viewbox="0 0 20 20">
+<path clip-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" fill-rule="evenodd"></path>
+</svg>
+          Mugalivakkam, Chennai
+        </p>
+</div>
+</div>
+<!-- END: BackgroundHeaderArea -->
+<!-- Backdrop Dimmer Overlay -->
+<div class="absolute inset-0 bg-slate-900/35 z-10 pointer-events-none"></div>
+<!-- BEGIN: BottomSheetModal -->
+<div class="mt-auto bg-white rounded-t-[28px] px-5 pt-3 pb-6 relative z-20 shadow-2xl flex flex-col space-y-4" data-purpose="review-modal">
+<!-- Top Pill Handle -->
+<div class="w-10 h-1 bg-slate-300 rounded-full mx-auto my-1" data-purpose="sheet-pill"></div>
+<!-- Modal Header -->
+<div class="flex items-start justify-between pb-1" data-purpose="modal-header">
+<div>
+<h2 class="text-base font-bold text-slate-900 tracking-tight">Status Update Detail</h2>
+<p class="text-[11px] text-slate-500 font-medium mt-0.5">
+            Oct 24, 2026 • 04:30 PM • <span class="text-blue-600 font-semibold">Field Rep: Sriraman K</span>
+</p>
+</div>
+<!-- Close Button -->
+<button aria-label="Close modal" class="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 hover:bg-slate-200 transition-colors">
+<svg class="w-3.5 h-3.5 stroke-current stroke-2" fill="none" viewbox="0 0 24 24">
+<path d="M6 18L18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</button>
+</div>
+<!-- Card 1: Updated Stage & Deal Value -->
+<div class="rounded-xl border border-emerald-100 bg-[#F6FDF9] p-3 flex flex-col space-y-1.5" data-purpose="deal-value-card">
+<span class="text-[11px] text-slate-500 font-medium">Updated Stage &amp; Deal Value</span>
+<div class="flex items-center justify-between">
+<div class="flex items-center space-x-2">
+<span class="bg-[#059669] text-white text-[11px] font-bold px-2.5 py-0.5 rounded-full tracking-wide">
+              WON
+            </span>
+<span class="text-base font-bold text-slate-900 tracking-tight">$24,500</span>
+</div>
+<span class="text-[10px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-300 rounded-full px-2.5 py-0.5">
+            Full Payment Received
+          </span>
+</div>
+</div>
+<!-- Card 2: Discussion & Visit Notes -->
+<div class="flex flex-col space-y-1.5" data-purpose="notes-section">
+<h3 class="text-xs font-bold text-slate-800">Discussion &amp; Visit Notes</h3>
+<div class="rounded-xl border border-slate-200/90 bg-slate-50/40 p-3 text-xs leading-relaxed text-slate-600 font-normal">
+          Conducted comprehensive terrace inspection (approx 1,450 sq.ft). Client agreed to the dual-layer elastomeric waterproofing system and premium terrace reflective coating.
+        </div>
+</div>
+<!-- Card 3: When to Call / Follow-up Reminder -->
+<div class="flex flex-col space-y-1.5" data-purpose="reminder-section">
+<div class="flex items-center justify-between">
+<h3 class="text-xs font-bold text-slate-800">When to Call / Follow-up Reminder</h3>
+<span class="text-[10px] font-medium text-blue-600 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full">
+            Push Alert Set
+          </span>
+</div>
+<div class="rounded-xl border border-slate-100 bg-slate-50/60 p-2.5 flex items-center justify-between">
+<div class="flex items-center space-x-2.5">
+<!-- Clock Icon -->
+<div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 flex-shrink-0">
+<svg class="w-4 h-4 fill-none stroke-current stroke-2" viewbox="0 0 24 24">
+<circle cx="12" cy="12" r="9"></circle>
+<path d="M12 7v5l3 3" stroke-linecap="round"></path>
+</svg>
+</div>
+<div>
+<p class="text-xs font-bold text-slate-800 leading-tight">Oct 28, 2026 • 10:00 AM</p>
+<p class="text-[10px] text-slate-500 font-medium">Site preparation &amp; primer delivery check</p>
+</div>
+</div>
+<span class="text-xs font-bold text-blue-600 pr-1">Active</span>
+</div>
+</div>
+<!-- Card 4: Voice Note Recording -->
+<div class="flex flex-col space-y-1.5" data-purpose="audio-section">
+<h3 class="text-xs font-bold text-slate-800">Voice Note Recording</h3>
+<div class="rounded-xl border border-slate-100 bg-slate-50/60 p-3 flex flex-col space-y-2">
+<div class="flex items-center justify-between">
+<div class="flex items-center space-x-2.5">
+<!-- Play Button -->
+<button aria-label="Play recording" class="w-8 h-8 rounded-full bg-[#10b981] flex items-center justify-center text-white shadow-sm flex-shrink-0">
+<svg class="w-3.5 h-3.5 fill-current ml-0.5" viewbox="0 0 24 24">
+<path d="M8 5v14l11-7z"></path>
+</svg>
+</button>
+<!-- Waveform Simulator -->
+<div class="flex items-center space-x-1 h-5">
+<span class="w-1 h-3.5 bg-emerald-500 rounded-full"></span>
+<span class="w-1 h-5 bg-emerald-500 rounded-full"></span>
+<span class="w-1 h-2 bg-slate-300 rounded-full"></span>
+<span class="w-1 h-4 bg-emerald-500 rounded-full"></span>
+<span class="w-1 h-6 bg-emerald-500 rounded-full"></span>
+<span class="w-1 h-2.5 bg-slate-300 rounded-full"></span>
+<span class="w-1 h-4.5 bg-emerald-500 rounded-full"></span>
+<span class="w-1 h-2 bg-slate-300 rounded-full"></span>
+</div>
+</div>
+<span class="text-xs font-bold text-slate-800 tracking-wider">0 : 28</span>
+</div>
+<div class="flex items-center justify-between pt-1 border-t border-slate-100 text-[10px]">
+<span class="text-slate-500 font-medium">Debrief audio note recorded on-site</span>
+<span class="text-emerald-700 font-bold">Verified by rep</span>
+</div>
+</div>
+</div>
+<!-- BEGIN: BottomDoneButton -->
+<div class="pt-2" data-purpose="action-button">
+<button class="w-full bg-[#0F172A] hover:bg-slate-800 text-white font-semibold py-3 rounded-xl text-xs tracking-wide shadow-sm transition-colors">
+          Done
+        </button>
+</div>
+<!-- END: BottomDoneButton -->
+</div>
+<!-- END: BottomSheetModal -->
+</div>
+<!-- END: MobileContainer -->
+</body></html>

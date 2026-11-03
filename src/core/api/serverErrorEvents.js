@@ -73,9 +73,9 @@ export function isServerError(error) {
     return true;
   }
 
-  // 4. Axios bad response code with 5xx status or nginx HTML content
+  // 4. Axios bad response code with nginx HTML content.
+  // Other 5xx responses (such as 500) mean the server was reached, so the calling screen handles them.
   if (code === 'ERR_BAD_RESPONSE') {
-    if (status >= 500) return true;
     if (/502|503|504|Bad Gateway|nginx/i.test(message)) return true;
     if (/502|503|504|Bad Gateway|nginx/i.test(dataStr)) return true;
   }

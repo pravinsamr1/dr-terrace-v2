@@ -1,0 +1,549 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport">
+<title>Collections &amp; Payments - Nexa CRM</title>
+<!-- Tailwind CSS CDN with forms and container queries plugins -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eef6ff',
+              100: '#dbeafe',
+              500: '#2563eb',
+              600: '#1d4ed8',
+              700: '#1e40af',
+            },
+            canvasBg: '#f2f6fa',
+          },
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Text"', '"SF Pro Display"', 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+<style data-purpose="custom-layout">
+    body {
+      -webkit-font-smoothing: antialiased;
+      -webkit-tap-highlight-color: transparent;
+      background-color: #f2f6fa;
+    }
+  </style>
+</head>
+<body class="bg-[#f2f6fa] text-slate-800 antialiased min-h-screen pb-12 flex justify-center relative" style="overflow: hidden;">
+<!-- Main Mobile Canvas Container (iOS Width target: 390px) -->
+<div class="w-full max-w-[412px] min-h-screen bg-[#f2f6fa] px-4 pt-3 pb-8 flex flex-col gap-3.5">
+<!-- BEGIN: TopHeader -->
+<header class="flex items-center justify-between pt-1 pb-1" data-purpose="screen-header">
+<div class="flex items-center gap-3">
+<!-- Back Navigation Button -->
+<button aria-label="Go back" class="w-10 h-10 rounded-full bg-white shadow-sm border border-slate-200/70 flex items-center justify-center text-slate-700 active:bg-slate-100 transition-colors" type="button">
+<svg class="w-5 h-5 stroke-[2.2]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</button>
+<!-- Title and Metadata -->
+<div>
+<h1 class="text-[21px] font-bold tracking-tight text-slate-900 leading-tight">Collections</h1>
+<p class="text-[12px] font-medium text-slate-500">Oct 2024 · All modes</p>
+</div>
+</div>
+<!-- User Profile Avatar -->
+<div class="w-10 h-10 rounded-full bg-blue-600 text-white font-semibold text-sm flex items-center justify-center shadow-sm" data-purpose="user-avatar">
+        PS
+      </div>
+</header>
+<!-- END: TopHeader -->
+<!-- BEGIN: OverdueAlertBanner -->
+<section class="bg-[#fff1f2] border border-rose-200/80 rounded-2xl p-3.5 flex items-center justify-between shadow-xs" data-purpose="urgent-action-banner">
+<div class="pr-2">
+<h2 class="text-[14px] font-bold text-rose-700 leading-tight">5 overdue invoices · ₹34,200</h2>
+<p class="text-[11.5px] font-medium text-rose-500/95 mt-0.5">Immediate follow-up required today</p>
+</div>
+<button class="bg-[#e12a32] hover:bg-rose-700 active:scale-95 text-white font-semibold text-[13px] px-4 py-1.5 rounded-full shadow-sm transition-all whitespace-nowrap" type="button">
+        Review
+      </button>
+</section>
+<!-- END: OverdueAlertBanner -->
+<!-- BEGIN: SegmentedTabs -->
+<nav class="bg-[#e3ebf4] p-1 rounded-2xl flex items-center text-[13.5px] font-medium" data-purpose="segmented-tab-bar">
+<!-- Active Overview Tab -->
+<button class="flex-1 py-1.5 text-center font-semibold text-slate-900 bg-white rounded-xl shadow-xs transition-shadow" type="button">
+        Overview
+      </button>
+<!-- Inactive Payments Tab -->
+<button class="flex-1 py-1.5 text-center text-slate-600 hover:text-slate-900 transition-colors" type="button">
+        Payments
+      </button>
+<!-- Inactive Due Tab -->
+<button class="flex-1 py-1.5 text-center text-slate-600 hover:text-slate-900 transition-colors" type="button">
+        Due
+      </button>
+</nav>
+<!-- END: SegmentedTabs -->
+<!-- BEGIN: KeyMetricsSection -->
+<!-- END: KeyMetricsSection -->
+<!-- BEGIN: ComparisonBarChartCard -->
+<section class="bg-white rounded-2xl p-4 border border-slate-100 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-4" data-purpose="monthly-comparison-card">
+<div class="flex items-center justify-between">
+<h2 class="text-[15px] font-bold text-slate-900">Sep vs Oct 2024</h2>
+<button class="inline-flex items-center gap-1.5 text-[12px] font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 active:scale-95 px-2.5 py-1 rounded-full border border-blue-200/80 transition-all" id="openCompareModalBtn" type="button">
+<svg class="w-3.5 h-3.5 text-blue-600 stroke-[2.2]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+<span class="">Compare</span>
+</button>
+</div>
+<!-- Chart Legend -->
+<div class="flex items-center gap-4 text-[12px] text-slate-600">
+<div class="flex items-center gap-1.5">
+<span class="w-2.5 h-2.5 rounded-full bg-slate-300"></span>
+<span class="">Sep</span>
+</div>
+<div class="flex items-center gap-1.5">
+<span class="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
+<span class="">Oct (Current)</span>
+</div>
+</div>
+<!-- Bar Chart Graphic Mockup -->
+<div class="pt-4 pb-1">
+<div class="grid grid-cols-4 items-end gap-2 text-center h-[135px]">
+<!-- Column 1: Paid -->
+<div class="flex flex-col items-center justify-end h-full">
+<span class="text-[11px] font-medium text-slate-600 mb-1">24 / 28</span>
+<div class="flex items-end gap-1.5 h-[85px] w-full justify-center">
+<div class="w-3.5 bg-slate-300 rounded-t-sm" style="height: 74%;"></div>
+<div class="w-3.5 bg-blue-600 rounded-t-sm" style="height: 94%;"></div>
+</div>
+<span class="text-[11.5px] text-slate-500 font-medium mt-2">Paid</span>
+</div>
+<!-- Column 2: Pending -->
+<div class="flex flex-col items-center justify-end h-full">
+<span class="text-[11px] font-medium text-slate-600 mb-1">11 / 9</span>
+<div class="flex items-end gap-1.5 h-[85px] w-full justify-center">
+<div class="w-3.5 bg-slate-300 rounded-t-sm" style="height: 48%;"></div>
+<div class="w-3.5 bg-blue-600 rounded-t-sm" style="height: 38%;"></div>
+</div>
+<span class="text-[11.5px] text-slate-500 font-medium mt-2">Pending</span>
+</div>
+<!-- Column 3: Due today -->
+<div class="flex flex-col items-center justify-end h-full">
+<span class="text-[11px] font-medium text-slate-600 mb-1">4 / 5</span>
+<div class="flex items-end gap-1.5 h-[85px] w-full justify-center">
+<div class="w-3.5 bg-slate-300 rounded-t-sm" style="height: 20%;"></div>
+<div class="w-3.5 bg-blue-600 rounded-t-sm" style="height: 24%;"></div>
+</div>
+<span class="text-[11.5px] text-slate-500 font-medium mt-2">Due today</span>
+</div>
+<!-- Column 4: Overdue -->
+<div class="flex flex-col items-center justify-end h-full">
+<span class="text-[11px] font-medium text-slate-600 mb-1">7 / 5</span>
+<div class="flex items-end gap-1.5 h-[85px] w-full justify-center">
+<div class="w-3.5 bg-slate-300 rounded-t-sm" style="height: 32%;"></div>
+<div class="w-3.5 bg-blue-600 rounded-t-sm" style="height: 22%;"></div>
+</div>
+<span class="text-[11.5px] text-slate-500 font-medium mt-2">Overdue</span>
+</div>
+</div>
+</div>
+</section>
+<!-- END: ComparisonBarChartCard -->
+<!-- BEGIN: PaymentStatusBreakdown -->
+<section class="bg-white rounded-2xl p-4 border border-slate-100 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-3.5" data-purpose="payment-status-distribution">
+<div class="flex items-center justify-between">
+<h2 class="text-[15px] font-bold text-slate-900">Payment status</h2>
+<span class="text-[12px] text-slate-500 font-normal">50 invoices</span>
+</div>
+<!-- Segmented Bar Indicator -->
+<div class="w-full h-2 rounded-full flex overflow-hidden bg-slate-100">
+<div class="bg-[#0f766e] h-full" style="width: 56%;" title="Paid 56%"></div>
+<div class="bg-blue-600 h-full" style="width: 18%;" title="Pending 18%"></div>
+<div class="bg-cyan-500 h-full" style="width: 10%;" title="Due today 10%"></div>
+<div class="bg-rose-500 h-full" style="width: 16%;" title="Overdue 10%"></div>
+</div>
+<!-- Detailed Breakdown Metrics -->
+<div class="space-y-2 pt-0.5 text-[13px]">
+<!-- Paid -->
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2.5">
+<span class="w-2.5 h-2.5 rounded-full bg-[#0f766e]"></span>
+<span class="text-slate-700 font-medium">Paid</span>
+</div>
+<span class="font-bold text-slate-900">28 <span class="font-normal text-slate-400">·</span> <span class="text-emerald-700 font-medium">56%</span></span>
+</div>
+<!-- Pending -->
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2.5">
+<span class="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
+<span class="text-slate-700 font-medium">Pending</span>
+</div>
+<span class="font-bold text-slate-900">9 <span class="font-normal text-slate-400">·</span> <span class="text-blue-600 font-medium">18%</span></span>
+</div>
+<!-- Due today -->
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2.5">
+<span class="w-2.5 h-2.5 rounded-full bg-cyan-500"></span>
+<span class="text-slate-700 font-medium">Due today</span>
+</div>
+<span class="font-bold text-slate-900">5 <span class="font-normal text-slate-400">·</span> <span class="text-cyan-600 font-medium">10%</span></span>
+</div>
+<!-- Overdue -->
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2.5">
+<span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+<span class="text-slate-700 font-medium">Overdue</span>
+</div>
+<span class="font-bold text-rose-600">5 <span class="font-normal text-slate-400">·</span> <span class="font-medium">10%</span></span>
+</div>
+</div>
+</section>
+<!-- END: PaymentStatusBreakdown -->
+<!-- BEGIN: RecentPaymentsList -->
+<section class="space-y-3 pt-1" data-purpose="recent-transactions-section">
+<div class="flex items-center justify-between px-0.5">
+<h2 class="text-[16px] font-bold text-slate-900">Recent payments</h2>
+<button class="text-[13px] font-semibold text-blue-600 hover:text-blue-700 transition-colors" type="button">
+          Export CSV
+        </button>
+</div>
+<!-- Transactions Vertical List -->
+<div class="space-y-2.5">
+<!-- Card 1: Sarah Jenkins -->
+<article class="bg-white rounded-2xl p-3.5 border border-slate-100 shadow-[0_1px_2px_rgba(0,0,0,0.03)]" data-purpose="transaction-card">
+<div class="flex items-start justify-between">
+<div class="flex items-center gap-3">
+<div class="w-9 h-9 rounded-full bg-blue-100/70 text-blue-600 font-semibold text-[13px] flex items-center justify-center shrink-0">
+                SJ
+              </div>
+<div>
+<h3 class="text-[14.5px] font-bold text-slate-900 leading-snug">Sarah Jenkins</h3>
+<p class="text-[11.5px] text-slate-400 font-normal">+91 98844 01133</p>
+</div>
+</div>
+<span class="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
+              PAID
+            </span>
+</div>
+<p class="text-[12px] text-slate-600 mt-2">Grand Palm Villa #4B, Austin</p>
+<div class="mt-2 pt-1.5 border-t border-slate-100/70 flex items-baseline justify-between">
+<div>
+<p class="text-[14.5px] font-bold text-slate-900">₹14,250 <span class="text-[12px] font-medium text-slate-600">paid</span></p>
+<p class="text-[11px] text-slate-400 mt-0.5">Paid via UPI (GPay) · Oct 24</p>
+</div>
+</div>
+</article>
+<!-- Card 2: Robert Lang -->
+<article class="bg-white rounded-2xl p-3.5 border border-slate-100 shadow-[0_1px_2px_rgba(0,0,0,0.03)]" data-purpose="transaction-card">
+<div class="flex items-start justify-between">
+<div class="flex items-center gap-3">
+<div class="w-9 h-9 rounded-full bg-blue-100/70 text-blue-600 font-semibold text-[13px] flex items-center justify-center shrink-0">
+                RL
+              </div>
+<div>
+<h3 class="text-[14.5px] font-bold text-slate-900 leading-snug">Robert Lang</h3>
+<p class="text-[11.5px] text-slate-400 font-normal">+91 97890 23411</p>
+</div>
+</div>
+<span class="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
+              PAID
+            </span>
+</div>
+<p class="text-[12px] text-slate-600 mt-2">Skyline Heights Unit #102, Dallas</p>
+<div class="mt-2 pt-1.5 border-t border-slate-100/70 flex items-baseline justify-between">
+<div>
+<p class="text-[14.5px] font-bold text-slate-900">₹8,900 <span class="text-[12px] font-medium text-slate-600">paid</span></p>
+<p class="text-[11px] text-slate-400 mt-0.5">Paid via credit card · Oct 23</p>
+</div>
+</div>
+</article>
+<!-- Card 3: Ananya Sharma -->
+<article class="bg-white rounded-2xl p-3.5 border border-slate-100 shadow-[0_1px_2px_rgba(0,0,0,0.03)]" data-purpose="transaction-card">
+<div class="flex items-start justify-between">
+<div class="flex items-center gap-3">
+<div class="w-9 h-9 rounded-full bg-blue-100/70 text-blue-600 font-semibold text-[13px] flex items-center justify-center shrink-0">
+                AS
+              </div>
+<div>
+<h3 class="text-[14.5px] font-bold text-slate-900 leading-snug">Ananya Sharma</h3>
+<p class="text-[11.5px] text-slate-400 font-normal">+91 98401 55290</p>
+</div>
+</div>
+<span class="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
+              PAID
+            </span>
+</div>
+<p class="text-[12px] text-slate-600 mt-2">Belclaire Estates Penthouse, Austin</p>
+<div class="mt-2 pt-1.5 border-t border-slate-100/70 flex items-baseline justify-between">
+<div>
+<p class="text-[14.5px] font-bold text-slate-900">₹32,000 <span class="text-[12px] font-medium text-slate-600">paid</span></p>
+<p class="text-[11px] text-slate-400 mt-0.5">NEFT transfer · Oct 22</p>
+</div>
+</div>
+</article>
+<!-- Card 4: Michael Chang -->
+<article class="bg-white rounded-2xl p-3.5 border border-slate-100 shadow-[0_1px_2px_rgba(0,0,0,0.03)]" data-purpose="transaction-card">
+<div class="flex items-start justify-between">
+<div class="flex items-center gap-3">
+<div class="w-9 h-9 rounded-full bg-blue-100/70 text-blue-600 font-semibold text-[13px] flex items-center justify-center shrink-0">
+                MC
+              </div>
+<div>
+<h3 class="text-[14.5px] font-bold text-slate-900 leading-snug">Michael Chang</h3>
+<p class="text-[11.5px] text-slate-400 font-normal">+91 91234 56789</p>
+</div>
+</div>
+<span class="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
+              PAID
+            </span>
+</div>
+<p class="text-[12px] text-slate-600 mt-2">Oakridge Commerce Plaza #305, Houston</p>
+<div class="mt-2 pt-1.5 border-t border-slate-100/70 flex items-baseline justify-between">
+<div>
+<p class="text-[14.5px] font-bold text-slate-900">₹19,400 <span class="text-[12px] font-medium text-slate-600">paid</span></p>
+<p class="text-[11px] text-slate-400 mt-0.5">Collected by Ravi Kumar · Oct 21</p>
+</div>
+</div>
+</article>
+<!-- Card 5: Rajesh Gupta -->
+<article class="bg-white rounded-2xl p-3.5 border border-slate-100 shadow-[0_1px_2px_rgba(0,0,0,0.03)]" data-purpose="transaction-card">
+<div class="flex items-start justify-between">
+<div class="flex items-center gap-3">
+<div class="w-9 h-9 rounded-full bg-blue-100/70 text-blue-600 font-semibold text-[13px] flex items-center justify-center shrink-0">
+                RG
+              </div>
+<div>
+<h3 class="text-[14.5px] font-bold text-slate-900 leading-snug">Rajesh Gupta</h3>
+<p class="text-[11.5px] text-slate-400 font-normal">+91 99620 44512</p>
+</div>
+</div>
+<span class="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
+              PAID
+            </span>
+</div>
+<p class="text-[12px] text-slate-600 mt-2">Highland Park Manor #18, Dallas</p>
+<div class="mt-2 pt-1.5 border-t border-slate-100/70 flex items-baseline justify-between">
+<div>
+<p class="text-[14.5px] font-bold text-slate-900">₹24,500 <span class="text-[12px] font-medium text-slate-600">paid</span></p>
+<p class="text-[11px] text-slate-400 mt-0.5">Collected by Alex Morgan · Oct 20</p>
+</div>
+</div>
+</article>
+<!-- Card 6: Priya Sundaram -->
+<article class="bg-white rounded-2xl p-3.5 border border-slate-100 shadow-[0_1px_2px_rgba(0,0,0,0.03)]" data-purpose="transaction-card">
+<div class="flex items-start justify-between">
+<div class="flex items-center gap-3">
+<div class="w-9 h-9 rounded-full bg-blue-100/70 text-blue-600 font-semibold text-[13px] flex items-center justify-center shrink-0">
+                PS
+              </div>
+<div>
+<h3 class="text-[14.5px] font-bold text-slate-900 leading-snug">Priya Sundaram</h3>
+<p class="text-[11.5px] text-slate-400 font-normal">+91 94440 88219</p>
+</div>
+</div>
+<span class="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
+              PAID
+            </span>
+</div>
+<p class="text-[12px] text-slate-600 mt-2">Clearwater Haven #2B, Austin</p>
+<div class="mt-2 pt-1.5 border-t border-slate-100/70 flex items-baseline justify-between">
+<div>
+<p class="text-[14.5px] font-bold text-slate-900">₹11,800 <span class="text-[12px] font-medium text-slate-600">paid</span></p>
+<p class="text-[11px] text-slate-400 mt-0.5">Paid via PhonePe UPI · Oct 19</p>
+</div>
+</div>
+</article>
+<!-- Card 7: Mr R. Murugan -->
+<article class="bg-white rounded-2xl p-3.5 border border-slate-100 shadow-[0_1px_2px_rgba(0,0,0,0.03)]" data-purpose="transaction-card">
+<div class="flex items-start justify-between">
+<div class="flex items-center gap-3">
+<div class="w-9 h-9 rounded-full bg-blue-100/70 text-blue-600 font-semibold text-[13px] flex items-center justify-center shrink-0">
+                DR
+              </div>
+<div>
+<h3 class="text-[14.5px] font-bold text-slate-900 leading-snug">Mr R. Murugan</h3>
+<p class="text-[11.5px] text-slate-400 font-normal">+91 98844 01133</p>
+</div>
+</div>
+<span class="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
+              PAID
+            </span>
+</div>
+<p class="text-[12px] text-slate-600 mt-2">Mugalivakkam, Chennai</p>
+<div class="mt-2 pt-1.5 border-t border-slate-100/70 flex items-baseline justify-between">
+<div>
+<p class="text-[14.5px] font-bold text-slate-900">₹24,500 <span class="text-[12px] font-medium text-slate-600">paid</span></p>
+<p class="text-[11px] text-slate-400 mt-0.5">Cash debrief verified by Sriraman K · Oct 18</p>
+</div>
+</div>
+</article>
+</div>
+</section>
+<!-- END: RecentPaymentsList -->
+</div>
+<!-- BEGIN: Compare Date Range Modal -->
+<div aria-labelledby="modalTitle" aria-modal="true" class="fixed inset-0 z-50 flex items-center justify-center px-4 bg-slate-900/50 backdrop-blur-xs transition-opacity duration-200" id="compareModal" role="dialog">
+<div class="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-slate-100 space-y-4 animate-in fade-in zoom-in-95 duration-150" id="compareModalCard"><!-- Header -->
+<div class="flex items-center justify-between pb-1 border-b border-slate-100">
+  <div class="flex items-center gap-2.5">
+    <div class="w-8 h-8 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+      <svg class="w-4 h-4 stroke-[2]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" stroke-linecap="round" stroke-linejoin="round"></path>
+      </svg>
+    </div>
+    <div>
+      <h3 class="text-[15px] font-bold text-slate-900 leading-tight" id="modalTitle">Compare Collections</h3>
+      <p class="text-[11px] text-slate-500 font-medium">Select ranges to analyze performance</p>
+    </div>
+  </div>
+  <button aria-label="Close dialog" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors" id="closeCompareModalBtn" onclick="document.getElementById('compareModal').classList.add('hidden'); document.body.style.overflow='';">
+    <svg class="w-5 h-5 stroke-[2]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path d="M6 18L18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round"></path>
+    </svg>
+  </button>
+</div>
+
+<!-- Quick Presets -->
+
+
+<!-- Date Range Form -->
+<form class="space-y-3" id="compareForm" onsubmit="event.preventDefault();">
+  <!-- Primary Range -->
+  <div class="p-3 bg-slate-50/80 rounded-2xl border border-slate-200/70 space-y-2">
+    <div class="flex items-center justify-between">
+      <span class="text-[11.5px] font-bold text-slate-800 flex items-center gap-1.5">
+        <span class="w-2 h-2 rounded-full bg-blue-600"></span>
+        Primary Period (Current)
+      </span>
+      <span class="text-[10px] font-semibold text-blue-700 bg-blue-100/70 px-1.5 py-0.5 rounded">Active</span>
+    </div>
+    <div class="grid grid-cols-2 gap-2">
+      <div>
+        <label class="block text-[11px] font-medium text-slate-600 mb-0.5" for="startDateInput">Start Date</label>
+        <input class="w-full text-[12px] text-slate-800 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 focus:border-blue-600 focus:outline-none transition-colors font-medium shadow-xs" id="startDateInput" type="date" value="2024-10-01">
+      </div>
+      <div>
+        <label class="block text-[11px] font-medium text-slate-600 mb-0.5" for="endDateInput">End Date</label>
+        <input class="w-full text-[12px] text-slate-800 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 focus:border-blue-600 focus:outline-none transition-colors font-medium shadow-xs" id="endDateInput" type="date" value="2024-10-31">
+      </div>
+    </div>
+  </div>
+
+  <!-- Compare With Selector -->
+  <div class="p-3 bg-slate-50/80 rounded-2xl border border-slate-200/70 space-y-2">
+    <div class="flex items-center justify-between">
+      <span class="text-[11.5px] font-bold text-slate-800 flex items-center gap-1.5">
+        <span class="w-2 h-2 rounded-full bg-slate-400"></span>
+        Compare With (Baseline)
+      </span>
+    </div>
+    <div>
+      
+    </div>
+    <div class="grid grid-cols-2 gap-2 pt-0.5">
+      <div>
+        <label class="block text-[11px] font-medium text-slate-600 mb-0.5" for="compareStartDateInput">Baseline Start</label>
+        <input class="w-full text-[12px] text-slate-800 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 focus:border-blue-600 focus:outline-none transition-colors font-medium shadow-xs" id="compareStartDateInput" type="date" value="2024-09-01">
+      </div>
+      <div>
+        <label class="block text-[11px] font-medium text-slate-600 mb-0.5" for="compareEndDateInput">Baseline End</label>
+        <input class="w-full text-[12px] text-slate-800 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 focus:border-blue-600 focus:outline-none transition-colors font-medium shadow-xs" id="compareEndDateInput" type="date" value="2024-09-30">
+      </div>
+    </div>
+  </div>
+
+  <!-- Selected Comparison Summary Banner -->
+  
+
+  <!-- Action Buttons -->
+  <div class="pt-1 flex items-center gap-2">
+    <button class="flex-1 py-2 px-3 text-[13px] font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors" id="cancelCompareModalBtn" type="button" onclick="document.getElementById('compareModal').classList.add('hidden'); document.body.style.overflow='';">
+      Cancel
+    </button>
+    <button class="flex-1 py-2 px-3 text-[13px] font-semibold text-white bg-blue-600 hover:bg-blue-700 active:scale-95 rounded-xl shadow-xs transition-all text-center" id="applyCompareModalBtn" type="button" onclick="document.getElementById('compareModal').classList.add('hidden'); document.body.style.overflow='';">
+      Apply Comparison
+    </button>
+  </div>
+</form></div>
+</div>
+<!-- END: Compare Date Range Modal -->
+<script>
+  (function initCompareModal() {
+    const modal = document.getElementById('compareModal');
+    const openBtn = document.getElementById('openCompareModalBtn');
+    const closeBtn = document.getElementById('closeCompareModalBtn');
+    const cancelBtn = document.getElementById('cancelCompareModalBtn');
+    const applyBtn = document.getElementById('applyCompareModalBtn');
+    const modalCard = document.getElementById('compareModalCard');
+
+    function openModal() {
+      if (modal) {
+        modal.classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+      }
+    }
+
+    function closeModal() {
+      if (modal) {
+        modal.classList.add('hidden');
+        document.body.style.overflow = '';
+      }
+    }
+
+    if (openBtn) openBtn.addEventListener('click', openModal);
+    if (closeBtn) closeBtn.addEventListener('click', closeModal);
+    if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+    if (applyBtn) {
+      applyBtn.addEventListener('click', function() {
+        closeModal();
+      });
+    }
+
+    // Close when clicking on backdrop outside modalCard
+    if (modal) {
+      modal.addEventListener('click', function(event) {
+        if (!modalCard.contains(event.target)) {
+          closeModal();
+        }
+      });
+    }
+
+    // Quick presets handler
+    const presetBtns = document.querySelectorAll('.preset-btn');
+    const startInput = document.getElementById('startDateInput');
+    const endInput = document.getElementById('endDateInput');
+
+    presetBtns.forEach(btn => {
+      btn.addEventListener('click', function() {
+        presetBtns.forEach(b => {
+          b.className = 'preset-btn px-2.5 py-1 rounded-full bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100 whitespace-nowrap text-[11.5px] font-medium';
+        });
+        this.className = 'preset-btn px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-semibold whitespace-nowrap text-[11.5px]';
+
+        const type = this.getAttribute('data-preset');
+        if (type === 'last-month') {
+          if (startInput) startInput.value = '2024-09-01';
+          if (endInput) endInput.value = '2024-10-01';
+        } else if (type === 'last-quarter') {
+          if (startInput) startInput.value = '2024-07-01';
+          if (endInput) endInput.value = '2024-09-30';
+        } else if (type === 'yoy') {
+          if (startInput) startInput.value = '2023-10-01';
+          if (endInput) endInput.value = '2024-10-01';
+        }
+      });
+    });
+
+    // Close on Escape key
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && modal && !modal.classList.contains('hidden')) {
+        closeModal();
+      }
+    });
+  })();
+</script>
+
+
+</body></html>

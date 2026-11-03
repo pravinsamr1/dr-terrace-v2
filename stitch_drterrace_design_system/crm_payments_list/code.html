@@ -1,0 +1,222 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport">
+<title>CRM - Payments List</title>
+<!-- Tailwind CSS CDN with forms and container queries -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            appBg: '#EEF3F8',
+            navBg: '#E2EAF2',
+            navyDark: '#171E36',
+            badgePaidBg: '#E7F8F0',
+            badgePaidText: '#1B8755',
+            badgePendingBg: '#EDF4FE',
+            badgePendingText: '#2C6ECB',
+            badgeOverdueBg: '#FEECEC',
+            badgeOverdueText: '#D9383A',
+          },
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Display"', '"SF Pro Text"', 'Roboto', 'sans-serif'],
+          }
+        }
+      }
+    };
+  </script>
+<style data-purpose="base-styling">
+    body {
+      background-color: #EEF3F8;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    /* Hide scrollbars for slick mobile appearance */
+    ::-webkit-scrollbar {
+      display: none;
+    }
+  </style>
+</head>
+<body class="min-h-screen text-slate-800 flex justify-center py-0 sm:py-6">
+<!-- Mobile Canvas Device Container (390px typical iOS width) -->
+<main class="w-full max-w-[390px] min-h-screen bg-[#EEF3F8] flex flex-col px-4 pt-4 pb-8 antialiased" data-purpose="mobile-viewport-container">
+<!-- BEGIN: Header -->
+<header class="flex items-center justify-between pt-2 pb-4" data-purpose="screen-header">
+<div class="flex items-center gap-3">
+<!-- Back Navigation Button -->
+<button aria-label="Go back" class="w-10 h-10 rounded-full bg-white flex items-center justify-center shadow-xs text-slate-700 active:scale-95 transition-transform" type="button">
+<svg class="w-5 h-5 stroke-[2.2]" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<path d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</button>
+<!-- Screen Title and Subtitle -->
+<div>
+<h1 class="text-[23px] font-bold tracking-tight text-slate-900 leading-none">Payments</h1>
+<p class="text-[13px] text-slate-500 font-normal mt-1">Oct 2024 · All payments</p>
+</div>
+</div>
+<!-- User Avatar -->
+<div class="w-9 h-9 rounded-full bg-[#1E65F6] flex items-center justify-center text-white text-[13px] font-semibold tracking-wide shadow-xs" data-purpose="user-avatar">
+        PS
+      </div>
+</header>
+<!-- END: Header -->
+<!-- BEGIN: NavigationTabs -->
+<!-- Segmented Segment Tabs: Overview, Payments, Due -->
+<nav aria-label="Sections" class="bg-[#E0E9F2] p-1 rounded-xl flex items-center mb-4">
+<button class="flex-1 py-1.5 text-center text-[13.5px] font-medium text-slate-600 rounded-lg hover:text-slate-900 transition-colors" type="button">
+        Overview
+      </button>
+<button class="flex-1 py-1.5 text-center text-[13.5px] font-semibold text-slate-900 bg-white rounded-[10px] shadow-sm" type="button">
+        Payments
+      </button>
+<button class="flex-1 py-1.5 text-center text-[13.5px] font-medium text-slate-600 rounded-lg hover:text-slate-900 transition-colors" type="button">
+        Due
+      </button>
+</nav>
+<!-- END: NavigationTabs -->
+<!-- BEGIN: FilterDropdownCards -->
+<!-- Quick Selection Filter Cards (Month & Employee) -->
+<section class="mb-4" data-purpose="key-metrics"><h2 class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Key metrics</h2><div class="grid grid-cols-2 gap-3"><div class="bg-white rounded-2xl p-3.5 border border-slate-100/80 shadow-[0_1px_3px_rgba(0,0,0,0.02)]"><p class="text-[12px] text-slate-500 font-medium">Total Collected</p><p class="text-[18px] font-bold text-slate-900 mt-1 leading-snug">₹3,42,800</p><p class="text-[11px] text-slate-400 mt-0.5">38 paid · 14 this week</p></div><div class="bg-white rounded-2xl p-3.5 border border-slate-100/80 shadow-[0_1px_3px_rgba(0,0,0,0.02)]"><p class="text-[12px] text-slate-500 font-medium">Pending</p><p class="text-[18px] font-bold text-slate-900 mt-1 leading-snug">₹86,500</p><p class="text-[11px] text-slate-400 mt-0.5">12 invoices · 78% rate</p></div><div class="bg-white rounded-2xl p-3.5 border border-slate-100/80 shadow-[0_1px_3px_rgba(0,0,0,0.02)]"><p class="text-[12px] text-slate-500 font-medium">Total Invoiced</p><p class="text-[18px] font-bold text-slate-900 mt-1 leading-snug">₹4,29,300</p><p class="text-[11px] text-slate-400 mt-0.5">Oct target ₹4.5L</p></div><div class="bg-white rounded-2xl p-3.5 border border-slate-100/80 shadow-[0_1px_3px_rgba(0,0,0,0.02)]"><p class="text-[12px] text-slate-500 font-medium">Paid Invoices</p><p class="text-[18px] font-bold text-slate-900 mt-1 leading-snug">28</p><p class="text-[11px] text-slate-400 mt-0.5">of 50 this month</p></div></div></section><div class="grid grid-cols-2 gap-3 mb-4" data-purpose="filter-cards">
+<!-- Month Filter Card -->
+<div class="bg-white rounded-2xl p-3 px-3.5 shadow-[0_1px_3px_rgba(0,0,0,0.03)] border border-slate-100 flex flex-col justify-center">
+<span class="text-[11px] text-slate-400 font-medium tracking-normal">Month</span>
+<span class="text-[13.5px] font-bold text-slate-900 mt-0.5 tracking-tight">Oct 2024</span>
+</div>
+<!-- Employee Filter Card -->
+<div class="bg-white rounded-2xl p-3 px-3.5 shadow-[0_1px_3px_rgba(0,0,0,0.03)] border border-slate-100 flex flex-col justify-center">
+<span class="text-[11px] text-slate-400 font-medium tracking-normal">Employee</span>
+<span class="text-[13.5px] font-bold text-slate-900 mt-0.5 tracking-tight truncate">All employees</span>
+</div>
+</div>
+<!-- END: FilterDropdownCards -->
+<!-- BEGIN: StatusPills -->
+<!-- Status Filter Pills -->
+<div class="flex items-center gap-2 mb-4 overflow-x-auto no-scrollbar" data-purpose="status-filters">
+<button class="px-5 py-1.5 rounded-full bg-[#171E36] text-white text-[12.5px] font-medium tracking-wide shadow-xs" type="button">
+        All
+      </button>
+<button class="px-4 py-1.5 rounded-full bg-white text-slate-700 text-[12.5px] font-medium border border-slate-100 hover:bg-slate-50" type="button">
+        Paid
+      </button>
+<button class="px-4 py-1.5 rounded-full bg-white text-slate-700 text-[12.5px] font-medium border border-slate-100 hover:bg-slate-50" type="button">
+        Pending
+      </button>
+<button class="px-3.5 py-1.5 rounded-full bg-white text-slate-700 text-[12.5px] font-medium border border-slate-100 hover:bg-slate-50" type="button">
+        Overdue
+      </button>
+</div>
+<!-- END: StatusPills -->
+<!-- BEGIN: TransactionList -->
+<div class="flex flex-col gap-2.5" data-purpose="payments-card-list">
+<!-- Item 1: Sarah Jenkins -->
+<article class="bg-white rounded-2xl p-4 shadow-[0_1px_3px_rgba(0,0,0,0.02)] border border-slate-100/80">
+<div class="flex items-start justify-between">
+<div>
+<h2 class="text-[14.5px] font-bold text-slate-900 leading-tight">Sarah Jenkins</h2>
+<div class="text-[18px] font-bold text-slate-900 mt-1 leading-snug">₹14,250</div>
+<p class="text-[12px] text-slate-500 font-normal mt-1">Paid via UPI (GPay) · Oct 24</p>
+</div>
+<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[10.5px] font-bold tracking-wide bg-[#E8F8F0] text-[#198754]">
+            PAID
+          </span>
+</div>
+</article>
+<!-- Item 2: Robert Lang -->
+<article class="bg-white rounded-2xl p-4 shadow-[0_1px_3px_rgba(0,0,0,0.02)] border border-slate-100/80">
+<div class="flex items-start justify-between">
+<div>
+<h2 class="text-[14.5px] font-bold text-slate-900 leading-tight">Robert Lang</h2>
+<div class="text-[18px] font-bold text-slate-900 mt-1 leading-snug">₹8,900</div>
+<p class="text-[12px] text-slate-500 font-normal mt-1">Paid via credit card · Oct 23</p>
+</div>
+<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[10.5px] font-bold tracking-wide bg-[#E8F8F0] text-[#198754]">
+            PAID
+          </span>
+</div>
+</article>
+<!-- Item 3: Ananya Sharma -->
+<article class="bg-white rounded-2xl p-4 shadow-[0_1px_3px_rgba(0,0,0,0.02)] border border-slate-100/80">
+<div class="flex items-start justify-between">
+<div>
+<h2 class="text-[14.5px] font-bold text-slate-900 leading-tight">Ananya Sharma</h2>
+<div class="text-[18px] font-bold text-slate-900 mt-1 leading-snug">₹32,000</div>
+<p class="text-[12px] text-slate-500 font-normal mt-1">NEFT transfer · Oct 22</p>
+</div>
+<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[10.5px] font-bold tracking-wide bg-[#E8F8F0] text-[#198754]">
+            PAID
+          </span>
+</div>
+</article>
+<!-- Item 4: Vikram Shah -->
+<article class="bg-white rounded-2xl p-4 shadow-[0_1px_3px_rgba(0,0,0,0.02)] border border-slate-100/80">
+<div class="flex items-start justify-between">
+<div>
+<h2 class="text-[14.5px] font-bold text-slate-900 leading-tight">Vikram Shah</h2>
+<div class="text-[18px] font-bold text-slate-900 mt-1 leading-snug">₹7,400</div>
+<p class="text-[12px] text-slate-500 font-normal mt-1">Invoice Oct 25 · awaiting payment</p>
+</div>
+<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[10.5px] font-bold tracking-wide bg-[#EBF3FF] text-[#2C6ECB]">
+            PENDING
+          </span>
+</div>
+</article>
+<!-- Item 5: Michael Chang -->
+<article class="bg-white rounded-2xl p-4 shadow-[0_1px_3px_rgba(0,0,0,0.02)] border border-slate-100/80">
+<div class="flex items-start justify-between">
+<div>
+<h2 class="text-[14.5px] font-bold text-slate-900 leading-tight">Michael Chang</h2>
+<div class="text-[18px] font-bold text-slate-900 mt-1 leading-snug">₹19,400</div>
+<p class="text-[12px] text-slate-500 font-normal mt-1">Collected by Ravi Kumar · Oct 21</p>
+</div>
+<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[10.5px] font-bold tracking-wide bg-[#E8F8F0] text-[#198754]">
+            PAID
+          </span>
+</div>
+</article>
+<!-- Item 6: Deepa Nair -->
+<article class="bg-white rounded-2xl p-4 shadow-[0_1px_3px_rgba(0,0,0,0.02)] border border-slate-100/80">
+<div class="flex items-start justify-between">
+<div>
+<h2 class="text-[14.5px] font-bold text-slate-900 leading-tight">Deepa Nair</h2>
+<div class="text-[18px] font-bold text-slate-900 mt-1 leading-snug">₹5,800</div>
+<p class="text-[12px] text-slate-500 font-normal mt-1">Invoice Oct 12 · 8 days late</p>
+</div>
+<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[10.5px] font-bold tracking-wide bg-[#FEEDEC] text-[#D9383A]">
+            OVERDUE
+          </span>
+</div>
+</article>
+<!-- Item 7: Rajesh Gupta -->
+<article class="bg-white rounded-2xl p-4 shadow-[0_1px_3px_rgba(0,0,0,0.02)] border border-slate-100/80">
+<div class="flex items-start justify-between">
+<div>
+<h2 class="text-[14.5px] font-bold text-slate-900 leading-tight">Rajesh Gupta</h2>
+<div class="text-[18px] font-bold text-slate-900 mt-1 leading-snug">₹24,500</div>
+<p class="text-[12px] text-slate-500 font-normal mt-1">Collected by Alex Morgan · Oct 20</p>
+</div>
+<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[10.5px] font-bold tracking-wide bg-[#E8F8F0] text-[#198754]">
+            PAID
+          </span>
+</div>
+</article>
+<!-- Item 8: Priya Sundaram -->
+<article class="bg-white rounded-2xl p-4 shadow-[0_1px_3px_rgba(0,0,0,0.02)] border border-slate-100/80">
+<div class="flex items-start justify-between">
+<div>
+<h2 class="text-[14.5px] font-bold text-slate-900 leading-tight">Priya Sundaram</h2>
+<div class="text-[18px] font-bold text-slate-900 mt-1 leading-snug">₹11,800</div>
+<p class="text-[12px] text-slate-500 font-normal mt-1">Paid via PhonePe UPI · Oct 19</p>
+</div>
+<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[10.5px] font-bold tracking-wide bg-[#E8F8F0] text-[#198754]">
+            PAID
+          </span>
+</div>
+</article>
+</div>
+<!-- END: TransactionList -->
+</main>
+
+
+</body></html>

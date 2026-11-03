@@ -249,3 +249,43 @@ export function FileSendIcon3D({ size = 68 }) {
     </Svg>
   );
 }
+
+// ─── 5. Wallet Icon (Rose) ───────────────────────────────────────────────────
+export function WalletIcon3D({ size = 68 }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 80 80">
+      <Defs>
+        <RadialGradient id="walBg" cx="50%" cy="45%" r="50%">
+          <Stop offset="0%" stopColor="#FDA4AF" />
+          <Stop offset="100%" stopColor="#E11D48" />
+        </RadialGradient>
+      </Defs>
+      <Circle cx="40" cy="40" r="38" fill="url(#walBg)" />
+      <Ellipse cx="26" cy="22" rx="11" ry="7" fill="rgba(255,255,255,0.28)" />
+      <Rect x="20" y="30" width="42" height="30" rx="6" fill="rgba(0,0,0,0.18)" />
+      <Rect x="18" y="27" width="42" height="30" rx="6" fill="#FFFFFF" />
+      <Rect x="18" y="27" width="42" height="8" rx="4" fill="#FECDD3" />
+      <Rect x="46" y="38" width="17" height="11" rx="4" fill="#BE123C" />
+      <Circle cx="52" cy="43.5" r="2.4" fill="#FFFFFF" />
+    </Svg>
+  );
+}
+
+// ─── 6. Shield + Check Icon (Amber) ──────────────────────────────────────────
+export function ShieldCheckIcon3D({ size = 68 }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 80 80">
+      <Defs>
+        <RadialGradient id="shdBg" cx="50%" cy="45%" r="50%">
+          <Stop offset="0%" stopColor="#FDE68A" />
+          <Stop offset="100%" stopColor="#D97706" />
+        </RadialGradient>
+      </Defs>
+      <Circle cx="40" cy="40" r="38" fill="url(#shdBg)" />
+      <Ellipse cx="26" cy="22" rx="11" ry="7" fill="rgba(255,255,255,0.28)" />
+      <Path d="M41 21 L60 28 V42 C60 54 51 61 41 65 C31 61 22 54 22 42 V28 Z" fill="rgba(0,0,0,0.18)" />
+      <Path d="M40 18 L59 25 V39 C59 51 50 58 40 62 C30 58 21 51 21 39 V25 Z" fill="#FFFFFF" />
+      <Path d="M31 40 L38 47 L50 33" fill="none" stroke="#B45309" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}

@@ -1,0 +1,250 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport">
+<title>Update Customer Status</title>
+<!-- Tailwind CSS v3 with forms & container queries -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Google Fonts: Inter / Plus Jakarta Sans -->
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'Inter', 'sans-serif'],
+          },
+          colors: {
+            brand: {
+              50: '#eff6ff',
+              100: '#dbeafe',
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8',
+            }
+          }
+        }
+      }
+    }
+  </script>
+<!-- BEGIN: Custom CSS -->
+<style data-purpose="base-styling">
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    /* Hide scrollbars for slick mobile look */
+    ::-webkit-scrollbar {
+      display: none;
+    }
+  </style>
+<!-- END: Custom CSS -->
+</head>
+<body class="bg-slate-100 min-h-screen p-0">
+<!-- BEGIN: PhoneFrame -->
+<!-- Outer iOS Mobile Shell -->
+<div class="relative w-full max-w-[430px] mx-auto min-h-screen overflow-hidden flex flex-col justify-between">
+<!-- BEGIN: BackgroundScreen -->
+<!-- Dimmed / Obscured Customer Detail Screen in background -->
+<div class="absolute inset-0 bg-[#2554ba] flex flex-col pointer-events-none select-none">
+<!-- iOS Status Bar (Header) -->
+<div class="w-full pt-3 px-7 flex justify-between items-center text-white text-xs font-semibold tracking-tight z-10">
+<span class="">9:41</span>
+<div class="flex items-center space-x-2">
+<!-- Signal Icon -->
+<svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M12 3c-4.97 0-9 4.03-9 9 0 2.12.74 4.07 1.97 5.61L12 22l7.03-4.39C20.26 16.07 21 14.12 21 12c0-4.97-4.03-9-9-9z"></path></svg>
+<!-- Wifi Icon -->
+<svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M12 4C7.31 4 3.07 5.9 0 8.98L12 21 24 8.98C20.93 5.9 16.69 4 12 4zm0 3.3c3.78 0 7.21 1.48 9.77 3.93L12 19.12 2.23 11.23C4.79 8.78 8.22 7.3 12 7.3z"></path></svg>
+<!-- Battery Icon -->
+<div class="flex items-center space-x-0.5">
+<span class="text-[11px] font-medium mr-1">91%</span>
+<div class="w-5 h-2.5 border border-white rounded-[3px] p-[1px] flex items-center">
+<div class="h-full w-[85%] bg-white rounded-[1.5px]"></div>
+</div>
+</div>
+</div>
+</div>
+<!-- Detail Screen Top Bar -->
+<div class="px-5 pt-3 pb-6 flex items-center relative">
+<button class="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center text-white backdrop-blur-sm">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"></path></svg>
+</button>
+<h1 class="w-full text-center text-white text-base font-bold -ml-9">Customer Detail</h1>
+</div>
+<!-- Detail Card Preview in Background -->
+<div class="flex-1 bg-[#eaeff7] rounded-t-[30px] p-5 space-y-4">
+<!-- Customer Info Card -->
+<div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex items-start gap-3.5">
+<div class="w-14 h-14 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-blue-700 font-bold text-xl flex-shrink-0">
+            R
+          </div>
+<div class="flex-1">
+<h2 class="text-base font-bold text-slate-800 leading-tight">Mr R.murugan</h2>
+<p class="text-xs text-slate-500 mt-1">Cust ID: <span class="font-bold text-slate-700">DR55</span> • 9884401133</p>
+<div class="flex items-center text-blue-600 text-xs mt-1.5 font-medium">
+<svg class="w-3.5 h-3.5 mr-1 text-blue-600 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path clip-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" fill-rule="evenodd"></path></svg>
+              Mugalivakkam, Chennai
+            </div>
+</div>
+</div>
+<!-- Action Buttons -->
+<div class="grid grid-cols-3 gap-2 pt-1">
+<div class="h-10 rounded-xl border border-slate-200 bg-white/60 flex items-center justify-center gap-1.5 text-xs font-semibold text-slate-700">
+<svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+            Call
+          </div>
+<div class="h-10 rounded-xl border border-emerald-200 bg-emerald-50/50 flex items-center justify-center gap-1.5 text-xs font-semibold text-emerald-800">
+<svg class="w-4 h-4 text-emerald-600" fill="currentColor" viewBox="0 0 24 24"><path d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91 0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.816 9.816 0 0012.04 2z"></path></svg>
+            WhatsApp
+          </div>
+<div class="h-10 rounded-xl border border-rose-200 bg-rose-50/50 flex items-center justify-center gap-1.5 text-xs font-semibold text-rose-800">
+<svg class="w-4 h-4 text-rose-600" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"></path></svg>
+            Directions
+          </div>
+</div>
+</div>
+</div>
+<!-- END: BackgroundScreen -->
+<!-- Backdrop Dim Layer -->
+<div class="absolute inset-0 bg-slate-900/35 backdrop-blur-[1px] z-10 transition-opacity"></div>
+<!-- BEGIN: BottomSheetModal -->
+<!-- Bottom Sheet Container with Slide-up look -->
+<main class="relative z-20 mt-auto bg-white rounded-t-[28px] shadow-2xl flex flex-col pt-3 pb-6 px-5 max-h-[82%] border-t border-white/60">
+<!-- Drag Grabber Handle -->
+<div class="w-10 h-1.5 bg-slate-300 rounded-full mx-auto mb-3"></div>
+<!-- Sheet Header -->
+<div class="flex items-start justify-between pb-3 border-b border-slate-100">
+<div class="pr-3">
+<h2 class="text-[17px] font-bold text-slate-900 leading-tight tracking-tight">Update Customer Status</h2>
+<p class="text-xs text-slate-500 mt-0.5 font-normal">Log visit outcome, notes, reminders &amp; audio</p>
+</div>
+<!-- Close (X) button -->
+<button aria-label="Close" class="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 transition-colors flex-shrink-0" type="button">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"></path></svg>
+</button>
+</div>
+<!-- Scrollable Form Area -->
+<div class="overflow-y-auto space-y-4 pt-3.5 pr-0.5 pb-2">
+<!-- Form Item 1: Customer Status Dropdown -->
+<div>
+<label class="block text-xs font-bold text-slate-800 mb-1.5" for="customerStatus">Customer Status</label>
+<div class="relative">
+<select class="w-full appearance-none bg-white border border-slate-300 text-slate-800 text-sm font-semibold rounded-xl px-3.5 py-2.5 pr-9 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm transition" id="customerStatus">
+<option selected="">Inspection Done</option>
+<option>Follow Up Required</option>
+<option>Deal Closed</option>
+<option>Not Interested</option>
+</select>
+<!-- Dropdown chevron arrow -->
+<div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-500">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"></path></svg>
+</div>
+</div>
+</div>
+<!-- Form Item 2: Visit & Discussion Notes -->
+<div>
+<label class="block text-xs font-bold text-slate-800 mb-1.5" for="visitNotes">Visit &amp; Discussion Notes</label>
+<textarea class="w-full border border-slate-300 rounded-xl p-3 text-xs text-slate-700 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm resize-none" id="visitNotes" placeholder="Enter client discussion details, site observations, or requirements..." rows="3"></textarea>
+</div>
+<!-- Form Item 3: When to Call Reminder Card -->
+<!-- BEGIN: ReminderSection -->
+<div class="border border-blue-100 rounded-2xl p-3.5 bg-blue-50/20 shadow-sm">
+<!-- Reminder Title & Badge -->
+<div class="flex items-center justify-between mb-2.5">
+<div class="flex items-center gap-1.5">
+<svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+<span class="text-xs font-bold text-slate-900">When to Call Reminder</span>
+</div>
+<span class="text-[11px] font-semibold text-blue-600 tracking-tight">Optional alert</span>
+</div>
+<!-- Quick Option Filter Pills -->
+<div class="grid grid-cols-3 gap-2 mb-2.5">
+<button class="py-1.5 text-xs font-medium bg-white text-slate-700 border border-slate-200 rounded-lg hover:border-slate-300 text-center transition" type="button">
+              Tomorrow
+            </button>
+<button class="py-1.5 text-xs font-bold bg-white text-blue-600 border-[1.5px] border-blue-500 rounded-lg text-center shadow-xs" type="button">
+              In 2 Days
+            </button>
+<button class="py-1.5 text-xs font-medium bg-white text-slate-700 border border-slate-200 rounded-lg hover:border-slate-300 text-center transition" type="button">
+              Next Week
+            </button>
+</div>
+<!-- Date & Time Row -->
+<div class="grid grid-cols-2 gap-2">
+<!-- Date input pill -->
+<div class="flex items-center bg-white border border-slate-200 rounded-xl px-3 py-2 shadow-xs">
+<svg class="w-4 h-4 text-blue-600 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+<span class="text-xs font-bold text-slate-800 tracking-tight">10/28/2026</span>
+</div>
+<!-- Time input pill -->
+<div class="flex items-center bg-white border border-slate-200 rounded-xl px-3 py-2 shadow-xs">
+<svg class="w-4 h-4 text-blue-600 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+<span class="text-xs font-bold text-slate-800 tracking-tight">11:00 AM</span>
+</div>
+</div>
+</div>
+<!-- END: ReminderSection -->
+<!-- Form Item 4: Voice Note Recorder Card -->
+<!-- BEGIN: VoiceRecorderSection -->
+<div class="border border-blue-100 rounded-2xl p-3 bg-blue-50/50 shadow-sm space-y-2.5">
+<!-- Voice Note Header -->
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2.5">
+<!-- Pulsing Recording Status Indicator Circle -->
+<div class="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center relative flex-shrink-0">
+<span class="w-3.5 h-3.5 rounded-full bg-rose-500 animate-pulse"></span>
+</div>
+<div>
+<div class="flex items-center gap-1.5">
+<h4 class="text-xs font-bold text-slate-900 leading-tight">Voice Note Recorder</h4>
+<span class="text-[9px] font-bold text-rose-500 bg-rose-50 border border-rose-200 px-1 py-0.5 rounded leading-none uppercase tracking-wider">REC</span>
+</div>
+<p class="text-[10px] text-slate-500 font-medium leading-none mt-1">Audio note required for follow-up</p>
+</div>
+</div>
+<!-- Timer and action text -->
+<div class="text-right">
+<div class="text-xs font-bold text-blue-600 tracking-wider">00 : 24</div>
+<div class="text-[10px] text-slate-400 font-normal mt-0.5">Tap to stop</div>
+</div>
+</div>
+<!-- Waveform Player Strip -->
+<div class="bg-white border border-slate-200 rounded-xl px-3 py-2 flex items-center justify-between">
+<!-- Simulated Audio Waveform -->
+<div class="flex items-center gap-1 h-4">
+<div class="w-1 h-3 bg-blue-600 rounded-full"></div>
+<div class="w-1 h-4 bg-blue-600 rounded-full"></div>
+<div class="w-1 h-1.5 bg-blue-300 rounded-full"></div>
+<div class="w-1 h-2 bg-blue-300 rounded-full"></div>
+<div class="w-1 h-3.5 bg-blue-600 rounded-full"></div>
+<div class="w-1 h-2 bg-blue-300 rounded-full"></div>
+</div>
+<!-- Audio status message -->
+<span class="text-[11px] font-semibold text-slate-500">Ready to save</span>
+</div>
+</div>
+<!-- END: VoiceRecorderSection -->
+</div>
+<!-- BEGIN: BottomButtons -->
+<!-- Action Buttons Row -->
+<div class="grid grid-cols-2 gap-3 pt-3 mt-1 border-t border-slate-100">
+<button class="w-full py-3 px-4 border border-slate-300 rounded-xl text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 active:bg-slate-100 text-center transition" type="button">
+          Cancel
+        </button>
+<button class="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/25 text-center transition" type="button">
+          Save &amp; Update Status
+        </button>
+</div>
+<!-- END: BottomButtons -->
+<!-- iOS Home Bar Indicator -->
+
+</main>
+<!-- END: BottomSheetModal -->
+</div>
+<!-- END: PhoneFrame -->
+
+
+</body></html>

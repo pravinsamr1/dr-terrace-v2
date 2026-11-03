@@ -103,6 +103,8 @@ const SEGMENT_TO_TAB = {
   'salary-details': 'settings',
   'salary-advance': 'settings',
   'outstanding': 'index',
+  'appointment-reports': 'index',
+  'collections': 'index',
   'warranty': 'index',
   'warranty-letter': 'index',
   'notifications': 'index',
